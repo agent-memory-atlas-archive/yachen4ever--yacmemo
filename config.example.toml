@@ -1,73 +1,28 @@
-# yacmemo example configuration
+# yacmemo v2 (lean) example configuration
 # Copy to config.toml and edit values for your environment.
+# Everything is optional — missing keys fall back to the defaults shown here.
 
-# ---- Global LLM defaults (shared by all users unless overridden) ----
-[llm]
-base_url = "http://localhost:11234/v1"
-api_key = "sk-your-key"
-model = "your-model-name"
-enable_thinking = false          # Ling-3.0-tiny: top-level enable_thinking=false works
-extract_max_tokens = 2048
-consistency_max_tokens = 512
-extract_timeout = 60
-consistency_timeout = 30
-response_format = "json_object"  # mlx-serve supports this for pure JSON output
+[memory]
+# This MCP instance's memory root. Override at launch with: yacmemo-mcp --root <dir>
+# One process per user; the directory IS the isolation boundary.
+root = "memory"
+# Timeline notes live here; exempt from the near-duplicate title guard.
+journal_dir = "journal"
 
-# ---- Global embedding defaults ----
 [embedding]
+# OpenAI-compatible /v1/embeddings endpoint (omlx + Qwen3-Embedding-0.6B).
 base_url = "http://localhost:11235/v1"
 api_key = "sk-your-key"
 model = "your-embedding-model"
 dimensions = 1024
 timeout = 30
+# Leave base_url or model empty to run FTS-only (no vectors, no D2 collision checks).
 
-# ---- Storage (system-level) ----
-[storage]
-# System-level SQLite database — all users share one DB, isolated via user_id columns
-sqlite_path = "data/system.db"
-# LanceDB vector index — per-user subdirectories under this path (data/lancedb/{user_id}/)
-lancedb_path = "data/lancedb/"
+[search]
+rrf_k = 60                        # Reciprocal Rank Fusion constant
+fts_seg_fallback = false          # reserved: jieba shadow column if trigram recall is weak
 
-# ---- Scheduler ----
-[schedule]
-# Cron format: minute hour day month day-of-week
-extract_cron = "0 */6 * * *"      # every 6 hours
-consistency_cron = "0 3 * * *"    # daily at 03:00
-
-# ---- Consistency checking ----
-[consistency]
-similarity_threshold = 0.85       # LanceDB cosine distance threshold for candidates
-confidence_threshold = 0.8        # LLM confidence above this = auto-invalidate
-auto_invalidate = true
-
-# ---- Server (webhook + WebUI share this port) ----
-[server]
-host = "0.0.0.0"                    # 0.0.0.0 = listen on all interfaces (for remote WebUI access)
-port = 9721
-
-# ---- Admin WebUI ----
-[webui]
-enabled = true
-admin_token = ""                 # empty = no auth (local only); set a token for remote access
-web_port = 9722                  # (reserved; WebUI currently mounts at /admin on the main port)
-
-# ---- Users ----
-# Each user has an isolated memory directory and LanceDB index.
-# All users share a single system-level SQLite database (data/system.db),
-# with per-user isolation via user_id columns.
-# LLM/embedding api_key can be overridden per user (empty string = inherit global).
-# Start MCP server with: yacmemo-mcp --user <id>
-# Memory .md files are stored under each user's memory_root directory.
-# Users defined here are synced to the database on startup. Users added
-# via the WebUI at runtime are persisted in the database only.
-
-[[users]]
-id = "yachen"
-display_name = "yachen"
-memory_root = "./data/yachen/memory"
-
-[[users]]
-id = "wife"
-display_name = "老婆"
-memory_root = "./data/wife/memory"
-llm_api_key = "sk-wife-separate-key"
+[guard]
+title_similarity_threshold = 0.85   # memory_write refuses near-duplicate titles above this
+collision_cosine_threshold = 0.86   # D2 observation-collision threshold (cosine)
+obs_topk = 5                        # candidates compared per new observation

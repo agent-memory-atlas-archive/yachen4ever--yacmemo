@@ -1,139 +1,85 @@
-"""Shared test fixtures for yacmemo test suite."""
+"""Shared fixtures for the yacmemo v2 test suite."""
 
 from __future__ import annotations
 
-import os
-from unittest.mock import MagicMock
-
 import pytest
 
-from yacmemo.config import Config, ConsistencyConfig, EmbeddingConfig, LLMConfig, UserConfig
-from yacmemo.db import MemoryDB
+from yacmemo.config import (
+    Config,
+    EmbeddingConfig,
+    GuardConfig,
+    MemoryConfig,
+    SearchConfig,
+)
+from yacmemo.index_db import IndexDB
+from yacmemo.search import Searcher
+from yacmemo.store import Store
+from yacmemo.vector import VectorStore
 
-# ---- Path fixtures ----
 
 @pytest.fixture
-def tmp_dir(tmp_path):
-    """Provide a clean temp directory."""
-    return str(tmp_path)
-
-
-@pytest.fixture
-def memory_root(tmp_path):
-    """Create a memory root directory with sample structure."""
-    root = tmp_path / "memory"
-    root.mkdir()
-    return str(root)
-
-
-# ---- Database fixtures ----
-
-@pytest.fixture
-def db(tmp_path):
-    """Create a system-level MemoryDB with two test users pre-loaded."""
-    db_path = str(tmp_path / "system.db")
-    db = MemoryDB(db_path)
-
-    db.add_user("alice", "Alice", str(tmp_path / "alice" / "memory"))
-    db.add_user("bob", "Bob", str(tmp_path / "bob" / "memory"))
-
-    yield db
-    db.close()
-
-
-# ---- Config fixtures ----
-
-@pytest.fixture
-def mock_config(tmp_path):
-    """Build a Config object with temp paths, no TOML file needed."""
-    memory_root = tmp_path / "memory"
-    memory_root.mkdir()
-
-    config = Config(
-        llm=LLMConfig(
-            base_url="http://localhost:11234/v1",
-            api_key="sk-test",
-            model="test-model",
-        ),
-        embedding=EmbeddingConfig(
-            base_url="http://localhost:11235/v1",
-            api_key="sk-test",
-            model="test-embed",
-        ),
-        storage={"sqlite_path": "data/system.db", "lancedb_path": "data/lancedb/"},
-        consistency=ConsistencyConfig(similarity_threshold=0.85, confidence_threshold=0.8, auto_invalidate=True),
-        users=[
-            UserConfig(id="alice", display_name="Alice", memory_root=str(memory_root)),
-            UserConfig(id="bob", display_name="Bob", memory_root=str(tmp_path / "bob_memory")),
-        ],
+def cfg(tmp_path) -> Config:
+    return Config(
+        memory=MemoryConfig(root=str(tmp_path / "memory")),
+        embedding=EmbeddingConfig(),  # endpoints unused; Store gets a fake client
+        search=SearchConfig(),
+        guard=GuardConfig(),
     )
 
-    # Override paths to use tmp_path
-    os.environ["YACMEMO_HOME"] = str(tmp_path)
-    yield config
-    os.environ.pop("YACMEMO_HOME", None)
+
+@pytest.fixture
+def db(cfg):
+    d = IndexDB(cfg.sqlite_path)
+    yield d
+    d.close()
+
+
+class FakeEmbedding:
+    """Deterministic keyword-bucket embedding (1024-dim, matching LanceDB schema).
+
+    Texts containing the same keyword land in the same direction (cosine 1.0);
+    unrelated texts land in orthogonal directions (cosine 0.0). Same text always
+    yields the identical vector.
+    """
+
+    BUCKETS = {"端口": 0, "备份": 1, "服务器": 2, "网络": 3}
+
+    def __init__(self, dim: int = 1024):
+        self.dim = dim
+        self.calls = 0
+
+    def embed_one(self, text: str) -> list[float]:
+        self.calls += 1
+        v = [0.0] * self.dim
+        hit = False
+        for key, idx in self.BUCKETS.items():
+            if key in text:
+                v[idx] = 1.0
+                hit = True
+        if not hit:
+            # orthogonal junk bucket, deterministic per text
+            v[100 + (abs(hash(text)) % 800)] = 1.0
+        return v
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed_one(t) for t in texts]
 
 
 @pytest.fixture
-def config_with_db(mock_config, tmp_path):
-    """Config + DB with users synced."""
-    db_path = str(tmp_path / "data" / "system.db")
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    db = MemoryDB(db_path)
-    mock_config.users = mock_config.sync_users_to_db(db)
-    yield mock_config, db
-    db.close()
+def emb():
+    return FakeEmbedding()
 
-
-# ---- Mock LLM ----
 
 @pytest.fixture
-def mock_llm():
-    """Mock LLMClient with configurable responses."""
-    llm = MagicMock()
-    llm.chat_json.return_value = {
-        "files": [
-            {
-                "name": "test-split",
-                "title": "测试拆分",
-                "content": "这是测试内容。",
-                "entities": [
-                    {"name": "实体A", "type": "概念", "summary": "实体A描述"},
-                    {"name": "实体B", "type": "工具", "summary": "实体B描述"},
-                ],
-                "events": [
-                    {"date": "2026-01-01", "type": "部署", "description": "部署完成"},
-                ],
-            }
-        ]
-    }
-    return llm
+def vectors(cfg):
+    return VectorStore(cfg.lancedb_path, dimensions=1024)
 
-
-# ---- Mock Embedding ----
 
 @pytest.fixture
-def mock_embedding():
-    """Mock EmbeddingClient that returns deterministic 1024-dim vectors."""
-    emb = MagicMock()
+def store(cfg, db, emb, vectors) -> Store:
+    return Store(cfg, db, emb, vectors)
 
-    def _fake_embed_one(text: str) -> list[float]:
-        # Deterministic pseudo-embedding based on text hash
-        h = hash(text) & 0xFFFF
-        return [((h >> (i % 16)) & 1) * 0.1 for i in range(1024)]
-
-    emb.embed_one.side_effect = _fake_embed_one
-    return emb
-
-
-# ---- Sample .md content ----
 
 @pytest.fixture
-def sample_md_content():
-    """Sample .md file content for extraction tests."""
-    return """# yacmemo 部署记录
-
-今天在 debsvc 上部署了 yacmemo 记忆层系统。
-使用了 Ling-3.0-tiny 模型进行实体提取。
-通过 mlx-serve 部署在 m2ultra 上。
-"""
+def searcher(cfg, db, emb, vectors) -> Searcher:
+    return Searcher(cfg, db, emb, vectors)

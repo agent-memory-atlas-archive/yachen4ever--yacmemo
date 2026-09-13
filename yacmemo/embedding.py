@@ -20,12 +20,12 @@ class EmbeddingClient:
         """Batch embed texts. Returns list of embedding vectors."""
         if not texts:
             return []
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         resp = httpx.post(
             f"{self.base_url}/embeddings",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
+            headers=headers,
             json={
                 "model": self.model,
                 "input": texts,

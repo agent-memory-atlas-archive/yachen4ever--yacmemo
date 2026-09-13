@@ -1,27 +1,23 @@
-"""yacmemo MCP server: exposes 9 memory tools via stdio transport.
+"""yacmemo v2 MCP server: lean memory layer, 8 tools, stdio transport.
 
-Multi-user: start with --user <id> to select which user's memory to serve.
-Each user has isolated memory directory, SQLite database, and LanceDB index.
+One process per user/memory-root:
+    yacmemo-mcp --root /srv/yacmemo/yachen/memory [--config config.toml]
+
+The directory IS the boundary: two users = two roots = two processes.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-import os
-import subprocess
-import threading
 
 from mcp.server.fastmcp import FastMCP
 
-from yacmemo.config import Config, UserConfig, load_config
-from yacmemo.db import MemoryDB
+from yacmemo.config import load_config
 from yacmemo.embedding import EmbeddingClient
-from yacmemo.fs_utils import (
-    safe_edit,
-    safe_write,
-    to_rel_path,
-)
+from yacmemo.index_db import IndexDB
+from yacmemo.search import Searcher
+from yacmemo.store import Store
 from yacmemo.vector import VectorStore
 
 logging.basicConfig(
@@ -30,340 +26,205 @@ logging.basicConfig(
 )
 logger = logging.getLogger("yacmemo.mcp")
 
-# ---- Per-user state (initialized in main with --user) ----
-config: Config | None = None
-user: UserConfig | None = None
-db: MemoryDB | None = None
-vector: VectorStore | None = None
-emb: EmbeddingClient | None = None
+store: Store | None = None
+searcher: Searcher | None = None
 
 mcp = FastMCP("yacmemo")
 
 
-def _init_for_user(config_path: str | None, user_id: str):
-    """Initialize all components for a specific user.
-
-    Uses the system-level SQLite database (shared across all users,
-    isolated via user_id columns).
-    """
-    global config, user, db, vector, emb
-
+def _init(root: str | None, config_path: str | None):
+    global store, searcher
     config = load_config(config_path)
-    user = config.get_user(user_id)
+    if root:
+        config.memory.root = root
 
-    memory_root = config.user_memory_root_abs(user)
-    lancedb_path = config.user_lancedb_abs(user)
+    db = IndexDB(config.sqlite_path)
+    emb = None
+    vectors = None
+    if config.embedding.base_url and config.embedding.model:
+        emb = EmbeddingClient(
+            base_url=config.embedding.base_url, api_key=config.embedding.api_key,
+            model=config.embedding.model, dimensions=config.embedding.dimensions,
+            timeout=config.embedding.timeout,
+        )
+        vectors = VectorStore(config.lancedb_path, config.embedding.dimensions)
+    else:
+        logger.warning("Embedding endpoint not configured — running FTS-only.")
 
-    os.makedirs(os.path.dirname(lancedb_path), exist_ok=True)
-
-    # System-level SQLite (shared, user isolation via user_id columns)
-    db = MemoryDB(config.sqlite_abs)
-    vector = VectorStore(lancedb_path, config.embedding.dimensions)
-
-    emb_cfg = config.resolve_embedding(user)
-    emb = EmbeddingClient(
-        base_url=emb_cfg.base_url, api_key=emb_cfg.api_key,
-        model=emb_cfg.model, dimensions=emb_cfg.dimensions, timeout=emb_cfg.timeout,
-    )
-
-    logger.info("Initialized for user '%s' (memory: %s)", user.id, memory_root)
-
-
-def _memory_root() -> str:
-    return config.user_memory_root_abs(user)
+    store = Store(config, db, emb, vectors)
+    searcher = Searcher(config, db, emb, vectors)
+    logger.info("yacmemo ready (root=%s)", config.root_abs)
 
 
-def _resolve_path(path: str) -> str:
-    """Resolve a relative path to absolute within this user's memory_root."""
-    if os.path.isabs(path):
-        return path
-    return os.path.join(_memory_root(), path)
-
-
-def _trigger_extract(path: str):
-    """Async trigger extraction via webhook to enhancer."""
-    try:
-        import httpx
-        rel = to_rel_path(_resolve_path(path), _memory_root())
-
-        def _post():
-            try:
-                httpx.post(
-                    f"http://{config.server.host}:{config.server.port}/trigger",
-                    json={"action": "extract", "path": rel, "user_id": user.id},
-                    timeout=5,
-                )
-            except Exception as e:
-                logger.warning("Webhook trigger failed: %s", e)
-
-        threading.Thread(target=_post, daemon=True).start()
-    except Exception as e:
-        logger.warning("Trigger extract failed: %s", e)
+def _fmt_search(results: list[dict]) -> str:
+    if not results:
+        return "未找到相关笔记。"
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r['title']} (score {r.get('score', 0):.4f}, "
+                     f"{'+'.join(r.get('channels', []))})")
+        lines.append(f"   path: {r['path']}")
+        for w in r.get("warnings", []):
+            lines.append(f"   {w}")
+    return "\n".join(lines)
 
 
 @mcp.tool()
-def memory_search(query: str, limit: int = 10) -> str:
-    """语义搜索记忆。返回实体/事件/关系的摘要和来源路径。
+def memory_search(query: str, limit: int = 10, kind: str = "hybrid") -> str:
+    """混合检索记忆（FTS + 语义向量）。结果带 ⚠ 标注表示存在疑似重复/矛盾，先合并再回答。
 
     Args:
-        query: 搜索查询文本
-        limit: 返回结果数量上限（默认10）
+        query: 查询文本（中文/英文均可）
+        limit: 返回数量上限
+        kind: "hybrid"（默认）/"fts"/"vector"
     """
     try:
-        query_emb = emb.embed_one(query)
-        results = vector.search_all(query_emb, limit=limit)
-
-        if not results:
-            return "未找到相关记忆。"
-
-        lines = []
-        for i, r in enumerate(results, 1):
-            kind = r.get("kind", "?")
-            text = r.get("text", "")
-            source = r.get("source_path", "")
-            dist = r.get("_distance", 0)
-            lines.append(f"{i}. [{kind}] {text}")
-            lines.append(f"   source: {source} (distance: {dist:.4f})")
-
-        return "\n".join(lines)
+        results = searcher.search(query, limit=limit, kind=kind)
+        return _fmt_search(results)
     except Exception as e:
         return f"搜索失败: {e}"
 
 
 @mcp.tool()
-def memory_grep(pattern: str, path: str = "") -> str:
-    """正则搜索 .md 原文文件。
+def memory_read(path_or_title: str) -> str:
+    """读取笔记全文，附相关笔记（wiki-links + 语义近邻）。
 
     Args:
-        pattern: 正则表达式
-        path: 搜索范围（相对 memory_root 的目录路径，空=全部）
+        path_or_title: 相对路径或笔记标题
     """
-    search_dir = _resolve_path(path) if path else _memory_root()
-
     try:
-        result = subprocess.run(
-            ["rg", "-n", "--no-heading", pattern, search_dir],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode not in (0, 1):
-            return f"grep 错误: {result.stderr}"
-        if not result.stdout:
-            return "未找到匹配。"
-        return result.stdout
-    except FileNotFoundError:
-        return "ripgrep (rg) 未安装"
-    except subprocess.TimeoutExpired:
-        return "搜索超时"
-
-
-@mcp.tool()
-def memory_read(path: str) -> str:
-    """读取 .md 文件内容。
-
-    Args:
-        path: 文件路径（相对 memory_root 或绝对路径）
-    """
-    full_path = _resolve_path(path)
-
-    if not os.path.isfile(full_path):
-        return f"文件不存在: {path}"
-
-    try:
-        with open(full_path, encoding="utf-8") as f:
-            return f.read()
+        r = store.read(path_or_title)
     except Exception as e:
         return f"读取失败: {e}"
 
+    lines = [f"# {r['title']}", f"(path: {r['path']})", "", r["content"]]
+    if r["related"]:
+        lines += ["", "## 相关笔记"]
+        for rel in r["related"]:
+            if rel.get("missing"):
+                lines.append(f"- [[{rel['title']}]]（目标不存在，可考虑创建或清理该链接）")
+            else:
+                note = f" — {rel['note']}" if rel.get("note") else ""
+                lines.append(f"- [[{rel['title']}]] ({rel['via']}){note}")
+    return "\n".join(lines)
+
 
 @mcp.tool()
-def memory_write(path: str, content: str) -> str:
-    """写入 .md 文件。自动触发后台提取（索引更新）。不能写入拆分目录。
+def memory_write(title: str, content: str, force: bool = False) -> str:
+    """新建笔记（一篇一主题，标题即主题名）。近似标题会被拒绝；更新已有笔记请用 memory_edit。
 
     Args:
-        path: 文件路径（相对 memory_root 或绝对路径）
-        content: 文件内容
+        title: 笔记标题，可含目录前缀（如 "projects/yacmemo部署配置"）
+        content: markdown 正文（首行建议 "# 标题"；事实行用 "- [类别] 内容"）
+        force: 明确越过近似标题守卫（会被记录为违约指标，慎用）
     """
-    memory_root = _memory_root()
-    full_path = _resolve_path(path)
-
     try:
-        safe_write(full_path, content, memory_root, allow_split=False)
-    except ValueError as e:
-        return f"写入被拒绝: {e}"
-
-    _trigger_extract(path)
-    return f"已写入 {path}，后台提取已触发。"
+        r = store.write(title, content, force=force)
+    except Exception as e:
+        return f"{e}"
+    note = "（注意：本次为 force 越过近似标题守卫，已记录）" if r["forced"] else ""
+    return f"已写入并索引: {r['path']}{note}"
 
 
 @mcp.tool()
 def memory_edit(path: str, old_string: str, new_string: str) -> str:
-    """替换 .md 文件中的字符串。自动触发后台提取。不能编辑拆分目录。
+    """就地修改笔记（唯一文本锚点替换）。这是更新事实的正确方式，不要新建重复笔记。
 
     Args:
-        path: 文件路径
-        old_string: 要替换的原文
-        new_string: 替换为的新文本
+        path: 笔记路径或标题
+        old_string: 要替换的原文（必须在笔记中唯一）
+        new_string: 替换后的文本
     """
-    memory_root = _memory_root()
-    full_path = _resolve_path(path)
-
     try:
-        safe_edit(full_path, old_string, new_string, memory_root, allow_split=False)
-    except ValueError as e:
-        return f"编辑被拒绝: {e}"
-
-    _trigger_extract(path)
-    return f"已编辑 {path}，后台提取已触发。"
+        r = store.edit(path, old_string, new_string)
+        return f"已修改并重新索引: {r['path']}"
+    except Exception as e:
+        return f"{e}"
 
 
 @mcp.tool()
-def memory_list(path: str = "") -> str:
-    """列出目录树。
+def memory_edit_section(path: str, heading: str, new_content: str) -> str:
+    """按 "## 标题" 替换整个小节（P2 提供）。
 
     Args:
-        path: 目录路径（空=memory_root）
+        path: 笔记路径或标题
+        heading: 小节标题
+        new_content: 新小节内容
     """
-    target = _resolve_path(path) if path else _memory_root()
-
-    if not os.path.isdir(target):
-        return f"目录不存在: {path}"
-
-    lines = []
-    for dirpath, dirnames, filenames in os.walk(target):
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
-        for f in sorted(filenames):
-            if f.endswith(".md"):
-                rel = os.path.relpath(os.path.join(dirpath, f), target)
-                lines.append(rel)
-
-    return "\n".join(lines) if lines else "（空）"
+    try:
+        store.edit_section(path, heading, new_content)
+        return "ok"
+    except Exception as e:
+        return f"{e}"
 
 
 @mcp.tool()
-def memory_history(entity_name: str) -> str:
-    """查询实体的历史版本（含已失效的）。
+def memory_move(path: str, new_path: str) -> str:
+    """移动笔记到新路径（标题不变，[[链接]] 按标题解析不受影响）。
 
     Args:
-        entity_name: 实体名称
+        path: 现有路径或标题
+        new_path: 新路径（相对 memory_root）
     """
-    history = db.get_node_history(user.id, entity_name)
+    try:
+        r = store.move(path, new_path)
+        return f"已移动: {r['old_path']} → {r['new_path']}"
+    except Exception as e:
+        return f"{e}"
 
-    if not history:
-        return f"未找到实体: {entity_name}"
+
+@mcp.tool()
+def memory_audit() -> str:
+    """全量一致性审计：标题重复、语义撞车、悬空链接、守卫统计。"""
+    try:
+        r = store.audit()
+    except Exception as e:
+        return f"审计失败: {e}"
 
     lines = []
-    for h in history:
-        status = "有效" if h["valid"] else f"已失效({h.get('invalid_reason', '?')})"
-        lines.append(
-            f"- [{status}] {h['name']} ({h['type']}): {h.get('summary', '')}\n"
-            f"  created: {h['created_at']}, source: {h['source_path']}"
-        )
-
+    d1 = r["title_duplicates"]
+    lines.append(f"== 标题重复（{len(d1)}）==")
+    for c in d1[:10]:
+        lines.append(f"- [[{c['a_title']}]] ↔ [[{c['b_title']}]] (score {c['score']})")
+    col = r["collisions"]
+    lines.append(f"== 语义撞车（{len(col)}）==")
+    for c in col[:10]:
+        lines.append(f"- {c['a_path']} ↔ {c['b_path']} (score {c['score']})")
+        lines.append(f"  A: {c['a_text'][:60]}")
+        lines.append(f"  B: {c['b_text'][:60]}")
+    dangling = r["dangling_links"]
+    lines.append(f"== 悬空链接（{len(dangling)}）==")
+    for d in dangling[:10]:
+        lines.append(f"- {d['path']}: [[{d['link']}]]")
+    g = r["guard_stats"]
+    lines.append(f"== 守卫统计 == 拒绝 {g['refused']} 次，force 越过 {g['forced']} 次")
     return "\n".join(lines)
 
 
 @mcp.tool()
-def memory_consistency_status() -> str:
-    """查看一致性校验状态（待人工确认的矛盾项列表）。"""
-    pending = db.get_pending_consistency(user.id)
-
-    if not pending:
-        return "无待确认项。"
-
-    lines = []
-    for p in pending:
-        lines.append(
-            f"- [{p['id'][:8]}] 旧: {p.get('old_source_path', '?')}\n"
-            f"  新: {p.get('new_source_path', '?')}\n"
-            f"  理由: {p['reason']} (置信度: {p.get('confidence', 0):.2f})"
-        )
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def memory_consistency_resolve(log_id: str, action: str) -> str:
-    """处理一致性校验待确认项。
+def memory_list(path: str = "", sort: str = "name") -> str:
+    """列出笔记目录树。
 
     Args:
-        log_id: 日志ID（可从 consistency_status 输出中截取前8位）
-        action: "confirm"（确认旧事实失效）或 "dismiss"（忽略，不失效）
+        path: 子目录（空 = 根目录）
+        sort: "name" 或 "mtime"（最近变更优先）
     """
-    if len(log_id) < 32:
-        pending = db.get_pending_consistency(user.id)
-        match = [p for p in pending if p["id"].startswith(log_id)]
-        if len(match) != 1:
-            return f"无法唯一匹配 log_id: {log_id}（匹配到 {len(match)} 条）"
-        log_id = match[0]["id"]
-
-    if action == "confirm":
-        log = db.conn.execute(
-            "SELECT old_node_id FROM consistency_log WHERE id=? AND user_id=?", (log_id, user.id)
-        ).fetchone()
-        if log:
-            db.invalidate_node(user.id, log["old_node_id"], "manual_confirmed")
-        db.resolve_consistency(user.id, log_id, "manual_confirmed")
-        return "已确认旧事实失效。"
-    elif action == "dismiss":
-        db.resolve_consistency(user.id, log_id, "manual_dismissed")
-        return "已忽略此矛盾。"
-    else:
-        return f"未知操作: {action}（支持 confirm/dismiss）"
-
-
-@mcp.tool()
-def memory_split_status() -> str:
-    """检查拆分文件的完整性状态。
-
-    返回每个拆分文件的状态：
-    - active: 文件正常（未被手动修改）
-    - user_edited: 检测到用户手动修改
-    - stale: 文件被删除
-    - conflict: 用户修改已保留为 .conflict 文件
-
-    Returns:
-        拆分文件状态列表
-    """
-    records = db.list_split_files(user.id)
-    if not records:
-        return "无拆分文件记录。"
-
-    lines = ["拆分文件状态："]
-    for r in records:
-        status_map = {
-            "active": "正常",
-            "user_edited": "用户手动修改",
-            "stale": "文件已删除",
-            "conflict": "冲突（已保留 .conflict 备份）",
-        }
-        status_text = status_map.get(r["status"], r["status"])
-        lines.append(f"  {r['path']} — {status_text}")
-
-    # Also check for .conflict files on disk
-    import glob
-    memory_root = _memory_root()
-    conflict_files = glob.glob(
-        os.path.join(memory_root, "**", "*.conflict.*"), recursive=True
-    )
-    if conflict_files:
-        lines.append("")
-        lines.append(f"磁盘上的 .conflict 备份文件（{len(conflict_files)} 个）：")
-        for cf in conflict_files:
-            rel = os.path.relpath(cf, memory_root)
-            lines.append(f"  {rel}")
-
-    return "\n".join(lines)
+    try:
+        entries = store.list_notes(path, sort=sort)
+    except Exception as e:
+        return f"{e}"
+    return "\n".join(entries) if entries else "（空）"
 
 
 def main():
-    parser = argparse.ArgumentParser(description="yacmemo MCP server")
+    parser = argparse.ArgumentParser(description="yacmemo lean memory MCP server")
     parser.add_argument("--config", default=None, help="Path to config.toml")
-    parser.add_argument("--user", required=True,
-                        help="User ID to serve (e.g. yachen, wife)")
+    parser.add_argument("--root", default=None,
+                        help="Memory root directory (overrides config)")
     args = parser.parse_args()
 
-    _init_for_user(args.config, args.user)
-    logger.info("yacmemo MCP server starting for user '%s' (stdio transport)", args.user)
+    _init(args.root, args.config)
+    logger.info("yacmemo MCP server starting (stdio transport)")
     mcp.run(transport="stdio")
 
 

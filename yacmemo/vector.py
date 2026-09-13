@@ -1,8 +1,14 @@
-"""LanceDB vector store for memory-enhancer."""
+"""LanceDB vector store for yacmemo v2: note-level and observation-level vectors.
+
+Same shape as v1's three tables, collapsed to two (note_vectors / obs_vectors).
+Vectors are 1024-dim (Qwen3-Embedding-0.6B via omlx). Everything here is
+rebuildable from markdown + vec_cache.
+"""
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 
 import lancedb
@@ -10,106 +16,70 @@ import pyarrow as pa
 
 logger = logging.getLogger(__name__)
 
-_NODE_SCHEMA = pa.schema([
+_VECTOR_SCHEMA = pa.schema([
     pa.field("id", pa.string()),
     pa.field("vector", pa.list_(pa.float32(), 1024)),
     pa.field("text", pa.string()),
     pa.field("source_path", pa.string()),
 ])
 
-_EVENT_SCHEMA = pa.schema([
-    pa.field("id", pa.string()),
-    pa.field("vector", pa.list_(pa.float32(), 1024)),
-    pa.field("text", pa.string()),
-    pa.field("source_path", pa.string()),
-])
+_TABLES = ("note_vectors", "obs_vectors")
 
-_EDGE_SCHEMA = pa.schema([
-    pa.field("id", pa.string()),
-    pa.field("vector", pa.list_(pa.float32(), 1024)),
-    pa.field("text", pa.string()),
-    pa.field("source_path", pa.string()),
-])
+
+def obs_id(path: str, text: str) -> str:
+    """Stable id for an observation vector: content-addressed per note."""
+    return hashlib.sha256(f"{path}\x00{text}".encode()).hexdigest()[:32]
 
 
 class VectorStore:
-    """LanceDB wrapper for node/event/edge vectors."""
+    """LanceDB wrapper. `id` of a note vector IS its memory-root-relative path."""
 
     def __init__(self, lancedb_path: str, dimensions: int = 1024):
         self.db = lancedb.connect(lancedb_path)
         self.dimensions = dimensions
-
-        # Ensure tables exist
-        for name, schema in [
-            ("node_vectors", _NODE_SCHEMA),
-            ("event_vectors", _EVENT_SCHEMA),
-            ("edge_vectors", _EDGE_SCHEMA),
-        ]:
+        for name in _TABLES:
             try:
                 self.db.open_table(name)
             except Exception:
-                self.db.create_table(name, schema=schema)
+                self.db.create_table(name, schema=_VECTOR_SCHEMA)
                 logger.info("Created LanceDB table: %s", name)
 
-    def _upsert(self, table_name: str, item_id: str, text: str,
-                embedding: list[float], source_path: str, schema):
-        tbl = self.db.open_table(table_name)
-        # Delete existing record with same id (LanceDB has no native upsert)
-        # Use single quotes for string literals (double quotes = column refs in LanceDB SQL)
+    def _upsert(self, table: str, item_id: str, text: str,
+                embedding: list[float], source_path: str):
+        tbl = self.db.open_table(table)
         with contextlib.suppress(Exception):
-            tbl.delete(f"id = '{item_id}'")  # Record doesn't exist yet
-        tbl.add([{
-            "id": item_id,
-            "vector": embedding,
-            "text": text,
-            "source_path": source_path,
-        }])
-        logger.debug("Upserted vector %s into %s", item_id, table_name)
+            tbl.delete(f"id = '{item_id}'")  # not present yet
+        tbl.add([{"id": item_id, "vector": embedding, "text": text,
+                  "source_path": source_path}])
 
-    def upsert_node_vector(self, node_id: str, text: str,
-                           embedding: list[float], source_path: str):
-        self._upsert("node_vectors", node_id, text, embedding, source_path, _NODE_SCHEMA)
+    def upsert_note_vector(self, path: str, text: str, embedding: list[float]):
+        self._upsert("note_vectors", path, text, embedding, path)
 
-    def upsert_event_vector(self, event_id: str, text: str,
-                            embedding: list[float], source_path: str):
-        self._upsert("event_vectors", event_id, text, embedding, source_path, _EVENT_SCHEMA)
+    def upsert_obs_vector(self, path: str, text: str, embedding: list[float]):
+        self._upsert("obs_vectors", obs_id(path, text), text, embedding, path)
 
-    def upsert_edge_vector(self, edge_id: str, text: str,
-                           embedding: list[float], source_path: str):
-        self._upsert("edge_vectors", edge_id, text, embedding, source_path, _EDGE_SCHEMA)
+    def search_note_vectors(self, embedding: list[float], limit: int = 10) -> list[dict]:
+        tbl = self.db.open_table("note_vectors")
+        return tbl.search(embedding).limit(limit).to_list()
 
-    def search_nodes(self, query_embedding: list[float], limit: int = 10) -> list[dict]:
-        """Search node vectors. Returns [{id, text, source_path, _distance}]."""
-        tbl = self.db.open_table("node_vectors")
-        results = tbl.search(query_embedding).limit(limit).to_list()
-        return results
+    def search_obs_vectors(self, embedding: list[float], limit: int = 10) -> list[dict]:
+        tbl = self.db.open_table("obs_vectors")
+        return tbl.search(embedding).limit(limit).to_list()
 
-    def search_all(self, query_embedding: list[float], limit: int = 10) -> list[dict]:
-        """Search across all vector tables, merge and sort by distance."""
-        all_results = []
-        for table_name, kind in [
-            ("node_vectors", "node"),
-            ("event_vectors", "event"),
-            ("edge_vectors", "edge"),
-        ]:
+    def delete_by_path(self, path: str):
+        """Remove all vectors (note + observations) belonging to a note."""
+        escaped = path.replace("'", "''")
+        for name in _TABLES:
             try:
-                tbl = self.db.open_table(table_name)
-                results = tbl.search(query_embedding).limit(limit).to_list()
-                for r in results:
-                    r["kind"] = kind
-                all_results.extend(results)
+                tbl = self.db.open_table(name)
+                tbl.delete(f"source_path = '{escaped}'")
             except Exception as e:
-                logger.warning("Search %s failed: %s", table_name, e)
+                logger.warning("Delete from %s failed: %s", name, e)
 
-        # Sort by distance (ascending = most similar first)
-        all_results.sort(key=lambda x: x.get("_distance", float("inf")))
-        return all_results[:limit]
-
-    def delete_by_source(self, source_path: str):
-        """Delete all vectors from a given split file (before re-extraction)."""
-        for table_name in ["node_vectors", "event_vectors", "edge_vectors"]:
-            try:
-                tbl = self.db.open_table(table_name)
-                tbl.delete(f"source_path = '{source_path}'")
-            except Exception as e:
-                logger.warning("Delete from %s failed: %s", table_name, e)
+    def wipe(self):
+        """Drop and recreate both tables (full rebuild path)."""
+        for name in _TABLES:
+            with contextlib.suppress(Exception):
+                self.db.drop_table(name)
+        for name in _TABLES:
+            self.db.create_table(name, schema=_VECTOR_SCHEMA)

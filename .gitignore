@@ -21,5 +21,5 @@ config.toml
 Thumbs.db
 
 # Frontend
-frontend/node_modules/
-frontend/dist/
+legacy/frontend/node_modules/
+legacy/frontend/dist/
