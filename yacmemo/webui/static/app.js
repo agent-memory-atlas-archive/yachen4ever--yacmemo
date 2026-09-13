@@ -89,14 +89,52 @@ async function loadNotes() {
   const data = await api(`/api/${state.user}/notes`);
   state.notes = data.notes.filter((n) =>
     !filter || n.path.toLowerCase().includes(filter));
-  $("note-list").innerHTML = state.notes.map((n) => `
-    <li data-path="${esc(n.path)}" class="${state.current && state.current.path === n.path ? "active" : ""}">
-      <span class="t" title="${esc(n.path)}">${esc(n.title)}</span>
-      <span class="m">${fmtTime(n.mtime)}</span>
-    </li>`).join("") || `<li class="muted">（空）</li>`;
+  $("note-list").innerHTML = renderTree(buildTree(state.notes));
   for (const li of $("note-list").querySelectorAll("li[data-path]")) {
     li.onclick = () => openNote(li.dataset.path);
   }
+}
+
+function buildTree(notes) {
+  // {dirs: {name: node}, files: [note]}
+  const root = { dirs: {}, files: [] };
+  for (const n of notes) {
+    let node = root;
+    const parts = n.path.split("/");
+    for (let i = 0; i < parts.length - 1; i++) {
+      node.dirs[parts[i]] = node.dirs[parts[i]] || { dirs: {}, files: [] };
+      node = node.dirs[parts[i]];
+    }
+    node.files.push(n);
+  }
+  return root;
+}
+
+function countFiles(node) {
+  let n = node.files.length;
+  for (const sub of Object.values(node.dirs)) n += countFiles(sub);
+  return n;
+}
+
+function renderTree(node) {
+  const fileLi = (n) => `
+    <li data-path="${esc(n.path)}" class="${state.current && state.current.path === n.path ? "active" : ""}">
+      <span class="t" title="${esc(n.path)}">${esc(n.title)}</span>
+      <span class="m">${fmtTime(n.mtime)}</span>
+    </li>`;
+  const dirs = Object.entries(node.dirs)
+    .sort(([a], [b]) => a.localeCompare(b));
+  const files = [...node.files].sort((a, b) => a.title.localeCompare(b.title, "zh"));
+  let html = "";
+  for (const [name, sub] of dirs) {
+    html += `<li class="folder-wrap"><details open>
+      <summary>📁 ${esc(name)} <span class="m">(${countFiles(sub)})</span></summary>
+      ${renderTree(sub)}
+    </details></li>`;
+  }
+  html += `<ul>${files.map(fileLi).join("")}</ul>`;
+  return html ||
+    `<ul><li class="muted">（空）</li></ul>`;
 }
 
 $("note-filter").oninput = () => loadNotes();
