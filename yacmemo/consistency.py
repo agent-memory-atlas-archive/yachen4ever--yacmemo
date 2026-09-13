@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
 from .db import MemoryDB
@@ -33,9 +32,9 @@ class ConsistencyChecker:
         self.llm = llm
         self.emb = emb
 
-    def check_new_node(self, node_id: str):
+    def check_new_node(self, user_id: str, node_id: str):
         """Check a newly extracted node against existing nodes for contradictions."""
-        node = self.db.get_node(node_id)
+        node = self.db.get_node(user_id, node_id)
         if not node:
             return
 
@@ -64,7 +63,7 @@ class ConsistencyChecker:
             if distance > (1 - threshold):
                 continue
 
-            old_node = self.db.get_node(match_id)
+            old_node = self.db.get_node(user_id, match_id)
             if not old_node or not old_node["valid"]:
                 continue
 
@@ -78,12 +77,13 @@ class ConsistencyChecker:
                         and self.config.consistency.auto_invalidate)
 
                 if auto:
-                    self.db.invalidate_node(match_id,
+                    self.db.invalidate_node(user_id, match_id,
                                             f"superseded_by:{node_id}: {reason}")
                     logger.info("Auto-invalidated node '%s' (confidence=%.2f): %s",
                                 old_node['name'], confidence, reason)
 
                 self.db.add_consistency_log(
+                    user_id,
                     old_node_id=match_id,
                     new_node_id=node_id,
                     old_source_path=old_node.get("source_path", ""),
@@ -93,13 +93,13 @@ class ConsistencyChecker:
                     auto_invalidated=auto,
                 )
 
-    def check_all(self):
+    def check_all(self, user_id: str):
         """Full consistency scan of all valid nodes (cron triggered)."""
-        nodes = self.db.get_all_valid_nodes()
+        nodes = self.db.get_all_valid_nodes(user_id)
         logger.info("Full consistency scan: %d valid nodes", len(nodes))
 
         for node in nodes:
-            self.check_new_node(node["id"])
+            self.check_new_node(user_id, node["id"])
 
         logger.info("Full consistency scan complete")
 

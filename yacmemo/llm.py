@@ -79,12 +79,12 @@ class LLMClient:
             except httpx.TimeoutException:
                 logger.warning("LLM call timeout (attempt %d/3)", attempt + 1)
                 if attempt == 2:
-                    raise LLMError(f"LLM timeout after 3 attempts")
+                    raise LLMError("LLM timeout after 3 attempts") from None
                 time.sleep(2 ** (attempt + 1))
             except httpx.HTTPStatusError as e:
                 logger.warning("LLM HTTP error (attempt %d/3): %s", attempt + 1, e)
                 if attempt == 2:
-                    raise LLMError(f"LLM HTTP error: {e}")
+                    raise LLMError(f"LLM HTTP error: {e}") from e
                 time.sleep(2 ** (attempt + 1))
 
     def chat_json(self, system: str, user: str, max_tokens: int,
@@ -98,7 +98,7 @@ class LLMClient:
         try:
             return json.loads(raw)
         except json.JSONDecodeError as e:
-            raise LLMJSONError(f"LLM returned invalid JSON: {e}", raw)
+            raise LLMJSONError(f"LLM returned invalid JSON: {e}", raw) from e
 
     def chat_text(self, system: str, user: str, max_tokens: int,
                   timeout: int | None = None) -> str:

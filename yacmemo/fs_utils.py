@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-from pathlib import Path
 
 
 def content_hash(content: str) -> str:
@@ -25,10 +24,7 @@ def get_split_dir(md_path: str, memory_root: str) -> str:
           -> memory_root/resources/projects/01-数据门户/
     """
     rel = os.path.relpath(md_path, memory_root)
-    if rel.endswith(".md"):
-        split_rel = rel[:-3]  # Remove .md suffix
-    else:
-        split_rel = rel
+    split_rel = rel[:-3] if rel.endswith(".md") else rel  # Remove .md suffix
     return os.path.join(memory_root, split_rel)
 
 
@@ -41,7 +37,7 @@ def is_in_split_dir(path: str, memory_root: str) -> bool:
     path = os.path.realpath(path)
     memory_root = os.path.realpath(memory_root)
     parent = os.path.dirname(path)
-    basename = os.path.basename(path)
+    os.path.basename(path)
     # Check if parent dir has a sibling .md file
     parent_name = os.path.basename(parent)
     sibling_md = os.path.join(os.path.dirname(parent), parent_name + ".md")
@@ -111,7 +107,7 @@ def safe_edit(path: str, old_string: str, new_string: str,
             f"Cannot edit split directory file (managed by memory-enhancer): {path}"
         )
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         content = f.read()
 
     if old_string not in content:
@@ -126,3 +122,21 @@ def safe_edit(path: str, old_string: str, new_string: str,
 def to_rel_path(abs_path: str, memory_root: str) -> str:
     """Convert absolute path to relative path (from memory_root)."""
     return os.path.relpath(abs_path, os.path.realpath(memory_root))
+
+
+def list_split_files_in_dir(split_dir: str) -> list[str]:
+    """List all .md files in a split directory (non-recursive).
+
+    Excludes .conflict backup files and hidden files.
+    """
+    if not os.path.isdir(split_dir):
+        return []
+    result = []
+    for f in sorted(os.listdir(split_dir)):
+        if f.startswith("."):
+            continue
+        if ".conflict." in f:
+            continue
+        if f.endswith(".md"):
+            result.append(os.path.join(split_dir, f))
+    return result

@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .db import MemoryDB
 from .embedding import EmbeddingClient
+from .fs_utils import content_hash, file_hash, get_split_dir, to_rel_path
 from .llm import LLMClient, LLMJSONError
 from .vector import VectorStore
-from .fs_utils import content_hash, file_hash, get_split_dir, to_rel_path
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +28,23 @@ class ExtractResult:
 
 # ---- Prompts ----
 
-_EXTRACT_SYSTEM = """你是一个记忆提取助手。请将给定的工作记录按独立事项拆分为多个文件，并为每个文件提取关联的实体和事件。
-以JSON格式输出，格式如下：
-{
-  "files": [
-    {
-      "name": "文件名（不含.md后缀，用英文kebab-case）",
-      "title": "标题（中文，简明描述这个事项）",
-      "content": "文件正文内容（简洁摘要，保留关键细节）",
-      "entities": [{"name": "实体名称", "type": "实体类型", "summary": "一句话描述"}],
-      "events": [{"date": "日期(YYYY-MM-DD或留空)", "type": "事件类型", "description": "事件描述"}]
-    }
-  ]
-}"""
+_EXTRACT_SYSTEM = (
+    "你是一个记忆提取助手。请将给定的工作记录按独立事项拆分为多个文件，"
+    "并为每个文件提取关联的实体和事件。\n"
+    "以JSON格式输出，格式如下：\n"
+    "{\n"
+    '  "files": [\n'
+    '    {\n'
+    '      "name": "文件名（不含.md后缀，用英文kebab-case）",\n'
+    '      "title": "标题（中文，简明描述这个事项）",\n'
+    '      "content": "文件正文内容（简洁摘要，保留关键细节）",\n'
+    '      "entities": [{"name": "实体名称", "type": "实体类型", "summary": "一句话描述"}],\n'
+    '      "events": [{"date": "日期(YYYY-MM-DD或留空)", '
+    '"type": "事件类型", "description": "事件描述"}]\n'
+    "    }\n"
+    "  ]\n"
+    "}"
+)
 
 _INCREMENT_HINT = """
 以下是上次的拆分结果，请做增量更新：
@@ -64,14 +68,14 @@ class Extractor:
         self.llm = llm
         self.emb = emb
 
-    def process_file(self, md_path: str) -> ExtractResult:
+    def process_file(self, user_id: str, md_path: str) -> ExtractResult:
         """Process a single .md file: extract → split → index."""
         memory_root = self.config.memory_root_abs
         rel_path = to_rel_path(md_path, memory_root)
 
         # Step 1: Read file and compute hash
         try:
-            with open(md_path, "r", encoding="utf-8") as f:
+            with open(md_path, encoding="utf-8") as f:
                 content = f.read()
         except FileNotFoundError:
             return ExtractResult(path=rel_path, status="failed",
@@ -80,7 +84,7 @@ class Extractor:
         chash = content_hash(content)
 
         # Step 2: Check if already processed
-        prev = self.db.get_processed_file(rel_path)
+        prev = self.db.get_processed_file(user_id, rel_path)
         if prev and prev["content_hash"] == chash and prev["status"] == "success":
             return ExtractResult(path=rel_path, status="skipped")
 
@@ -100,25 +104,27 @@ class Extractor:
             result_json = self._extract(content, prev_splits)
         except (LLMJSONError, Exception) as e:
             logger.error("Extraction failed for %s: %s", rel_path, e)
-            self.db.record_processed_file(rel_path, chash, split_dir_rel or "", "failed", str(e))
+            self.db.record_processed_file(
+                user_id, rel_path, chash, split_dir_rel or "", "failed", str(e)
+            )
             return ExtractResult(path=rel_path, status="failed", errors=[str(e)])
 
         files = result_json.get("files", [])
         if not files:
             logger.info("No content extracted from %s", rel_path)
-            self.db.record_processed_file(rel_path, chash, split_dir_rel or "", "success",
+            self.db.record_processed_file(user_id, rel_path, chash, split_dir_rel or "", "success",
                                            split_file_count=0)
             return ExtractResult(path=rel_path, status="success", split_count=0)
 
-        # Step 6: Write split files
-        self._write_split_files(split_dir, files, rel_path)
+        # Step 6: Write split files (with hash-based conflict protection)
+        self._write_split_files(user_id, split_dir, files, rel_path)
 
         # Step 7: Clear old data for this source (re-extraction)
         for split_file in self._list_split_files(split_dir, [f["name"] for f in files]):
             split_rel = to_rel_path(split_file, memory_root)
-            self.db.delete_nodes_by_source(split_rel)
-            self.db.delete_events_by_source(split_rel)
-            self.db.delete_edges_by_source(split_rel)
+            self.db.delete_nodes_by_source(user_id, split_rel)
+            self.db.delete_events_by_source(user_id, split_rel)
+            self.db.delete_edges_by_source(user_id, split_rel)
             self.vector.delete_by_source(split_rel)
 
         # Step 8: Index new entities/events
@@ -140,6 +146,7 @@ class Extractor:
                 ent_summary = ent.get("summary", "")
                 node_text = f"{name}: {ent_summary}"
                 node_id = self.db.upsert_node(
+                    user_id,
                     name=name, type_=ent_type, summary=ent_summary,
                     source_path=split_rel, source_hash=shash,
                     original_path=rel_path,
@@ -160,6 +167,7 @@ class Extractor:
                 description = evt.get("description", "")
                 evt_text = f"{date} {evt_type}: {description}"
                 event_id = self.db.upsert_event(
+                    user_id,
                     date=date, type_=evt_type, summary=description,
                     details="", source_path=split_rel,
                     source_hash=shash, original_path=rel_path,
@@ -173,7 +181,7 @@ class Extractor:
 
         # Step 9: Update processed_files
         status = "incremental" if is_incremental else "success"
-        self.db.record_processed_file(rel_path, chash, split_dir_rel or "", status,
+        self.db.record_processed_file(user_id, rel_path, chash, split_dir_rel or "", status,
                                        split_file_count=len(files))
 
         logger.info("Extracted %s: %d files, %d entities, %d events (%s)",
@@ -207,7 +215,7 @@ class Extractor:
             name = f[:-3]
             filepath = os.path.join(split_dir, f)
             try:
-                with open(filepath, "r", encoding="utf-8") as fh:
+                with open(filepath, encoding="utf-8") as fh:
                     first_line = fh.readline()
                     # Extract title from first heading
                     title = first_line.lstrip("# ").strip() if first_line.startswith("#") else name
@@ -216,10 +224,20 @@ class Extractor:
                 result.append({"name": name, "title": name})
         return result
 
-    def _write_split_files(self, split_dir: str, files: list[dict], original_path: str):
-        """Write split .md files to the split directory."""
+    def _write_split_files(
+        self, user_id: str, split_dir: str,
+        files: list[dict], original_path: str,
+    ) -> list[str]:
+        """Write split .md files to the split directory.
+
+        Before overwriting, checks if the file was manually modified by the user.
+        If so, preserves the user's version as a .conflict backup.
+        Returns a list of conflict file paths.
+        """
         os.makedirs(split_dir, exist_ok=True)
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now = datetime.now(UTC).strftime("%Y-%m-%d")
+        memory_root = self.config.memory_root_abs
+        conflicts = []
 
         for f in files:
             name = f.get("name", "untitled")
@@ -261,8 +279,32 @@ class Extractor:
                     lines.append(f"- {date}: {desc}" if date else f"- {desc}")
 
             filepath = os.path.join(split_dir, name + ".md")
+            rel_filepath = to_rel_path(filepath, memory_root)
+
+            # Hash-based conflict detection
+            if os.path.isfile(filepath):
+                disk_hash = file_hash(filepath)
+                prev_record = self.db.get_split_file(user_id, rel_filepath)
+                if prev_record and disk_hash != prev_record["content_hash"]:
+                    # User manually modified this file — preserve as .conflict
+                    ts = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+                    conflict_path = f"{filepath}.conflict.{ts}"
+                    os.rename(filepath, conflict_path)
+                    conflicts.append(conflict_path)
+                    logger.warning(
+                        "Split file manually modified, preserved as %s",
+                        conflict_path,
+                    )
+
+            new_content = "\n".join(lines)
             with open(filepath, "w", encoding="utf-8") as fh:
-                fh.write("\n".join(lines))
+                fh.write(new_content)
+
+            # Record the hash of what we just wrote
+            new_hash = content_hash(new_content)
+            self.db.record_split_file(user_id, rel_filepath, new_hash)
+
+        return conflicts
 
     def _list_split_files(self, split_dir: str, expected_names: list[str]) -> list[str]:
         """List all .md files in split_dir that match expected names."""

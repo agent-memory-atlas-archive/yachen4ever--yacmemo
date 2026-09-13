@@ -1,47 +1,38 @@
-"""yacmemo WebUI: admin panel for user management, memory browsing,
-search, consistency dashboard, and system status.
+"""yacmemo WebUI: admin panel — pure JSON API backend + SPA static file serving.
 
 Mounts on the enhancer's FastAPI app as a sub-application at /admin.
+Frontend is a Vue 3 + Naive UI SPA built from frontend/dist/.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from yacmemo.config import Config, UserConfig
 from yacmemo.db import MemoryDB
-from yacmemo.vector import VectorStore
 from yacmemo.embedding import EmbeddingClient
+from yacmemo.vector import VectorStore
 from yacmemo.webui.auth import AdminAuthMiddleware
 
-_TEMPLATES_DIR = Path(__file__).parent / "templates"
-
-# Use jinja2.Environment directly (avoids Starlette 1.6 Jinja2Templates cache bug)
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-_jinja_env = Environment(
-    loader=FileSystemLoader(str(_TEMPLATES_DIR)),
-    autoescape=select_autoescape(["html", "xml"]),
-)
+# Path to the built frontend (frontend/dist/)
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 
-def create_webui_app(config: Config) -> FastAPI:
-    """Create the WebUI FastAPI sub-app."""
+def create_webui_app(config: Config, db: MemoryDB) -> FastAPI:
+    """Create the WebUI FastAPI sub-app (JSON API + SPA serving)."""
     app = FastAPI(title="yacmemo admin")
 
     # Auth middleware
     auth = AdminAuthMiddleware(app, config.webui.admin_token)
     app.middleware("http")(auth.dispatch)
 
-    # ---- Helper: get user components ----
-
-    def _get_db(user: UserConfig) -> MemoryDB:
-        return MemoryDB(config.user_sqlite_abs(user))
+    # ---- Helpers ----
 
     def _get_vector(user: UserConfig) -> VectorStore:
         return VectorStore(config.user_lancedb_abs(user), config.embedding.dimensions)
@@ -55,41 +46,38 @@ def create_webui_app(config: Config) -> FastAPI:
             timeout=config.embedding.timeout,
         )
 
-    def _render(template_name: str, request: Request, **context) -> HTMLResponse:
-        """Render a Jinja2 template and return HTMLResponse.
-
-        Automatically injects 'users' (for nav sidebar) and 'current_user_id'.
-        """
-        if "users" not in context:
-            context["users"] = [{"id": u.id, "display_name": u.display_name}
-                                 for u in config.users]
-        if "current_user_id" not in context:
-            # Try to extract user_id from the 'user' context var (set by per-user pages)
-            user_obj = context.get("user")
-            context["current_user_id"] = user_obj.id if user_obj else ""
-        tmpl = _jinja_env.get_template(template_name)
-        html = tmpl.render(request=request, **context)
-        return HTMLResponse(content=html)
-
     def _user_stats(user: UserConfig) -> dict:
         """Get stats for a user."""
         try:
-            db = _get_db(user)
             memory_root = config.user_memory_root_abs(user)
 
-            # Count .md files
             md_count = 0
-            for dirpath, dirnames, filenames in os.walk(memory_root):
+            for _dirpath, dirnames, filenames in os.walk(memory_root):
                 dirnames[:] = [d for d in dirnames if not d.startswith(".")]
                 md_count += sum(1 for f in filenames if f.endswith(".md"))
 
-            # DB counts
-            valid_nodes = db.conn.execute("SELECT COUNT(*) FROM nodes WHERE valid=1").fetchone()[0]
-            total_nodes = db.conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
-            total_events = db.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-            processed = db.conn.execute("SELECT COUNT(*) FROM processed_files WHERE status='success'").fetchone()[0]
-            pending = db.conn.execute("SELECT COUNT(*) FROM consistency_log WHERE status='pending'").fetchone()[0]
-            db.close()
+            uid = user.id
+            valid_nodes = db.conn.execute(
+                "SELECT COUNT(*) FROM nodes WHERE user_id=? AND valid=1", (uid,)
+            ).fetchone()[0]
+            total_nodes = db.conn.execute(
+                "SELECT COUNT(*) FROM nodes WHERE user_id=?", (uid,)
+            ).fetchone()[0]
+            total_events = db.conn.execute(
+                "SELECT COUNT(*) FROM events WHERE user_id=?", (uid,)
+            ).fetchone()[0]
+            processed = db.conn.execute(
+                "SELECT COUNT(*) FROM processed_files WHERE user_id=? "
+                "AND status='success'", (uid,)
+            ).fetchone()[0]
+            failed = db.conn.execute(
+                "SELECT COUNT(*) FROM processed_files WHERE user_id=? "
+                "AND status='failed'", (uid,)
+            ).fetchone()[0]
+            pending = db.conn.execute(
+                "SELECT COUNT(*) FROM consistency_log WHERE user_id=? "
+                "AND status='pending'", (uid,)
+            ).fetchone()[0]
 
             return {
                 "id": user.id,
@@ -99,6 +87,7 @@ def create_webui_app(config: Config) -> FastAPI:
                 "total_nodes": total_nodes,
                 "events": total_events,
                 "processed": processed,
+                "failed": failed,
                 "pending_consistency": pending,
                 "has_custom_key": bool(user.llm_api_key),
             }
@@ -111,17 +100,11 @@ def create_webui_app(config: Config) -> FastAPI:
 
     # ---- Login ----
 
-    @app.get("/login", response_class=HTMLResponse)
-    async def login_page(request: Request):
-        if not config.webui.admin_token:
-            return RedirectResponse(url="/admin/", status_code=302)
-        return _render("login.html", request)
-
     @app.post("/api/login")
     async def do_login(token: str = Form(...)):
         if token == config.webui.admin_token:
             session = auth.create_session()
-            resp = RedirectResponse(url="/admin/", status_code=302)
+            resp = JSONResponse({"status": "ok"})
             resp.set_cookie("yacmemo_admin", session, httponly=True, max_age=86400)
             return resp
         return JSONResponse({"error": "invalid token"}, status_code=401)
@@ -135,27 +118,7 @@ def create_webui_app(config: Config) -> FastAPI:
         resp.delete_cookie("yacmemo_admin")
         return resp
 
-    # ---- Dashboard / Home ----
-
-    @app.get("/", response_class=HTMLResponse)
-    async def dashboard(request: Request):
-        stats = [_user_stats(u) for u in config.users]
-        return _render("dashboard.html", request,
-            users=stats,
-            total_users=len(config.users),
-            total_nodes=sum(s.get("valid_nodes", 0) for s in stats),
-            total_events=sum(s.get("events", 0) for s in stats),
-            total_pending=sum(s.get("pending_consistency", 0) for s in stats),
-        )
-
-    # ---- Module 1: User Management ----
-
-    @app.get("/users", response_class=HTMLResponse)
-    async def users_page(request: Request):
-        stats = [_user_stats(u) for u in config.users]
-        return _render("users.html", request,
-            users=stats,
-        )
+    # ---- API: Users ----
 
     @app.get("/api/users")
     async def api_list_users():
@@ -163,11 +126,10 @@ def create_webui_app(config: Config) -> FastAPI:
 
     @app.post("/api/users/{user_id}/trigger-scan")
     async def api_trigger_scan(user_id: str):
-        """Trigger extraction scan for a user via webhook."""
         try:
             user = config.get_user(user_id)
         except ValueError:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, "User not found") from None
 
         import httpx
         try:
@@ -180,90 +142,128 @@ def create_webui_app(config: Config) -> FastAPI:
         except Exception as e:
             return {"status": "error", "detail": str(e)}
 
-    # ---- Module 2: Memory Browser ----
+    @app.post("/api/users")
+    async def api_create_user(request: Request):
+        """Create a new user. Accepts JSON body."""
+        data = await request.json()
+        uid = data.get("id", "")
+        if not uid:
+            raise HTTPException(400, "id is required")
+        if db.get_user(uid):
+            raise HTTPException(409, f"User already exists: {uid}")
 
-    @app.get("/memory/{user_id}", response_class=HTMLResponse)
-    async def memory_browser(request: Request, user_id: str):
+        display_name = data.get("display_name") or uid
+        memory_root = data.get("memory_root", "")
+        if not memory_root:
+            raise HTTPException(400, "memory_root is required")
+
+        llm_api_key = data.get("llm_api_key", "")
+        embedding_api_key = data.get("embedding_api_key", "")
+
+        db.add_user(
+            id=uid, display_name=display_name, memory_root=memory_root,
+            llm_api_key=llm_api_key, embedding_api_key=embedding_api_key,
+        )
+
+        new_user = UserConfig(
+            id=uid, display_name=display_name, memory_root=memory_root,
+            llm_api_key=llm_api_key, embedding_api_key=embedding_api_key,
+        )
+        config.users.append(new_user)
+
+        os.makedirs(config.user_memory_root_abs(new_user), exist_ok=True)
+        os.makedirs(config.user_lancedb_abs(new_user), exist_ok=True)
+
+        return {"status": "ok", "user": {"id": uid, "display_name": display_name}}
+
+    @app.delete("/api/users/{user_id}")
+    async def api_delete_user(user_id: str):
+        if not db.get_user(user_id):
+            raise HTTPException(404, f"User not found: {user_id}")
+
+        db.remove_user(user_id)
+        config.users = [u for u in config.users if u.id != user_id]
+
+        return {"status": "ok", "deleted": user_id}
+
+    # ---- API: Memory ----
+
+    @app.get("/api/memory/{user_id}")
+    async def api_memory(user_id: str):
         try:
             user = config.get_user(user_id)
         except ValueError:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, "User not found") from None
 
         memory_root = config.user_memory_root_abs(user)
         file_tree = _build_file_tree(memory_root, memory_root)
 
-        db = _get_db(user)
         nodes = db.conn.execute(
-            "SELECT name, type, summary, source_path, valid, created_at FROM nodes ORDER BY name"
+            "SELECT name, type, summary, source_path, valid, created_at "
+            "FROM nodes WHERE user_id=? ORDER BY name",
+            (user_id,)
         ).fetchall()
         events = db.conn.execute(
-            "SELECT date, type, summary, source_path FROM events ORDER BY date DESC LIMIT 100"
+            "SELECT date, type, summary, source_path "
+            "FROM events WHERE user_id=? ORDER BY date DESC LIMIT 100",
+            (user_id,)
         ).fetchall()
-        db.close()
 
-        return _render("memory.html", request,
-            user=user,
-            file_tree=file_tree,
-            nodes=[dict(n) for n in nodes],
-            events=[dict(e) for e in events],
-        )
+        return {
+            "file_tree": file_tree,
+            "nodes": [dict(n) for n in nodes],
+            "events": [dict(e) for e in events],
+        }
 
     @app.get("/api/memory/{user_id}/file")
     async def api_read_file(user_id: str, path: str = ""):
         try:
             user = config.get_user(user_id)
         except ValueError:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, "User not found") from None
 
         memory_root = config.user_memory_root_abs(user)
-        full_path = os.path.join(memory_root, path) if not os.path.isabs(path) else path
+        full_path = (
+            os.path.join(memory_root, path) if not os.path.isabs(path) else path
+        )
 
-        if not os.path.isfile(full_path) or not os.path.realpath(full_path).startswith(memory_root):
+        if (not os.path.isfile(full_path)
+                or not os.path.realpath(full_path).startswith(memory_root)):
             raise HTTPException(404, "File not found")
 
         try:
-            with open(full_path, "r", encoding="utf-8") as f:
+            with open(full_path, encoding="utf-8") as f:
                 return {"content": f.read(), "path": path}
         except Exception as e:
-            raise HTTPException(500, str(e))
+            raise HTTPException(500, str(e)) from e
 
     @app.get("/api/memory/{user_id}/history/{entity_name}")
     async def api_entity_history(user_id: str, entity_name: str):
         try:
             user = config.get_user(user_id)
         except ValueError:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, "User not found") from None
 
-        db = _get_db(user)
-        history = db.get_node_history(entity_name)
-        db.close()
+        history = db.get_node_history(user.id, entity_name)
         return {"history": [dict(h) for h in history]}
 
-    # ---- Module 3: Search ----
-
-    @app.get("/search/{user_id}", response_class=HTMLResponse)
-    async def search_page(request: Request, user_id: str):
-        try:
-            user = config.get_user(user_id)
-        except ValueError:
-            raise HTTPException(404, "User not found")
-
-        return _render("search.html", request,
-            user=user,
-        )
+    # ---- API: Search ----
 
     @app.post("/api/search/{user_id}")
     async def api_search(user_id: str, query: str = Form(...), limit: int = 10):
         try:
             user = config.get_user(user_id)
         except ValueError:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, "User not found") from None
 
         try:
             emb = _get_emb()
             vector = _get_vector(user)
             query_emb = emb.embed_one(query)
             results = vector.search_all(query_emb, limit=limit)
+            # Strip large vector field from results
+            for r in results:
+                r.pop("vector", None)
             return {"results": results, "query": query}
         except Exception as e:
             return {"error": str(e), "results": []}
@@ -273,7 +273,7 @@ def create_webui_app(config: Config) -> FastAPI:
         try:
             user = config.get_user(user_id)
         except ValueError:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, "User not found") from None
 
         memory_root = config.user_memory_root_abs(user)
         try:
@@ -289,49 +289,46 @@ def create_webui_app(config: Config) -> FastAPI:
         except subprocess.TimeoutExpired:
             return {"error": "search timeout", "matches": ""}
 
-    # ---- Module 4: Consistency Dashboard ----
+    # ---- API: Consistency ----
 
-    @app.get("/consistency/{user_id}", response_class=HTMLResponse)
-    async def consistency_page(request: Request, user_id: str):
+    @app.get("/api/consistency/{user_id}")
+    async def api_consistency(user_id: str):
         try:
-            user = config.get_user(user_id)
+            config.get_user(user_id)
         except ValueError:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, "User not found") from None
 
-        db = _get_db(user)
-        pending = db.get_pending_consistency()
+        pending = db.get_pending_consistency(user_id)
 
-        # Also get auto-invalidated history
         auto_logs = db.conn.execute(
-            "SELECT * FROM consistency_log WHERE auto_invalidated=1 ORDER BY checked_at DESC LIMIT 50"
+            "SELECT * FROM consistency_log WHERE user_id=? "
+            "AND auto_invalidated=1 ORDER BY checked_at DESC LIMIT 50",
+            (user_id,)
         ).fetchall()
 
-        # Invalidated nodes
         invalidated = db.conn.execute(
             "SELECT name, type, summary, invalid_at, invalid_reason, source_path "
-            "FROM nodes WHERE valid=0 ORDER BY invalid_at DESC LIMIT 50"
+            "FROM nodes WHERE user_id=? AND valid=0 "
+            "ORDER BY invalid_at DESC LIMIT 50",
+            (user_id,)
         ).fetchall()
-        db.close()
 
-        return _render("consistency.html", request,
-            user=user,
-            pending=[dict(p) for p in pending],
-            auto_logs=[dict(a) for a in auto_logs],
-            invalidated=[dict(i) for i in invalidated],
-        )
+        return {
+            "pending": [dict(p) for p in pending],
+            "auto_logs": [dict(a) for a in auto_logs],
+            "invalidated": [dict(i) for i in invalidated],
+        }
 
     @app.post("/api/consistency/{user_id}/resolve/{log_id}")
     async def api_resolve_consistency(user_id: str, log_id: str, action: str = Form(...)):
         try:
-            user = config.get_user(user_id)
+            config.get_user(user_id)
         except ValueError:
-            raise HTTPException(404, "User not found")
-
-        db = _get_db(user)
+            raise HTTPException(404, "User not found") from None
 
         # Support short ID
         if len(log_id) < 32:
-            pending = db.get_pending_consistency()
+            pending = db.get_pending_consistency(user_id)
             match = [p for p in pending if p["id"].startswith(log_id)]
             if len(match) != 1:
                 raise HTTPException(400, f"Cannot uniquely match log_id: {log_id}")
@@ -339,78 +336,92 @@ def create_webui_app(config: Config) -> FastAPI:
 
         if action == "confirm":
             log = db.conn.execute(
-                "SELECT old_node_id FROM consistency_log WHERE id=?", (log_id,)
+                "SELECT old_node_id FROM consistency_log "
+                "WHERE id=? AND user_id=?",
+                (log_id, user_id),
             ).fetchone()
             if log:
-                db.invalidate_node(log["old_node_id"], "manual_confirmed")
-            db.resolve_consistency(log_id, "manual_confirmed")
+                db.invalidate_node(user_id, log["old_node_id"], "manual_confirmed")
+            db.resolve_consistency(user_id, log_id, "manual_confirmed")
             msg = "Old fact invalidated."
         elif action == "dismiss":
-            db.resolve_consistency(log_id, "manual_dismissed")
+            db.resolve_consistency(user_id, log_id, "manual_dismissed")
             msg = "Contradiction dismissed."
         else:
-            db.close()
             raise HTTPException(400, f"Unknown action: {action}")
 
-        db.close()
         return {"status": "ok", "message": msg}
 
-    # ---- Module 5: System Status ----
+    # ---- API: Split file integrity ----
 
-    @app.get("/status", response_class=HTMLResponse)
-    async def status_page(request: Request):
-        # Check LLM connectivity
-        llm_ok = False
-        llm_detail = ""
+    @app.get("/api/split-status/{user_id}")
+    async def api_split_status(user_id: str):
+        """Get split file integrity status for a user."""
         try:
-            import httpx
-            resp = httpx.get(
-                f"{config.llm.base_url}/models",
-                headers={"Authorization": f"Bearer {config.llm.api_key}"},
-                timeout=5,
-            )
-            llm_ok = resp.status_code == 200
-            llm_detail = f"{resp.status_code}"
-        except Exception as e:
-            llm_detail = str(e)
+            config.get_user(user_id)
+        except ValueError:
+            raise HTTPException(404, "User not found") from None
 
-        # Check embedding connectivity
-        emb_ok = False
-        emb_detail = ""
-        try:
-            import httpx
-            resp = httpx.get(
-                f"{config.embedding.base_url}/models",
-                headers={"Authorization": f"Bearer {config.embedding.api_key}"},
-                timeout=5,
-            )
-            emb_ok = resp.status_code == 200
-            emb_detail = f"{resp.status_code}"
-        except Exception as e:
-            emb_detail = str(e)
+        records = db.list_split_files(user_id)
+        result = []
+        for r in records:
+            result.append({
+                "path": r["path"],
+                "status": r["status"],
+                "updated_at": r["updated_at"],
+            })
 
-        # Per-user index stats
+        # Also check for .conflict files on disk
+        import glob as _glob
+        user_obj = config.get_user(user_id)
+        memory_root = config.user_memory_root_abs(user_obj)
+        conflict_files = _glob.glob(
+            os.path.join(memory_root, "**", "*.conflict.*"), recursive=True
+        )
+        conflicts = [os.path.relpath(cf, memory_root) for cf in conflict_files]
+
+        return {"files": result, "conflicts": conflicts}
+
+    # ---- API: Status ----
+
+    @app.get("/api/status")
+    async def api_status():
+        """System status: LLM/embedding connectivity, cron, per-user index health."""
+        llm_ok, llm_detail = _check_service(config.llm.base_url, config.llm.api_key)
+        emb_ok, emb_detail = _check_service(
+            config.embedding.base_url, config.embedding.api_key
+        )
+
         user_indexes = []
         for user in config.users:
             try:
-                sqlite_path = config.user_sqlite_abs(user)
-                lancedb_path = config.user_lancedb_abs(user)
-                sqlite_size = os.path.getsize(sqlite_path) if os.path.exists(sqlite_path) else 0
-
-                db = _get_db(user)
-                node_count = db.conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
-                event_count = db.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-                processed = db.conn.execute("SELECT COUNT(*) FROM processed_files").fetchone()[0]
-                failed = db.conn.execute("SELECT COUNT(*) FROM processed_files WHERE status='failed'").fetchone()[0]
-                # Recent extractions
+                uid = user.id
+                sqlite_size = (
+                    os.path.getsize(config.sqlite_abs)
+                    if os.path.exists(config.sqlite_abs) else 0
+                )
+                node_count = db.conn.execute(
+                    "SELECT COUNT(*) FROM nodes WHERE user_id=?", (uid,)
+                ).fetchone()[0]
+                event_count = db.conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE user_id=?", (uid,)
+                ).fetchone()[0]
+                processed = db.conn.execute(
+                    "SELECT COUNT(*) FROM processed_files WHERE user_id=?", (uid,)
+                ).fetchone()[0]
+                failed = db.conn.execute(
+                    "SELECT COUNT(*) FROM processed_files "
+                    "WHERE user_id=? AND status='failed'", (uid,),
+                ).fetchone()[0]
                 recent = db.conn.execute(
-                    "SELECT path, status, processed_at, split_file_count FROM processed_files "
-                    "ORDER BY processed_at DESC LIMIT 5"
+                    "SELECT path, status, processed_at, split_file_count "
+                    "FROM processed_files WHERE user_id=? "
+                    "ORDER BY processed_at DESC LIMIT 5",
+                    (uid,)
                 ).fetchall()
-                db.close()
 
                 user_indexes.append({
-                    "user_id": user.id,
+                    "user_id": uid,
                     "sqlite_size": f"{sqlite_size / 1024:.0f} KB",
                     "nodes": node_count,
                     "events": event_count,
@@ -419,32 +430,68 @@ def create_webui_app(config: Config) -> FastAPI:
                     "recent": [dict(r) for r in recent],
                 })
             except Exception as e:
-                user_indexes.append({"user_id": user.id, "error": str(e)})
+                user_indexes.append({"user_id": uid, "error": str(e)})
 
-        return _render("status.html", request,
-            llm_ok=llm_ok,
-            llm_detail=llm_detail,
-            llm_base_url=config.llm.base_url,
-            llm_model=config.llm.model,
-            emb_ok=emb_ok,
-            emb_detail=emb_detail,
-            emb_base_url=config.embedding.base_url,
-            emb_model=config.embedding.model,
-            user_indexes=user_indexes,
-            extract_cron=config.schedule.extract_cron,
-            consistency_cron=config.schedule.consistency_cron,
-        )
+        return {
+            "llm_ok": llm_ok,
+            "llm_detail": llm_detail,
+            "llm_base_url": config.llm.base_url,
+            "llm_model": config.llm.model,
+            "emb_ok": emb_ok,
+            "emb_detail": emb_detail,
+            "emb_base_url": config.embedding.base_url,
+            "emb_model": config.embedding.model,
+            "user_indexes": user_indexes,
+            "extract_cron": config.schedule.extract_cron,
+            "consistency_cron": config.schedule.consistency_cron,
+        }
 
-    @app.get("/api/status")
-    async def api_status():
-        """JSON API for health checks."""
+    @app.get("/api/status/health")
+    async def api_health():
         return {"status": "ok", "users": [u.id for u in config.users]}
+
+    # ---- SPA static file serving ----
+
+    if _FRONTEND_DIST.is_dir():
+        # Mount static assets (js, css, images)
+        assets_dir = _FRONTEND_DIST / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        # Fallback: serve index.html for all non-API routes (SPA routing)
+        @app.get("/{path:path}")
+        async def spa_fallback(path: str):
+            # Try to serve a real file first
+            file_path = _FRONTEND_DIST / path
+            if file_path.is_file():
+                return FileResponse(str(file_path))
+
+            # Fallback to index.html for client-side routing
+            index_path = _FRONTEND_DIST / "index.html"
+            if index_path.is_file():
+                return FileResponse(str(index_path))
+
+            return JSONResponse({"error": "frontend not built"}, status_code=404)
 
     return app
 
 
+def _check_service(base_url: str, api_key: str) -> tuple[bool, str]:
+    """Check if a service endpoint is reachable."""
+    try:
+        import httpx
+        resp = httpx.get(
+            f"{base_url}/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=5,
+        )
+        return resp.status_code == 200, f"{resp.status_code}"
+    except Exception as e:
+        return False, str(e)
+
+
 def _build_file_tree(root: str, base: str) -> list[dict]:
-    """Build a nested file tree structure for Jinja2 rendering."""
+    """Build a nested file tree structure for the API response."""
     result = []
     if not os.path.isdir(root):
         return result

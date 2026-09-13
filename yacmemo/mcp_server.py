@@ -10,22 +10,19 @@ import argparse
 import logging
 import os
 import subprocess
-import sys
 import threading
 
 from mcp.server.fastmcp import FastMCP
 
-from yacmemo.config import load_config, Config, UserConfig
+from yacmemo.config import Config, UserConfig, load_config
 from yacmemo.db import MemoryDB
-from yacmemo.vector import VectorStore
 from yacmemo.embedding import EmbeddingClient
 from yacmemo.fs_utils import (
-    is_in_split_dir,
-    safe_write,
     safe_edit,
+    safe_write,
     to_rel_path,
-    list_md_files,
 )
+from yacmemo.vector import VectorStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,20 +41,23 @@ mcp = FastMCP("yacmemo")
 
 
 def _init_for_user(config_path: str | None, user_id: str):
-    """Initialize all components for a specific user."""
+    """Initialize all components for a specific user.
+
+    Uses the system-level SQLite database (shared across all users,
+    isolated via user_id columns).
+    """
     global config, user, db, vector, emb
 
     config = load_config(config_path)
     user = config.get_user(user_id)
 
     memory_root = config.user_memory_root_abs(user)
-    sqlite_path = config.user_sqlite_abs(user)
     lancedb_path = config.user_lancedb_abs(user)
 
-    os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
     os.makedirs(os.path.dirname(lancedb_path), exist_ok=True)
 
-    db = MemoryDB(sqlite_path)
+    # System-level SQLite (shared, user isolation via user_id columns)
+    db = MemoryDB(config.sqlite_abs)
     vector = VectorStore(lancedb_path, config.embedding.dimensions)
 
     emb_cfg = config.resolve_embedding(user)
@@ -169,7 +169,7 @@ def memory_read(path: str) -> str:
         return f"文件不存在: {path}"
 
     try:
-        with open(full_path, "r", encoding="utf-8") as f:
+        with open(full_path, encoding="utf-8") as f:
             return f.read()
     except Exception as e:
         return f"读取失败: {e}"
@@ -246,7 +246,7 @@ def memory_history(entity_name: str) -> str:
     Args:
         entity_name: 实体名称
     """
-    history = db.get_node_history(entity_name)
+    history = db.get_node_history(user.id, entity_name)
 
     if not history:
         return f"未找到实体: {entity_name}"
@@ -265,7 +265,7 @@ def memory_history(entity_name: str) -> str:
 @mcp.tool()
 def memory_consistency_status() -> str:
     """查看一致性校验状态（待人工确认的矛盾项列表）。"""
-    pending = db.get_pending_consistency()
+    pending = db.get_pending_consistency(user.id)
 
     if not pending:
         return "无待确认项。"
@@ -290,7 +290,7 @@ def memory_consistency_resolve(log_id: str, action: str) -> str:
         action: "confirm"（确认旧事实失效）或 "dismiss"（忽略，不失效）
     """
     if len(log_id) < 32:
-        pending = db.get_pending_consistency()
+        pending = db.get_pending_consistency(user.id)
         match = [p for p in pending if p["id"].startswith(log_id)]
         if len(match) != 1:
             return f"无法唯一匹配 log_id: {log_id}（匹配到 {len(match)} 条）"
@@ -298,17 +298,61 @@ def memory_consistency_resolve(log_id: str, action: str) -> str:
 
     if action == "confirm":
         log = db.conn.execute(
-            "SELECT old_node_id FROM consistency_log WHERE id=?", (log_id,)
+            "SELECT old_node_id FROM consistency_log WHERE id=? AND user_id=?", (log_id, user.id)
         ).fetchone()
         if log:
-            db.invalidate_node(log["old_node_id"], "manual_confirmed")
-        db.resolve_consistency(log_id, "manual_confirmed")
+            db.invalidate_node(user.id, log["old_node_id"], "manual_confirmed")
+        db.resolve_consistency(user.id, log_id, "manual_confirmed")
         return "已确认旧事实失效。"
     elif action == "dismiss":
-        db.resolve_consistency(log_id, "manual_dismissed")
+        db.resolve_consistency(user.id, log_id, "manual_dismissed")
         return "已忽略此矛盾。"
     else:
         return f"未知操作: {action}（支持 confirm/dismiss）"
+
+
+@mcp.tool()
+def memory_split_status() -> str:
+    """检查拆分文件的完整性状态。
+
+    返回每个拆分文件的状态：
+    - active: 文件正常（未被手动修改）
+    - user_edited: 检测到用户手动修改
+    - stale: 文件被删除
+    - conflict: 用户修改已保留为 .conflict 文件
+
+    Returns:
+        拆分文件状态列表
+    """
+    records = db.list_split_files(user.id)
+    if not records:
+        return "无拆分文件记录。"
+
+    lines = ["拆分文件状态："]
+    for r in records:
+        status_map = {
+            "active": "正常",
+            "user_edited": "用户手动修改",
+            "stale": "文件已删除",
+            "conflict": "冲突（已保留 .conflict 备份）",
+        }
+        status_text = status_map.get(r["status"], r["status"])
+        lines.append(f"  {r['path']} — {status_text}")
+
+    # Also check for .conflict files on disk
+    import glob
+    memory_root = _memory_root()
+    conflict_files = glob.glob(
+        os.path.join(memory_root, "**", "*.conflict.*"), recursive=True
+    )
+    if conflict_files:
+        lines.append("")
+        lines.append(f"磁盘上的 .conflict 备份文件（{len(conflict_files)} 个）：")
+        for cf in conflict_files:
+            rel = os.path.relpath(cf, memory_root)
+            lines.append(f"  {rel}")
+
+    return "\n".join(lines)
 
 
 def main():

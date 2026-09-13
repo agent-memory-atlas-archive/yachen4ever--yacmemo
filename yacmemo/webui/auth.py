@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import secrets
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response, RedirectResponse
+from starlette.responses import RedirectResponse, Response
 
 
 class AdminAuthMiddleware(BaseHTTPMiddleware):
@@ -33,9 +34,7 @@ class AdminAuthMiddleware(BaseHTTPMiddleware):
     def validate_session(self, token: str | None) -> bool:
         if not self.admin_token:
             return True  # Auth disabled
-        if token and token in self._sessions:
-            return True
-        return False
+        return bool(token and token in self._sessions)
 
     def validate_request(self, request: Request) -> bool:
         if not self.admin_token:

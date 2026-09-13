@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 import lancedb
@@ -55,10 +56,8 @@ class VectorStore:
         tbl = self.db.open_table(table_name)
         # Delete existing record with same id (LanceDB has no native upsert)
         # Use single quotes for string literals (double quotes = column refs in LanceDB SQL)
-        try:
-            tbl.delete(f"id = '{item_id}'")
-        except Exception:
-            pass  # Record doesn't exist yet
+        with contextlib.suppress(Exception):
+            tbl.delete(f"id = '{item_id}'")  # Record doesn't exist yet
         tbl.add([{
             "id": item_id,
             "vector": embedding,

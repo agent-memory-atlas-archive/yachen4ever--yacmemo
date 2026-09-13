@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 import os
-import sys
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 
 @dataclass
@@ -58,12 +53,12 @@ class ServerConfig:
 class WebUIConfig:
     enabled: bool = True
     admin_token: str = ""           # empty = no auth (local only); set for remote access
-    web_port: int = 9722           # reserved for future split; currently mounts at /admin on main port
+    web_port: int = 9722           # reserved for future split; mounts at /admin on main port
 
 
 @dataclass
 class UserConfig:
-    """Per-user configuration. Memory and indexes are fully isolated.
+    """Per-user configuration stored in the users table.
 
     LLM/embedding settings inherit from the global [llm]/[embedding] sections,
     but can be overridden per user (e.g. different API key).
@@ -72,9 +67,7 @@ class UserConfig:
     display_name: str = ""           # human-friendly name
     memory_root: str = ""            # directory for this user's .md files
     llm_api_key: str = ""            # override global LLM api_key (empty = inherit)
-    embedding_api_key: str = ""     # override global embedding api_key (empty = inherit)
-    sqlite_path: str = ""            # override global sqlite path (empty = inherit)
-    lancedb_path: str = ""           # override global lancedb path (empty = inherit)
+    embedding_api_key: str = ""      # override global embedding api_key (empty = inherit)
 
 
 @dataclass
@@ -122,6 +115,13 @@ class Config:
             timeout=self.embedding.timeout,
         )
 
+    @property
+    def sqlite_abs(self) -> str:
+        """System-level SQLite path."""
+        sqlite_rel = self.storage.get("sqlite_path", "data/system.db")
+        base = os.environ.get("YACMEMO_HOME", os.getcwd())
+        return str(Path(base) / sqlite_rel) if not os.path.isabs(sqlite_rel) else sqlite_rel
+
     def user_memory_root_abs(self, user: UserConfig) -> str:
         """Absolute path to this user's memory directory."""
         root = user.memory_root
@@ -130,17 +130,53 @@ class Config:
         base = os.environ.get("YACMEMO_HOME", os.getcwd())
         return str(Path(base) / root)
 
-    def user_sqlite_abs(self, user: UserConfig) -> str:
-        """Absolute path to this user's SQLite database."""
-        memory_root = self.user_memory_root_abs(user)
-        sqlite_rel = user.sqlite_path or self.storage.get("sqlite_path", ".index/memory.db")
-        return os.path.join(os.path.dirname(memory_root), sqlite_rel)
-
     def user_lancedb_abs(self, user: UserConfig) -> str:
         """Absolute path to this user's LanceDB directory."""
-        memory_root = self.user_memory_root_abs(user)
-        lancedb_rel = user.lancedb_path or self.storage.get("lancedb_path", ".index/lancedb/")
-        return os.path.join(os.path.dirname(memory_root), lancedb_rel)
+        lancedb_base = self.storage.get("lancedb_path", "data/lancedb/")
+        base = os.environ.get("YACMEMO_HOME", os.getcwd())
+        lancedb_root = (
+            str(Path(base) / lancedb_base)
+            if not os.path.isabs(lancedb_base) else lancedb_base
+        )
+        return os.path.join(lancedb_root, user.id)
+
+    def sync_users_to_db(self, db) -> list[UserConfig]:
+        """Sync config.toml [[users]] into the database.
+
+        - Users in config.toml that don't exist in DB are added.
+        - Users in DB that aren't in config.toml are kept (runtime additions via WebUI).
+        - Existing users' fields are updated from config.toml.
+        Returns the full user list from the database (as UserConfig objects).
+        """
+        {u.id for u in self.users}
+
+        # Add/update users from config.toml
+        for u in self.users:
+            existing = db.get_user(u.id)
+            if existing:
+                db.update_user(u.id,
+                               display_name=u.display_name,
+                               memory_root=u.memory_root,
+                               llm_api_key=u.llm_api_key,
+                               embedding_api_key=u.embedding_api_key)
+            else:
+                db.add_user(
+                    id=u.id,
+                    display_name=u.display_name,
+                    memory_root=u.memory_root,
+                    llm_api_key=u.llm_api_key,
+                    embedding_api_key=u.embedding_api_key,
+                )
+
+        # Load all users from DB (includes runtime-added ones)
+        db_users = db.list_users()
+        return [UserConfig(
+            id=u["id"],
+            display_name=u["display_name"],
+            memory_root=u["memory_root"],
+            llm_api_key=u["llm_api_key"],
+            embedding_api_key=u["embedding_api_key"],
+        ) for u in db_users]
 
 
 def load_config(path: str | None = None) -> Config:
@@ -163,8 +199,6 @@ def load_config(path: str | None = None) -> Config:
             memory_root=u.get("memory_root", ""),
             llm_api_key=u.get("llm_api_key", ""),
             embedding_api_key=u.get("embedding_api_key", ""),
-            sqlite_path=u.get("sqlite_path", ""),
-            lancedb_path=u.get("lancedb_path", ""),
         ))
 
     return Config(

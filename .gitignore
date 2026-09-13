@@ -7,6 +7,7 @@ dist/
 .uv-cache/
 
 # Data (generated at runtime)
+data/
 .index/
 *.db
 *.db-wal
@@ -18,3 +19,7 @@ config.toml
 # OS
 .DS_Store
 Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/

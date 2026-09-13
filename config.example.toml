@@ -21,10 +21,12 @@ model = "your-embedding-model"
 dimensions = 1024
 timeout = 30
 
-# ---- Storage defaults (used when user doesn't override) ----
+# ---- Storage (system-level) ----
 [storage]
-sqlite_path = ".index/memory.db"
-lancedb_path = ".index/lancedb/"
+# System-level SQLite database — all users share one DB, isolated via user_id columns
+sqlite_path = "data/system.db"
+# LanceDB vector index — per-user subdirectories under this path (data/lancedb/{user_id}/)
+lancedb_path = "data/lancedb/"
 
 # ---- Scheduler ----
 [schedule]
@@ -50,10 +52,14 @@ admin_token = ""                 # empty = no auth (local only); set a token for
 web_port = 9722                  # (reserved; WebUI currently mounts at /admin on the main port)
 
 # ---- Users ----
-# Each user has an isolated memory directory and index.
+# Each user has an isolated memory directory and LanceDB index.
+# All users share a single system-level SQLite database (data/system.db),
+# with per-user isolation via user_id columns.
 # LLM/embedding api_key can be overridden per user (empty string = inherit global).
 # Start MCP server with: yacmemo-mcp --user <id>
 # Memory .md files are stored under each user's memory_root directory.
+# Users defined here are synced to the database on startup. Users added
+# via the WebUI at runtime are persisted in the database only.
 
 [[users]]
 id = "yachen"
