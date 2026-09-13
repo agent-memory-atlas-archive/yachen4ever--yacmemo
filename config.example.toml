@@ -38,9 +38,9 @@ similarity_threshold = 0.85       # LanceDB cosine distance threshold for candid
 confidence_threshold = 0.8        # LLM confidence above this = auto-invalidate
 auto_invalidate = true
 
-# ---- Webhook server ----
+# ---- Server (webhook + WebUI share this port) ----
 [server]
-host = "127.0.0.1"
+host = "0.0.0.0"                    # 0.0.0.0 = listen on all interfaces (for remote WebUI access)
 port = 9721
 
 # ---- Admin WebUI ----

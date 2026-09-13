@@ -50,7 +50,7 @@ class ConsistencyConfig:
 
 @dataclass
 class ServerConfig:
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"          # 0.0.0.0 = listen on all interfaces (for remote WebUI access)
     port: int = 9721
 
 
@@ -58,7 +58,7 @@ class ServerConfig:
 class WebUIConfig:
     enabled: bool = True
     admin_token: str = ""           # empty = no auth (local only); set for remote access
-    web_port: int = 9722           # separate port for WebUI (enhancer webhook stays on `port`)
+    web_port: int = 9722           # reserved for future split; currently mounts at /admin on main port
 
 
 @dataclass
