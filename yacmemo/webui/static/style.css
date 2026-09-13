@@ -61,8 +61,12 @@ section[hidden] { display: none; }
   width: 300px; background: var(--pane); border: 1px solid var(--line);
   border-radius: 8px; padding: 8px; overflow-y: auto;
 }
-.sidebar ul { list-style: none; margin: 8px 0 0; padding: 0; }
-.sidebar ul ul { margin: 0; padding-left: 12px; }
+.sidebar ul { list-style: none; margin: 0; padding: 0; }
+.sidebar ul.tree-children {
+  margin: 0 0 0 7px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--line);
+}
 .sidebar li {
   padding: 6px 8px; border-radius: 6px; cursor: pointer;
   display: flex; justify-content: space-between; gap: 8px;
@@ -71,16 +75,18 @@ section[hidden] { display: none; }
 .sidebar li.active { background: #eaf1ff; }
 .sidebar li .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar li .m { color: var(--muted); font-size: 11px; white-space: nowrap; }
-.sidebar .folder-wrap { display: block; padding: 0; }
-.sidebar .folder-wrap:hover { background: transparent; }
-.sidebar details summary {
+.sidebar li.folder { display: block; padding: 0; }
+.sidebar li.folder:hover { background: transparent; }
+.sidebar li.folder > details summary {
   padding: 5px 8px; cursor: pointer; color: var(--text);
   font-weight: 600; font-size: 13px; border-radius: 6px; list-style: none;
   display: flex; align-items: center; gap: 4px;
 }
-.sidebar details summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
-.sidebar details[open] summary::before { content: "▾"; }
-.sidebar details summary:hover { background: #f0f4ff; }
+.sidebar li.folder > details summary::before {
+  content: "▸"; color: var(--muted); font-size: 11px;
+}
+.sidebar li.folder > details[open] summary::before { content: "▾"; }
+.sidebar li.folder > details summary:hover { background: #f0f4ff; }
 
 .note-pane {
   flex: 1; background: var(--pane); border: 1px solid var(--line);

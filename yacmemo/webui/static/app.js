@@ -117,24 +117,23 @@ function countFiles(node) {
 }
 
 function renderTree(node) {
-  const fileLi = (n) => `
-    <li data-path="${esc(n.path)}" class="${state.current && state.current.path === n.path ? "active" : ""}">
-      <span class="t" title="${esc(n.path)}">${esc(n.title)}</span>
-      <span class="m">${fmtTime(n.mtime)}</span>
-    </li>`;
-  const dirs = Object.entries(node.dirs)
-    .sort(([a], [b]) => a.localeCompare(b));
+  // Always returns a <ul>; folders nest as li > details > ul so every level
+  // is a valid list and indentation accumulates naturally.
+  const dirs = Object.entries(node.dirs).sort(([a], [b]) => a.localeCompare(b));
   const files = [...node.files].sort((a, b) => a.title.localeCompare(b.title, "zh"));
-  let html = "";
+  let inner = "";
   for (const [name, sub] of dirs) {
-    html += `<li class="folder-wrap"><details open>
+    inner += `<li class="folder"><details open>
       <summary>📁 ${esc(name)} <span class="m">(${countFiles(sub)})</span></summary>
       ${renderTree(sub)}
     </details></li>`;
   }
-  html += `<ul>${files.map(fileLi).join("")}</ul>`;
-  return html ||
-    `<ul><li class="muted">（空）</li></ul>`;
+  inner += files.map((n) => `
+    <li data-path="${esc(n.path)}" class="${state.current && state.current.path === n.path ? "active" : ""}">
+      <span class="t" title="${esc(n.path)}">${esc(n.title)}</span>
+      <span class="m">${fmtTime(n.mtime)}</span>
+    </li>`).join("");
+  return `<ul class="tree-children">${inner}</ul>`;
 }
 
 $("note-filter").oninput = () => loadNotes();
