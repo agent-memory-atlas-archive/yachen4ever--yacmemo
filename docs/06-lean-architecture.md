@@ -194,11 +194,11 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 |---|---|---|
 | `memory_search` | `query, limit=10, kind="hybrid"\|"fts"\|"vector"` | 双路 RRF 融合 + 撞车标注内联 |
 | `memory_read` | `path_or_title` | 正文 + 1-hop 相关笔记 |
-| `memory_write` | `title, content, force=false` | **近重名拦截**（见 6.1）；写入即同步索引 |
+| `memory_write` | `title, content, force=false, force_confirm=false` | **近重名拦截**（见 6.1，含两级 force 确认）；写入即同步索引 |
 | `memory_edit` | `path, old_string, new_string` | **锚点唯一性强制**：找不到/命中多处 → 拒绝并列出候选位置 |
 | `memory_edit_section` | `path, heading, new_content` | 按 `##` 标题段替换（P2 实现） |
 | `memory_move` | `path, new_path` | 移动 + 全库索引随路径更新（[[链接]] 按标题解析，移动不改标题故无需改写链接） |
-| `memory_audit` | — | D1 全量扫描 + collisions 表报告 + D3 悬空链接清单 |
+| `memory_audit` | — | 自愈（外部改动/删除的 hash 级重算与清理）+ D1 全量扫描 + collisions 报告 + D3 悬空链接 |
 | `memory_list` | `path="", sort="name"\|"mtime"` | 目录树 / 最近变更 |
 
 ### 6.1 写路径守卫（本设计的一致性核心）
@@ -219,6 +219,7 @@ memory_write(title, content):
 ```
 
 - 拒绝是**确定性行为**，不依赖模型自觉；`force=true` 是模型显式越过守卫的唯一通道；
+- **force 两级确认**：24 小时内 forced 事件达到 `force_confirm_threshold`（默认 3）后，光 `force=true` 会被拒绝，必须同时传 `force_confirm=true`（显式人工确认语义）；拒绝信息列出候选已有笔记，全过程可数；
 - **force 调用次数就是违约率的可数指标**（P4 核心度量），audit 汇总报告；
 - journal/ 目录不参与拦截；
 - 阈值 `title_similarity_threshold`（默认 0.85）可配，拒绝事件全量落日志用于调阈值。
@@ -249,7 +250,7 @@ memory_write / memory_edit 完成 embedding 后：
 
 - 阈值可配（`collision_cosine_threshold`，默认 0.86）；
 - **刻意不判断是否矛盾、不裁决谁有效**——只标记"疑似在说同一件事"；
-- stale 清理：任一侧文件 hash 变化后，下次 audit 将对应 collisions 行重算或清除；
+- **stale 清理与自愈**：`memory_audit` 比对磁盘文件 hash 与 `notes.content_hash`——外部修改的笔记自动重建索引（embedding 走 vec_cache，未变行零调用），其涉及 collisions 随之重算；外部删除的笔记清理全部索引并列入 `missing` 报告。审计即自愈，无后台进程；
 - 局限（接受）：措辞距离远但逻辑矛盾的不会命中——残余风险由第 3 层（主模型在检索到可疑对时判断）覆盖，不做基建。
 
 ### 7.3 D3：悬空引用
@@ -340,11 +341,13 @@ obs_topk = 5
 
 ## 十一、分阶段落地
 
+> **实现状态（2026-09-14）**：P0–P2 已实现并提交（49 个测试通过；三通道基线 fts 6/10 → hybrid 9/10）。P3（约定块进 TeleAgent + wife 实例部署）与 P4（两周实测）待执行。
+
 | 阶段 | 内容 | 工作量 | 验收标准 |
 |---|---|---|---|
 | P0 | 仓库转型（旧模块移出运行路径）、骨架、**trigram 中文实测** | 0.5 天 | 用 10 条真实中文查询记录 fts/vector/hybrid 三通道召回基线 |
 | P1 | `search/read/write/edit` + 同步索引 | 1–2 天 | 写入 < 300ms；评测集上 hybrid ≥ 单通道最优 |
-| P2 | 守卫完善（force 路径）、`edit_section/move`、D1–D3、`audit`、碰撞标注 | 1 天 | 人造 5 组重复/矛盾样本全被拦截或标出，误报 ≤ 2 |
+| P2 | 守卫完善（force 两级确认）、`edit_section/move`、D1–D3、`audit` 自愈、碰撞标注 | 1 天 | 人造 5 组重复/矛盾样本全被拦截或标出，误报 ≤ 2 |
 | P3 | 约定块进 TeleAgent、wife 实例 | 0.5 天 | 双用户隔离运行一天无串数据 |
 | P4 | 两周实测 | — | 7.4 全部指标产出；据数据调阈值 |
 

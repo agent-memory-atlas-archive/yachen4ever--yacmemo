@@ -34,6 +34,7 @@ from .vector import VectorStore
 logger = logging.getLogger(__name__)
 
 _ILLEGAL_FILENAME = re.compile(r'[\\/:*?"<>|]')
+_HEADING_RE = re.compile(r"^(#{2,6})\s+(.+?)\s*$")
 
 
 class StoreError(Exception):
@@ -113,7 +114,8 @@ class Store:
 
     # ------------------------------------------------------------------ write
 
-    def write(self, title: str, content: str, force: bool = False) -> dict:
+    def write(self, title: str, content: str, force: bool = False,
+              force_confirm: bool = False) -> dict:
         rel = self.title_to_path(title)
         _, name = self._split_title(title)
         is_journal = rel.startswith(self.config.journal_prefix)
@@ -137,6 +139,20 @@ class Store:
                     conflicts,
                 )
         if conflicts and force:
+            # Two-step confirmation ladder: frequent force usage requires an
+            # explicit force_confirm=true on top of force=true (human-confirm
+            # semantics, deterministic and fully counted in guard_events).
+            recent = self.db.count_forced_since(hours=24)
+            threshold = self.config.guard.force_confirm_threshold
+            if recent >= threshold and not force_confirm:
+                raise StoreError(
+                    f"force 近 24 小时已被使用 {recent} 次（阈值 {threshold}），"
+                    "需要人工确认。\n"
+                    f"候选已有笔记：[[{conflicts[0]['title']}]] "
+                    f"({conflicts[0]['path']}, 相似度 {conflicts[0]['score']})。\n"
+                    "若已确认这确实是不同主题，请同时传 force=true 和 "
+                    "force_confirm=true 重试。"
+                )
             self.db.add_guard_event("forced", name, conflicts[0]["path"], forced=True)
 
         abs_path = self.root / rel
@@ -205,8 +221,56 @@ class Store:
         return {"path": rel, "title": title}
 
     def edit_section(self, path: str, heading: str, new_content: str) -> dict:
-        raise StoreError(
-            "memory_edit_section 将在 P2 提供；当前请用 memory_edit 以唯一文本锚点替换。")
+        """Replace the body of one `##`-level (or deeper) section, keeping the heading."""
+        rel = self.resolve(path)
+        abs_path = self.root / rel
+        content = abs_path.read_text(encoding="utf-8")
+        lines = content.splitlines()
+
+        wanted = (heading or "").strip()
+        targets: list[tuple[int, int]] = []
+        available: list[str] = []
+        for i, line in enumerate(lines):
+            m = _HEADING_RE.match(line)
+            if not m:
+                continue
+            text = m.group(2).strip()
+            available.append(text)
+            if text == wanted:
+                targets.append((i, len(m.group(1))))
+
+        if not targets:
+            raise StoreError(
+                f"未找到小节标题 '{wanted}'（仅匹配 ## 及更深层标题，"
+                "# 一级标题是笔记本身，请用 memory_edit）。\n"
+                f"现有小节: {', '.join(available) if available else '（无）'}"
+            )
+        if len(targets) > 1:
+            nos = [t[0] + 1 for t in targets]
+            raise StoreError(
+                f"小节标题 '{wanted}' 命中 {len(targets)} 处（行 {nos}），需要唯一。")
+
+        idx, level = targets[0]
+        end = len(lines)
+        for j in range(idx + 1, len(lines)):
+            m = _HEADING_RE.match(lines[j])
+            if m and len(m.group(1)) <= level:
+                end = j
+                break
+
+        body = (new_content or "").strip("\n")
+        new_lines = lines[:idx + 1]
+        if body:
+            new_lines += ["", *body.splitlines()]
+        if end < len(lines):
+            new_lines += [""]
+        new_lines += lines[end:]
+        new_text = "\n".join(new_lines).rstrip("\n") + "\n"
+
+        abs_path.write_text(new_text, encoding="utf-8")
+        title = self._title_of(rel, new_text)
+        self._index_note(rel, title, new_text)
+        return {"path": rel, "heading": wanted}
 
     # ------------------------------------------------------------------ move
 
@@ -261,6 +325,7 @@ class Store:
     # ------------------------------------------------------------------ audit
 
     def audit(self) -> dict:
+        resynced, missing = self._resync_stale_notes()
         titles = self.db.all_titles()
         d1 = d1_scan(titles, self.config.guard.title_similarity_threshold)
         self.db.prune_stale_collisions()
@@ -276,7 +341,35 @@ class Store:
         return {"title_duplicates": d1,
                 "collisions": collisions,
                 "dangling_links": dangling,
+                "resynced": resynced,
+                "missing": missing,
                 "guard_stats": self.db.guard_stats()}
+
+    def _resync_stale_notes(self) -> tuple[list[str], list[str]]:
+        """Self-healing: reconcile the index with out-of-band file changes.
+
+        - externally edited (disk hash != notes.content_hash): rebuild that
+          note's index entry; embeddings come from vec_cache for unchanged
+          observation lines; collisions involving it are recomputed.
+        - externally deleted: drop its index rows (the user's deletion is the
+          source of truth; the store itself never deletes files).
+        """
+        resynced, missing = [], []
+        for row in self.db.list_notes():
+            p = self.root / row["path"]
+            if not p.is_file():
+                self.db.remove_note(row["path"])
+                self.db.remove_collisions_involving(row["path"])
+                if self.vectors:
+                    self.vectors.delete_by_path(row["path"])
+                missing.append(row["path"])
+                continue
+            content = p.read_text(encoding="utf-8")
+            if content_hash(content) != row["content_hash"]:
+                title = self._title_from_content(row["path"], content)
+                self._index_note(row["path"], title, content)
+                resynced.append(row["path"])
+        return resynced, missing
 
     # ------------------------------------------------------------------ reindex
 

@@ -95,12 +95,6 @@ def test_edit_updates_index(store: Store):
     assert hits == []
 
 
-def test_edit_section_is_p2_stub(store: Store):
-    store.write("yacmemo部署配置", NOTE_A)
-    with pytest.raises(Exception, match="P2"):
-        store.edit_section("yacmemo部署配置", "配置", "x")
-
-
 def test_move_updates_all_indexes(store: Store):
     store.write("projects/yacmemo部署配置", NOTE_A)
     r = store.move("projects/yacmemo部署配置", "infra/yacmemo部署配置")

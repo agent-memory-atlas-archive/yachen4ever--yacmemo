@@ -110,16 +110,18 @@ def memory_read(path_or_title: str) -> str:
 
 
 @mcp.tool()
-def memory_write(title: str, content: str, force: bool = False) -> str:
+def memory_write(title: str, content: str, force: bool = False,
+                 force_confirm: bool = False) -> str:
     """新建笔记（一篇一主题，标题即主题名）。近似标题会被拒绝；更新已有笔记请用 memory_edit。
 
     Args:
         title: 笔记标题，可含目录前缀（如 "projects/yacmemo部署配置"）
         content: markdown 正文（首行建议 "# 标题"；事实行用 "- [类别] 内容"）
-        force: 明确越过近似标题守卫（会被记录为违约指标，慎用）
+        force: 明确越过近似标题守卫（会被记录为违约指标）
+        force_confirm: force 使用频繁（24h 内达阈值）时的人工确认二级开关
     """
     try:
-        r = store.write(title, content, force=force)
+        r = store.write(title, content, force=force, force_confirm=force_confirm)
     except Exception as e:
         return f"{e}"
     note = "（注意：本次为 force 越过近似标题守卫，已记录）" if r["forced"] else ""
@@ -152,8 +154,8 @@ def memory_edit_section(path: str, heading: str, new_content: str) -> str:
         new_content: 新小节内容
     """
     try:
-        store.edit_section(path, heading, new_content)
-        return "ok"
+        r = store.edit_section(path, heading, new_content)
+        return f"已替换小节 '{r['heading']}' 并重新索引: {r['path']}"
     except Exception as e:
         return f"{e}"
 
@@ -175,13 +177,21 @@ def memory_move(path: str, new_path: str) -> str:
 
 @mcp.tool()
 def memory_audit() -> str:
-    """全量一致性审计：标题重复、语义撞车、悬空链接、守卫统计。"""
+    """全量一致性审计：外部变更自愈、标题重复、语义撞车、悬空链接、守卫统计。"""
     try:
         r = store.audit()
     except Exception as e:
         return f"审计失败: {e}"
 
     lines = []
+    if r["resynced"]:
+        lines.append(f"== 外部修改（{len(r['resynced'])}，已自动重建索引）==")
+        for p in r["resynced"]:
+            lines.append(f"- {p}")
+    if r["missing"]:
+        lines.append(f"== 外部删除（{len(r['missing'])}，已清理索引）==")
+        for p in r["missing"]:
+            lines.append(f"- {p}")
     d1 = r["title_duplicates"]
     lines.append(f"== 标题重复（{len(d1)}）==")
     for c in d1[:10]:

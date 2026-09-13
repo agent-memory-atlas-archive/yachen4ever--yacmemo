@@ -184,6 +184,18 @@ class IndexDB:
         return {"refused": stats.get("refused", 0),
                 "forced": stats.get("forced", 0)}
 
+    def count_forced_since(self, hours: int = 24) -> int:
+        """Forced bypasses within a rolling window (force-confirmation ladder)."""
+        from datetime import timedelta
+
+        cutoff = (datetime.now(UTC) - timedelta(hours=hours)).isoformat(
+            timespec="seconds")
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM guard_events WHERE kind='forced' AND ts >= ?",
+            (cutoff,),
+        ).fetchone()
+        return row["n"]
+
     # ---- collisions ----
 
     def add_collision(self, kind: str, a_path: str, b_path: str,

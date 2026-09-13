@@ -39,6 +39,9 @@ class GuardConfig:
     title_similarity_threshold: float = 0.85
     collision_cosine_threshold: float = 0.86
     obs_topk: int = 5
+    # When >= this many force-bypasses happened in the last 24h, force also
+    # requires force_confirm=True (two-step human-confirmation semantics)
+    force_confirm_threshold: int = 3
 
 
 @dataclass
@@ -105,5 +108,8 @@ def load_config(path: str | None = None) -> Config:
                 "collision_cosine_threshold", GuardConfig.collision_cosine_threshold
             ),
             obs_topk=guard.get("obs_topk", GuardConfig.obs_topk),
+            force_confirm_threshold=guard.get(
+                "force_confirm_threshold", GuardConfig.force_confirm_threshold
+            ),
         ),
     )
