@@ -80,7 +80,47 @@ systemctl enable --now yacmemo
 | Claude Code | `claude mcp add --transport http yacmemo http://debsvc.local:9721/yachen/mcp` |
 | Codex CLI | `codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp` |
 | Cursor / Claude Desktop 等 | mcp.json 中 `"yacmemo": {"url": "http://debsvc.local:9721/yachen/mcp"}`（类型 remote/http） |
+| TeleAgent 桌面版 | 官方 JSON 仅 stdio 形态——先试 `url` 直连，不行用 mcp-proxy 桥接（见 2.1.1） |
 | 自研 runtime | 任意 MCP 客户端库连 streamable HTTP；或直接用 `mcp` SDK |
+
+#### 2.1.1 TeleAgent 桌面版接入
+
+TeleAgent 的 MCP JSON（设置 → 工具设置 → 从 JSON 导入）文档化字段只有 `command/args/env`（stdio 形态）。两条路径：
+
+**① 先试远程直连**（新版客户端多已支持远程 MCP，粘贴后看是否亮绿色"已连接"）：
+
+```json
+{
+  "mcpServers": {
+    "yacmemo": {
+      "url": "http://192.168.5.7:9721/yachen/mcp"
+    }
+  }
+}
+```
+
+**② 不支持则用 stdio 桥接**（已在 Windows 上端到端验证：stdio → mcp-proxy → HTTP → debsvc，8 工具与向量检索均正常）。前提：运行 TeleAgent 的机器装有 [uv](https://docs.astral.sh/uv/)（`powershell -c "irm https://astral.sh/uv/install.ps1 | iex"` 一次即可）：
+
+```json
+{
+  "mcpServers": {
+    "yacmemo": {
+      "command": "uvx",
+      "args": ["--with", "mcp<2", "mcp-proxy", "--transport", "streamablehttp",
+               "http://192.168.5.7:9721/yachen/mcp"]
+    }
+  }
+}
+```
+
+装了 Node 的机器也可用 `npx -y mcp-remote http://192.168.5.7:9721/yachen/mcp`。
+
+注意：
+
+- `--with "mcp<2"` 必须保留——mcp-proxy 尚不兼容 mcp SDK 2.x；
+- user2 的设备把路径换成 `/user2/mcp`；
+- 首次写入类操作 TeleAgent 会弹【等待授权】，试用期建议对记忆工具选"一直允许"；
+- 连接成功后到 WebUI 使用记录页确认调用留痕（客户端列会显示调用方 UA）。
 
 - 用户2的设备把路径换成 `/user2/mcp` 即可，**同一台服务、同一个端口**；
 - `debsvc.local` 换成实际主机名/IP（192.168.5.7）；
