@@ -58,11 +58,15 @@ def create_webui_app(config: Config) -> FastAPI:
     def _render(template_name: str, request: Request, **context) -> HTMLResponse:
         """Render a Jinja2 template and return HTMLResponse.
 
-        Automatically injects 'users' (for nav sidebar) into all templates.
+        Automatically injects 'users' (for nav sidebar) and 'current_user_id'.
         """
         if "users" not in context:
             context["users"] = [{"id": u.id, "display_name": u.display_name}
                                  for u in config.users]
+        if "current_user_id" not in context:
+            # Try to extract user_id from the 'user' context var (set by per-user pages)
+            user_obj = context.get("user")
+            context["current_user_id"] = user_obj.id if user_obj else ""
         tmpl = _jinja_env.get_template(template_name)
         html = tmpl.render(request=request, **context)
         return HTMLResponse(content=html)

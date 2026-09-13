@@ -26,6 +26,14 @@
             text-decoration: none; font-size: 14px; transition: all 0.2s;
         }
         nav a:hover, nav a.active { color: var(--text); background: rgba(108,142,255,0.1); }
+        nav .nav-separator { height: 1px; background: var(--border); margin: 12px 20px; }
+        nav .nav-section-label { padding: 0 20px 4px; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+        nav .nav-select {
+            margin: 0 20px 8px; width: calc(100% - 40px); padding: 6px 8px;
+            background: var(--bg); border: 1px solid var(--border); color: var(--text);
+            border-radius: 6px; font-size: 13px; cursor: pointer;
+        }
+        nav .nav-select:focus { outline: none; border-color: var(--accent); }
         main { flex: 1; padding: 24px; overflow-x: auto; }
         h1 { font-size: 22px; margin-bottom: 20px; }
         h2 { font-size: 16px; margin: 20px 0 10px; color: var(--text-dim); }
@@ -74,20 +82,46 @@
         <div class="logo">yacmemo</div>
         <a href="/admin/" class="{% block nav_dashboard %}{% endblock %}">仪表盘</a>
         <a href="/admin/users" class="{% block nav_users %}{% endblock %}">用户管理</a>
-        {% for u in users if users %}
-        <a href="/admin/memory/{{ u.id }}" class="{% block nav_memory %}{% endblock %}">记忆 · {{ u.display_name or u.id }}</a>
-        {% endfor %}
-        {% for u in users if users %}
-        <a href="/admin/search/{{ u.id }}" class="{% block nav_search %}{% endblock %}">搜索 · {{ u.display_name or u.id }}</a>
-        {% endfor %}
-        {% for u in users if users %}
-        <a href="/admin/consistency/{{ u.id }}" class="{% block nav_consistency %}{% endblock %}">校验 · {{ u.display_name or u.id }}</a>
-        {% endfor %}
         <a href="/admin/status" class="{% block nav_status %}{% endblock %}">系统状态</a>
+        <div class="nav-separator"></div>
+        <div class="nav-section-label">用户视图</div>
+        <select id="user-select" onchange="switchUser(this.value)" class="nav-select">
+            {% for u in users %}
+            <option value="{{ u.id }}" {% if current_user_id == u.id %}selected{% endif %}>{{ u.display_name or u.id }}</option>
+            {% endfor %}
+        </select>
+        <a href="#" id="nav-memory" class="{% block nav_memory %}{% endblock %}">记忆浏览</a>
+        <a href="#" id="nav-search" class="{% block nav_search %}{% endblock %}">搜索</a>
+        <a href="#" id="nav-consistency" class="{% block nav_consistency %}{% endblock %}">一致性校验</a>
+        <div class="nav-separator"></div>
         <a href="/admin/logout">退出</a>
     </nav>
     <main>
         {% block content %}{% endblock %}
     </main>
+    <script>
+        function switchUser(userId) {
+            const path = window.location.pathname;
+            // Determine which page we're on and swap the user segment
+            const match = path.match(/\/admin\/(memory|search|consistency)\/[^/]+/);
+            if (match) {
+                const page = match[1];
+                window.location.href = `/admin/${page}/${userId}`;
+            } else {
+                // Default to memory page when switching from a non-user page
+                window.location.href = `/admin/memory/${userId}`;
+            }
+        }
+        // Set correct hrefs based on current user
+        (function() {
+            const sel = document.getElementById('user-select');
+            const uid = sel ? sel.value : null;
+            if (uid) {
+                document.getElementById('nav-memory').href = `/admin/memory/${uid}`;
+                document.getElementById('nav-search').href = `/admin/search/${uid}`;
+                document.getElementById('nav-consistency').href = `/admin/consistency/${uid}`;
+            }
+        })();
+    </script>
 </body>
 </html>
