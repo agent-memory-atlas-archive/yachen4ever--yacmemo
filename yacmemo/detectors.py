@@ -23,6 +23,8 @@ _SUFFIX_PATTERNS = [
 _NON_WORD = re.compile(r"[\W_]+", re.UNICODE)
 
 _OBS_RE = re.compile(r"^\s*-\s*\[([^\]]{1,32})\]\s*(.+?)\s*$")
+# GFM task-list items ("- [x] done") are checkboxes, not observations
+_TASK_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s")
 _LINK_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
 
 
@@ -76,9 +78,15 @@ def d1_scan(all_titles: list[dict], threshold: float) -> list[dict]:
 
 
 def parse_observations(content: str) -> list[dict]:
-    """Parse Basic-Memory-style observation lines: `- [category] text #tag`."""
+    """Parse Basic-Memory-style observation lines: `- [category] text #tag`.
+
+    GFM task-list items (`- [x]` / `- [ ]`) are checkboxes, not observations,
+    and are excluded so checklist-heavy notes don't generate collision noise.
+    """
     out = []
     for lineno, line in enumerate(content.splitlines(), 1):
+        if _TASK_RE.match(line):
+            continue
         m = _OBS_RE.match(line)
         if m:
             out.append({"category": m.group(1).strip(), "text": m.group(2).strip(),

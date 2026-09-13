@@ -287,43 +287,99 @@ $("btn-audit-run").onclick = async () => {
   }
 };
 
+$("btn-reindex").onclick = async () => {
+  if (!confirm("全量重建索引？将清除并重建该用户的 FTS/向量/撞车记录（笔记文件不受影响）。")) return;
+  $("audit-status").textContent = "重建中…";
+  try {
+    const data = await api(`/api/${state.user}/reindex`, { method: "POST" });
+    toast(`重建完成：${data.indexed} 篇${data.failed?.length ? "，失败 " + data.failed.length : ""}`);
+    $("btn-audit-run").click();
+  } catch (e) {
+    $("audit-status").textContent = e.message;
+  }
+};
+
+function noteTitleOf(path) {
+  const n = state.notes.find((x) => x.path === path);
+  return n ? n.title : path.split("/").pop().replace(/\.md$/, "");
+}
+
+function jumpToNote(path) {
+  document.querySelector('#tabs [data-tab="notes"]').click();
+  openNote(path);
+}
+
+const COLLISION_GUIDE = `
+<div class="section muted" style="font-size:13px">
+  撞车 = 两篇笔记里出现了同一（或极相似）的事实行。点「打开」看两篇的关系，再裁决：
+  ① <b>两篇是同一主题的两份拷贝</b> → 把有价值的内容并进保留篇、删除另一篇，然后点「✓ 已处理」；
+  ② <b>两篇主题不同，只是恰好都有这条事实</b>（如同一功能在两个项目里各有一条）→ 点「忽略」；
+  ③ <b>一篇是另一篇的旧版本</b> → 把新内容并入保留篇，点「✓ 已处理」。
+</div>`;
+
 function renderAudit(a) {
   const sec = (title, items, render) =>
     `<h3>${title}（${items.length}）</h3>` +
     (items.length ? items.map(render).join("") : `<div class="muted">无</div>`);
 
+  const openBtn = (p, label = "打开") =>
+    `<button onclick="jumpToNote(${JSON.stringify(p).replace(/"/g, "&quot;")})">${label}</button>`;
+
+  const groups = {};
+  for (const c of a.collisions) {
+    const key = [c.a_path, c.b_path].sort().join("↔");
+    (groups[key] = groups[key] || { a: c.a_path, b: c.b_path, rows: [] }).rows.push(c);
+  }
+
   $("audit-results").innerHTML =
-    sec("新发现文件（已建立索引）", a.added, (p) => `<div class="section">${esc(p)}</div>`) +
-    sec("外部修改（已自动重建索引）", a.resynced, (p) => `<div class="section">${esc(p)}</div>`) +
+    sec("新发现文件（已建立索引）", a.added, (p) => `
+      <div class="section pair"><div class="texts">${esc(p)}</div>${openBtn(p)}</div>`) +
+    sec("外部修改（已自动重建索引）", a.resynced, (p) => `
+      <div class="section pair"><div class="texts">${esc(p)}</div>${openBtn(p)}</div>`) +
     sec("外部删除（已清理索引）", a.missing, (p) => `<div class="section">${esc(p)}</div>`) +
     sec("标题重复", a.title_duplicates, (c) => `
       <div class="section pair"><div class="texts">
         <div>[[${esc(c.a_title)}]] ↔ [[${esc(c.b_title)}]] (score ${c.score})</div>
         <div class="small">${esc(c.a_path)} · ${esc(c.b_path)} — 建议合并为一篇</div>
-      </div></div>`) +
-    sec("语义撞车", a.collisions, (c) => `
+      </div>${openBtn(c.a_path, "打开 A")}${openBtn(c.b_path, "打开 B")}</div>`) +
+    `<h3>语义撞车（${a.collisions.length} 处，按笔记对分组）</h3>` + COLLISION_GUIDE +
+    (Object.values(groups).map((g) => {
+      const ids = JSON.stringify(g.rows.map((r) => r.id)).replace(/"/g, "&quot;");
+      return `
       <div class="section pair">
         <div class="texts">
-          <div class="small">${esc(c.a_path)} ↔ ${esc(c.b_path)} (score ${c.score})</div>
-          <div>A: ${esc(c.a_text)}</div>
-          <div>B: ${esc(c.b_text)}</div>
+          <div><b>A</b>：《${esc(noteTitleOf(g.a))}》<span class="small"> ${esc(g.a)}</span></div>
+          <div><b>B</b>：《${esc(noteTitleOf(g.b))}》<span class="small"> ${esc(g.b)}</span></div>
+          <div class="small" style="margin-top:6px">${g.rows.map((r) =>
+            `<div>score ${r.score} — A:「${esc(r.a_text)}」 / B:「${esc(r.b_text)}」</div>`).join("")}</div>
         </div>
-        <button data-cid="${esc(c.id)}" data-st="resolved">已合并</button>
-        <button data-cid="${esc(c.id)}" data-st="dismissed">忽略</button>
-      </div>`) +
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${openBtn(g.a, "打开 A")}${openBtn(g.b, "打开 B")}
+          <button data-resolve="${esc(ids)}" data-st="resolved">✓ 已处理</button>
+          <button data-resolve="${esc(ids)}" data-st="dismissed">忽略</button>
+        </div>
+      </div>`;
+    }).join("") || `<div class="muted" style="margin-bottom:10px">无</div>`) +
     sec("悬空链接", a.dangling_links, (d) => `
-      <div class="section">${esc(d.path)} → [[${esc(d.link)}]]</div>`) +
+      <div class="section pair"><div class="texts">${esc(d.path)} → [[${esc(d.link)}]]</div>${openBtn(d.path)}</div>`) +
     `<h3>守卫统计</h3><div class="section">
-      拒绝 ${a.guard_stats.refused} 次 · force 越过 ${a.guard_stats.forced} 次</div>`;
+      拒绝 ${a.guard_stats.refused} 次 · force 越过 ${a.guard_stats.forced} 次</div>
+      <button id="btn-reindex2" style="margin-top:8px">全量重建索引</button>`;
 
-  for (const btn of $("audit-results").querySelectorAll("button[data-cid]")) {
+  const r2 = $("btn-reindex2");
+  if (r2) r2.onclick = () => $("btn-reindex").click();
+
+  for (const btn of $("audit-results").querySelectorAll("button[data-resolve]")) {
     btn.onclick = async () => {
+      const ids = JSON.parse(btn.dataset.resolve);
       try {
-        await api(`/api/${state.user}/collision`, {
-          method: "POST",
-          body: JSON.stringify({ id: btn.dataset.cid, status: btn.dataset.st }),
-        });
-        toast(btn.dataset.st === "resolved" ? "已标记合并完成" : "已忽略");
+        for (const id of ids) {
+          await api(`/api/${state.user}/collision`, {
+            method: "POST",
+            body: JSON.stringify({ id, status: btn.dataset.st }),
+          });
+        }
+        toast(btn.dataset.st === "resolved" ? "已标记处理完成" : "已忽略");
         $("btn-audit-run").click();
       } catch (e) { toast(e.message, true); }
     };

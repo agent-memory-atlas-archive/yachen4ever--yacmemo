@@ -61,6 +61,8 @@ def test_parse_observations():
 - [配置] 服务端口为 9721
 - [运维] 每日备份 #重要
 - 这不是 observation（没有 [类别]）
+- [x] 这是 GFM 任务清单勾选项，不是 observation
+- [ ] 待办同样不是
 """
     obs = parse_observations(content)
     assert len(obs) == 2

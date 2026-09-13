@@ -454,7 +454,7 @@ class Store:
             try:
                 content = p.read_text(encoding="utf-8")
                 title = self._title_from_content(rel, content)
-                self._index_note(rel, title, content, collect_d2=False)
+                self._index_note(rel, title, content)
                 count += 1
             except Exception as e:
                 failed.append({"path": rel, "error": str(e)})

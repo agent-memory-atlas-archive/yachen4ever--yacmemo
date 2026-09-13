@@ -218,6 +218,18 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err(str(e))
         return _ok({"audit": r})
 
+    async def reindex(request: Request):
+        """Full rebuild: wipe derived state, re-walk all files, re-detect D2."""
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        try:
+            r = await run_in_threadpool(c["store"].reindex)
+        except Exception as e:
+            return _err(str(e))
+        return _ok(r)
+
     async def collision_resolve(request: Request):
         try:
             c = _ctx(request.path_params["user"])
@@ -247,5 +259,6 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         Route("/api/{user}/note", note_delete, methods=["DELETE"]),
         Route("/api/{user}/search", search, methods=["GET"]),
         Route("/api/{user}/audit", audit, methods=["POST"]),
+        Route("/api/{user}/reindex", reindex, methods=["POST"]),
         Route("/api/{user}/collision", collision_resolve, methods=["POST"]),
     ]
