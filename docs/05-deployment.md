@@ -30,8 +30,8 @@ id = "yachen"
 root = "/srv/yacmemo/yachen/memory"
 
 [[users]]
-id = "wife"
-root = "/srv/yacmemo/wife/memory"
+id = "user2"
+root = "/srv/yacmemo/user2/memory"
 ```
 
 注意：
@@ -43,10 +43,10 @@ root = "/srv/yacmemo/wife/memory"
 ### 1.2 首次启动与验证
 
 ```bash
-mkdir -p /srv/yacmemo/yachen/memory /srv/yacmemo/wife/memory
+mkdir -p /srv/yacmemo/yachen/memory /srv/yacmemo/user2/memory
 uv run yacmemo-server --config config.toml
 curl http://127.0.0.1:9721/health
-# → {"status":"ok","users":["wife","yachen"]}
+# → {"status":"ok","users":["user2","yachen"]}
 ```
 
 ### 1.3 systemd 常驻
@@ -82,7 +82,7 @@ systemctl enable --now yacmemo
 | Cursor / Claude Desktop 等 | mcp.json 中 `"yacmemo": {"url": "http://debsvc.local:9721/yachen/mcp"}`（类型 remote/http） |
 | 自研 runtime | 任意 MCP 客户端库连 streamable HTTP；或直接用 `mcp` SDK |
 
-- 妻子的设备把路径换成 `/wife/mcp` 即可，**同一台服务、同一个端口**；
+- 用户2的设备把路径换成 `/user2/mcp` 即可，**同一台服务、同一个端口**；
 - `debsvc.local` 换成实际主机名/IP（192.168.5.7）；
 - 无状态会话（stateless HTTP）：客户端重连、代理、多窗口并发都无需会话亲和。
 
@@ -136,6 +136,6 @@ uv run yacmemo-mcp --root /srv/yacmemo/yachen/memory
 
 - [ ] `systemctl status yacmemo` 正常，`/health` 返回两个用户
 - [ ] 笔记本 A（Claude Code）写入 → 手机/另一台（Cursor）能搜到
-- [ ] wife 实例与 yachen 实例互不可见（各写同名标题不冲突）
+- [ ] user2 实例与 yachen 实例互不可见（各写同名标题不冲突）
 - [ ] 直接在 memory 目录手动改一个文件 → `memory_audit` 报告"外部修改已重建"
 - [ ] 断开 omlx 写入 → 内容仍在、FTS 可搜；恢复后向量自动补齐

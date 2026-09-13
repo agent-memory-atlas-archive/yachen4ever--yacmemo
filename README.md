@@ -20,7 +20,7 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
    ▼
 yacmemo-server（单进程，streamable HTTP，无状态会话）
    ├── /yachen/mcp → Store(root=.../yachen/memory)
-   └── /wife/mcp   → Store(root=.../wife/memory)
+   └── /user2/mcp   → Store(root=.../user2/memory)
          store.py      CRUD + 写路径守卫 + 同步索引
          search.py     FTS5 trigram + 向量，RRF 融合
          detectors.py  确定性 D1/D3 检测
@@ -40,14 +40,14 @@ git clone <your-repo> yacmemo && cd yacmemo
 uv sync
 cp config.example.toml config.toml   # 填 embedding 端点与各用户 root
 uv run yacmemo-server --config config.toml
-curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["wife","yachen"]}
+curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["user2","yachen"]}
 ```
 
 ### 客户端（你的每台电脑、每个 agent）
 
 ```
 http://debsvc.local:9721/yachen/mcp
-http://debsvc.local:9721/wife/mcp
+http://debsvc.local:9721/user2/mcp
 ```
 
 ```bash

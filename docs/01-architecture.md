@@ -81,11 +81,11 @@ SQLite（FTS/元数据/冲突记录）与 LanceDB（向量）全部是派生索�
 你的电脑们（任意 agent：Claude Code / Codex / Cursor / 自研 runtime…）
   │  各端只添加一个远程 MCP URL，客户端零安装、零进程
   │      http://debsvc.local:9721/yachen/mcp
-  │      http://debsvc.local:9721/wife/mcp
+  │      http://debsvc.local:9721/user2/mcp
   ▼
 yacmemo-server（debsvc，单进程，streamable HTTP，无状态会话）
   ├── /yachen/mcp → Store(root=/srv/yacmemo/yachen/memory)
-  ├── /wife/mcp   → Store(root=/srv/yacmemo/wife/memory)
+  ├── /user2/mcp   → Store(root=/srv/yacmemo/user2/memory)
   │     ├── store.py      markdown CRUD + 写路径守卫 + 同步索引
   │     ├── search.py     FTS5(trigram) + 向量 RRF 融合
   │     ├── detectors.py  D1/D3 确定性检测器
@@ -97,7 +97,7 @@ yacmemo-server（debsvc，单进程，streamable HTTP，无状态会话）
   ▼
 磁盘 (source of truth，单点存放)
   /srv/yacmemo/yachen/memory/  ← git 仓库
-  /srv/yacmemo/wife/memory/    ← git 仓库
+  /srv/yacmemo/user2/memory/    ← git 仓库
   各 memory/.index/            ← 可随时删除重建，不进 git
 ```
 

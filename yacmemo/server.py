@@ -7,7 +7,7 @@ Any MCP-capable agent on any machine connects with just a URL — nothing to
 install client-side, no per-machine processes:
 
     http://debsvc.local:9721/yachen/mcp
-    http://debsvc.local:9721/wife/mcp
+    http://debsvc.local:9721/user2/mcp
 
 Also serves `GET /health`. For a same-box stdio agent use `yacmemo-mcp`.
 """

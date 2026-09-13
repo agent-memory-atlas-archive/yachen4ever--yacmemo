@@ -43,5 +43,5 @@ id = "yachen"
 root = "/srv/yacmemo/yachen/memory"
 
 [[users]]
-id = "wife"
-root = "/srv/yacmemo/wife/memory"
+id = "user2"
+root = "/srv/yacmemo/user2/memory"

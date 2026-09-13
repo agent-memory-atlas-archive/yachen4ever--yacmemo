@@ -55,7 +55,7 @@ curl http://127.0.0.1:9721/health     # → {"status":"ok","users":[...]}
 claude mcp add --transport http yacmemo http://debsvc.local:9721/yachen/mcp
 ```
 
-Cursor / Claude Desktop 在 mcp.json 里加 `"yacmemo": {"url": "..."}`；自研 runtime 用任意 MCP 客户端库连这个 URL。换路径 = 换用户（`/wife/mcp`）。
+Cursor / Claude Desktop 在 mcp.json 里加 `"yacmemo": {"url": "..."}`；自研 runtime 用任意 MCP 客户端库连这个 URL。换路径 = 换用户（`/user2/mcp`）。
 
 ### 4. 贴约定块
 
@@ -166,11 +166,11 @@ memory 目录就是普通 markdown，你可以完全绕开 agent：
 
 ```toml
 [[users]]
-id = "wife"
-root = "/srv/yacmemo/wife/memory"
+id = "user2"
+root = "/srv/yacmemo/user2/memory"
 ```
 
-- 老婆的设备上 agent 添加 `http://debsvc.local:9721/wife/mcp`；
+- 用户2的设备上 agent 添加 `http://debsvc.local:9721/user2/mcp`；
 - **隔离是物理的**（不同目录），不是字段过滤——两人可以有同名笔记互不影响，谁也搜不到对方的记忆；
 - 各自的系统提示里贴同一份约定块即可。
 
