@@ -55,6 +55,13 @@ class ServerConfig:
 
 
 @dataclass
+class WebUIConfig:
+    enabled: bool = True
+    admin_token: str = ""           # empty = no auth (local only); set for remote access
+    web_port: int = 9722           # separate port for WebUI (enhancer webhook stays on `port`)
+
+
+@dataclass
 class UserConfig:
     """Per-user configuration. Memory and indexes are fully isolated.
 
@@ -79,6 +86,7 @@ class Config:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     consistency: ConsistencyConfig = field(default_factory=ConsistencyConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    webui: WebUIConfig = field(default_factory=WebUIConfig)
     users: list[UserConfig] = field(default_factory=list)
 
     def get_user(self, user_id: str) -> UserConfig:
@@ -166,5 +174,6 @@ def load_config(path: str | None = None) -> Config:
         schedule=ScheduleConfig(**data.get("schedule", {})),
         consistency=ConsistencyConfig(**data.get("consistency", {})),
         server=ServerConfig(**data.get("server", {})),
+        webui=WebUIConfig(**data.get("webui", {})),
         users=users,
     )

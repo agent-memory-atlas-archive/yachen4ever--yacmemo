@@ -208,6 +208,13 @@ def main():
 
     app = create_app(config)
 
+    # Mount WebUI if enabled
+    if config.webui.enabled:
+        from yacmemo.webui.app import create_webui_app
+        webui_app = create_webui_app(config)
+        app.mount("/admin", webui_app)
+        logger.info("WebUI mounted at /admin (port %d)", config.server.port)
+
     scheduler = BackgroundScheduler()
 
     def _parse_cron(cron_str: str) -> dict:

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}登录 - yacmemo{% endblock %}
+{% block content %}
+<div style="max-width: 400px; margin: 100px auto;">
+    <h1>管理员登录</h1>
+    <form action="/admin/api/login" method="post" style="margin-top: 20px;">
+        <div style="margin-bottom: 12px;">
+            <input type="password" name="token" placeholder="管理员 Token" autofocus style="width: 100%;">
+        </div>
+        <button type="submit" style="width: 100%;">登录</button>
+    </form>
+</div>
+{% endblock %}

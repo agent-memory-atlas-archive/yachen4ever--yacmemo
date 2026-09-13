@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}一致性校验 - {{ user.display_name }}{% endblock %}
+{% block nav_consistency %}active{% endblock %}
+{% block content %}
+<h1>一致性校验 · {{ user.display_name }}</h1>
+
+<h2>待确认矛盾 ({{ pending | length }})</h2>
+{% if pending %}
+<table>
+    <thead>
+        <tr><th>ID</th><th>旧来源</th><th>新来源</th><th>理由</th><th>置信度</th><th>时间</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+        {% for p in pending %}
+        <tr>
+            <td style="font-size: 11px;">{{ p.id[:8] }}</td>
+            <td style="font-size: 11px; color: var(--text-dim)">{{ p.old_source_path }}</td>
+            <td style="font-size: 11px; color: var(--text-dim)">{{ p.new_source_path }}</td>
+            <td>{{ p.reason }}</td>
+            <td>
+                {% if p.confidence >= 0.8 %}
+                <span class="badge badge-green">{{ "%.2f"|format(p.confidence) }}</span>
+                {% else %}
+                <span class="badge badge-yellow">{{ "%.2f"|format(p.confidence or 0) }}</span>
+                {% endif %}
+            </td>
+            <td style="font-size: 11px;">{{ p.checked_at[:10] if p.checked_at else '-' }}</td>
+            <td>
+                <button class="secondary" onclick="resolveConsistency('{{ user.id }}', '{{ p.id[:8] }}', 'confirm')">确认失效</button>
+                <button class="secondary" onclick="resolveConsistency('{{ user.id }}', '{{ p.id[:8] }}', 'dismiss')">忽略</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: var(--text-dim)">无待确认项。</p>
+{% endif %}
+
+<h2>自动失效历史 ({{ auto_logs | length }})</h2>
+{% if auto_logs %}
+<table>
+    <thead>
+        <tr><th>旧来源</th><th>新来源</th><th>理由</th><th>置信度</th><th>时间</th></tr>
+    </thead>
+    <tbody>
+        {% for a in auto_logs %}
+        <tr>
+            <td style="font-size: 11px; color: var(--text-dim)">{{ a.old_source_path }}</td>
+            <td style="font-size: 11px; color: var(--text-dim)">{{ a.new_source_path }}</td>
+            <td>{{ a.reason }}</td>
+            <td>{{ "%.2f"|format(a.confidence or 0) }}</td>
+            <td style="font-size: 11px;">{{ a.checked_at[:10] if a.checked_at else '-' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: var(--text-dim)">无自动失效记录。</p>
+{% endif %}
+
+<h2>已失效实体 ({{ invalidated | length }})</h2>
+{% if invalidated %}
+<table>
+    <thead>
+        <tr><th>名称</th><th>类型</th><th>摘要</th><th>失效时间</th><th>失效原因</th><th>来源</th></tr>
+    </thead>
+    <tbody>
+        {% for i in invalidated %}
+        <tr>
+            <td><strong>{{ i.name }}</strong></td>
+            <td>{{ i.type }}</td>
+            <td>{{ i.summary or '-' }}</td>
+            <td style="font-size: 11px;">{{ i.invalid_at[:10] if i.invalid_at else '-' }}</td>
+            <td style="font-size: 11px; color: var(--text-dim)">{{ i.invalid_reason }}</td>
+            <td style="font-size: 11px; color: var(--text-dim)">{{ i.source_path }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: var(--text-dim)">无已失效实体。</p>
+{% endif %}
+
+<script>
+async function resolveConsistency(userId, logId, action) {
+    if (!confirm(action === 'confirm' ? '确认旧事实失效？' : '忽略此矛盾？')) return;
+    const formData = new FormData();
+    formData.append('action', action);
+    const resp = await fetch(`/admin/api/consistency/${userId}/resolve/${logId}`, { method: 'POST', body: formData });
+    const data = await resp.json();
+    alert(data.message || data.error || JSON.stringify(data));
+    if (data.status === 'ok') location.reload();
+}
+</script>
+{% endblock %}
