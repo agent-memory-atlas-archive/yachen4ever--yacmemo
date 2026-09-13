@@ -44,7 +44,7 @@ uv run yacmemo-server --config config.toml
 curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["user2","yachen"]}
 ```
 
-浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（笔记 / 搜索 / 审计 / 使用记录 / 健康）。
+浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（笔记 / 搜索 / 审计 / 使用记录 / 健康），详见 [docs/08-webui.md](docs/08-webui.md)。
 
 ### 客户端（你的每台电脑、每个 agent）
 
@@ -90,6 +90,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | [04-consistency.md](docs/04-consistency.md) | 三层防线、force 阶梯、指标 |
 | [05-deployment.md](docs/05-deployment.md) | systemd、客户端配置、备份、安全 |
 | [06-evaluation.md](docs/06-evaluation.md) | 检索基线与复测方法 |
+| [08-webui.md](docs/08-webui.md) | WebUI 控制台：页面与 API 参考 |
 
 v1（三层提取架构）冻结在 [`legacy/`](legacy/)，仅作决策记录。
 
