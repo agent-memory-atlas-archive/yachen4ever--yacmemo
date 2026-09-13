@@ -105,10 +105,16 @@ def parse_links(content: str) -> list[str]:
 
 
 def d3_scan(contents: dict[str, str], valid_titles: set[str]) -> list[dict]:
-    """Dangling [[links]]: targets that match no existing note title."""
+    """Dangling [[links]]: targets that match no existing note title.
+
+    Citation-like targets with no letters/CJK (e.g. `[[1,28,28]]`, `[[...]]`)
+    are not note references and are ignored.
+    """
     out = []
     for path, content in contents.items():
         for link in parse_links(content):
+            if not re.search(r"[\u4e00-\u9fffA-Za-z]", link):
+                continue
             if link not in valid_titles:
                 out.append({"path": path, "link": link})
     return out
