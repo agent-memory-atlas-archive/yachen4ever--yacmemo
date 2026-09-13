@@ -43,21 +43,25 @@ auto_invalidate = true
 host = "127.0.0.1"
 port = 9721
 
+# ---- Admin WebUI ----
+[webui]
+enabled = true
+admin_token = ""                 # empty = no auth (local only); set a token for remote access
+web_port = 9722                  # (reserved; WebUI currently mounts at /admin on the main port)
+
 # ---- Users ----
 # Each user has an isolated memory directory and index.
 # LLM/embedding api_key can be overridden per user (empty string = inherit global).
 # Start MCP server with: yacmemo-mcp --user <id>
-#
-# [[users]]
-# id = "yachen"
-# display_name = "yachen"
-# memory_root = "./data/yachen/memory"
-# # llm_api_key = ""        # override global LLM api_key (empty = inherit)
-# # embedding_api_key = ""  # override global embedding api_key (empty = inherit)
+# Memory .md files are stored under each user's memory_root directory.
 
-# [[users]]
-# id = "wife"
-# display_name = "老婆"
-# memory_root = "./data/wife/memory"
-# llm_api_key = "sk-wife-separate-key"
-# # embedding_api_key = "sk-wife-separate-key"
+[[users]]
+id = "yachen"
+display_name = "yachen"
+memory_root = "./data/yachen/memory"
+
+[[users]]
+id = "wife"
+display_name = "老婆"
+memory_root = "./data/wife/memory"
+llm_api_key = "sk-wife-separate-key"
