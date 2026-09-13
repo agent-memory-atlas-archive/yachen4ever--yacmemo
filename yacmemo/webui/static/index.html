@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yacmemo 记忆控制台</title>
+  <link rel="stylesheet" href="/ui/static/style.css">
+  <script src="/ui/static/marked.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">yacmemo <span class="sub">记忆控制台</span></div>
+    <nav id="tabs">
+      <button data-tab="notes" class="active">笔记</button>
+      <button data-tab="search">搜索</button>
+      <button data-tab="audit">审计</button>
+      <button data-tab="usage">使用记录</button>
+      <button data-tab="health">健康</button>
+    </nav>
+    <select id="user-select" title="选择用户"></select>
+  </header>
+
+  <main>
+    <!-- 笔记 -->
+    <section id="tab-notes">
+      <div class="split">
+        <aside class="sidebar">
+          <div class="row">
+            <input id="note-filter" placeholder="过滤文件名…">
+            <button id="btn-new" title="新建笔记">＋</button>
+          </div>
+          <ul id="note-list"></ul>
+        </aside>
+        <div class="note-pane">
+          <div id="note-toolbar" class="row" hidden>
+            <span id="note-path" class="muted"></span>
+            <span class="spacer"></span>
+            <label id="force-wrap" hidden><input type="checkbox" id="force-chk"> 强制(force)</label>
+            <button id="btn-edit">编辑</button>
+            <button id="btn-save" hidden>保存</button>
+            <button id="btn-cancel" hidden>取消</button>
+            <label class="chk"><input type="checkbox" id="chk-render" checked> 渲染</label>
+            <button id="btn-delete">删除</button>
+          </div>
+          <div id="note-empty" class="muted center">← 从左侧选择一篇笔记</div>
+          <div id="note-rendered" class="markdown-body" hidden></div>
+          <textarea id="note-editor" spellcheck="false" hidden></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- 搜索 -->
+    <section id="tab-search" hidden>
+      <div class="row">
+        <input id="search-q" placeholder="关键词或自然语句，如：端口 9721 / 怎么备份的">
+        <select id="search-kind">
+          <option value="hybrid">hybrid</option>
+          <option value="fts">fts</option>
+          <option value="vector">vector</option>
+        </select>
+        <button id="btn-search">搜索</button>
+      </div>
+      <div id="search-results"></div>
+    </section>
+
+    <!-- 审计 -->
+    <section id="tab-audit" hidden>
+      <div class="row">
+        <button id="btn-audit-run">运行审计（会自动修复外部改动/删除）</button>
+        <span id="audit-status" class="muted"></span>
+      </div>
+      <div id="audit-results"></div>
+    </section>
+
+    <!-- 使用记录 -->
+    <section id="tab-usage" hidden>
+      <div class="cards" id="usage-cards"></div>
+      <div class="row">
+        <select id="usage-tool">
+          <option value="">全部工具</option>
+        </select>
+        <span class="spacer"></span>
+        <button id="btn-usage-refresh">刷新</button>
+      </div>
+      <table id="usage-table" class="grid"></table>
+    </section>
+
+    <!-- 健康 -->
+    <section id="tab-health" hidden>
+      <div id="health-view"></div>
+    </section>
+  </main>
+
+  <div id="toast" hidden></div>
+  <script src="/ui/static/app.js"></script>
+</body>
+</html>

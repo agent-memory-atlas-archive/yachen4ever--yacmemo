@@ -293,6 +293,32 @@ class Store:
         self._index_note(rel, title, new_text)
         return {"path": rel, "heading": wanted}
 
+    def save(self, path: str, content: str) -> dict:
+        """Overwrite a note's full content (WebUI editor path). Title follows
+        the first `#` heading; index fully resynced."""
+        rel = self.resolve(path)
+        abs_path = self.root / rel
+        old_title = self._title_of(rel)
+        abs_path.write_text(content, encoding="utf-8")
+        title = self._title_from_content(rel, content) or old_title
+        self._index_note(rel, title, content)
+        return {"path": rel, "title": title}
+
+    def delete_note(self, path: str) -> dict:
+        """User-initiated deletion (WebUI): remove the file and all index rows.
+        The store never deletes on its own initiative — this is an explicit
+        human/agent action, equivalent to deleting the file in Obsidian."""
+        rel = self.resolve(path)
+        abs_path = self.root / rel
+        title = self._title_of(rel)
+        if abs_path.exists():
+            abs_path.unlink()
+        self.db.remove_note(rel)
+        self.db.remove_collisions_involving(rel)
+        if self.vectors:
+            self.vectors.delete_by_path(rel)
+        return {"path": rel, "title": title, "deleted": True}
+
     # ------------------------------------------------------------------ move
 
     def move(self, path: str, new_path: str) -> dict:
@@ -347,6 +373,7 @@ class Store:
 
     def audit(self) -> dict:
         resynced, missing = self._resync_stale_notes()
+        added = self._sync_new_files()
         titles = self.db.all_titles()
         d1 = d1_scan(titles, self.config.guard.title_similarity_threshold)
         self.db.prune_stale_collisions()
@@ -364,7 +391,27 @@ class Store:
                 "dangling_links": dangling,
                 "resynced": resynced,
                 "missing": missing,
+                "added": added,
                 "guard_stats": self.db.guard_stats()}
+
+    def _sync_new_files(self) -> list[str]:
+        """Index .md files that exist on disk but were never ingested
+        (created out-of-band before the server saw them)."""
+        added = []
+        for p in sorted(self.root.rglob("*.md")):
+            rel = p.relative_to(self.root).as_posix()
+            if rel.startswith(".index") or "/.index/" in f"/{rel}":
+                continue
+            if self.db.get_note(rel) is not None:
+                continue
+            try:
+                content = p.read_text(encoding="utf-8")
+                title = self._title_from_content(rel, content)
+                self._index_note(rel, title, content)
+                added.append(rel)
+            except Exception as e:
+                logger.warning("audit: indexing new file %s failed: %s", rel, e)
+        return added
 
     def _resync_stale_notes(self) -> tuple[list[str], list[str]]:
         """Self-healing: reconcile the index with out-of-band file changes.

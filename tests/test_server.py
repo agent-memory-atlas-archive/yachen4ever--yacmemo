@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import socket
-import threading
 
-import pytest
-import uvicorn
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-
-from yacmemo.server import create_app
 
 
 def _free_port() -> int:
@@ -20,50 +15,6 @@ def _free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
-
-
-@pytest.fixture
-def http_server(tmp_path):
-    """Two-user HTTP server (FTS-only: no embedding endpoint configured)."""
-    config_file = tmp_path / "config.toml"
-    config_file.write_text(
-        f"""
-[embedding]
-base_url = ""
-model = ""
-
-[[users]]
-id = "alice"
-root = "{(tmp_path / "alice").as_posix()}"
-
-[[users]]
-id = "bob"
-root = "{(tmp_path / "bob").as_posix()}"
-""",
-        encoding="utf-8",
-    )
-    from yacmemo.config import load_config
-
-    config = load_config(str(config_file))
-    app = create_app(config)
-
-    port = _free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
-                                           log_level="error"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    for _ in range(100):
-        if server.started:
-            break
-        import time
-
-        time.sleep(0.1)
-    assert server.started, "uvicorn did not start"
-
-    yield port
-
-    server.should_exit = True
-    thread.join(timeout=5)
 
 
 async def _roundtrip(port: int):

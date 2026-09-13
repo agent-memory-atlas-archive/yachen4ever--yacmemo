@@ -96,6 +96,18 @@ uv run yacmemo-mcp --root /srv/yacmemo/yachen/memory
 
 工具面与 HTTP 模式完全一致（同一份 `register_tools`）。
 
+### 2.2 WebUI 控制台
+
+服务端自带，浏览器打开 `http://debsvc.local:9721/ui/` 即用（`/` 自动跳转）：
+
+- **笔记**：markdown 渲染浏览、在线编辑/新建/删除（守卫与索引同步生效）；
+- **搜索**：手动验证三通道检索，⚠ 撞车标注可见，点击跳转；
+- **审计**：人工触发的全量审计与撞车裁决（已合并/忽略按钮）；
+- **使用记录**：全部 MCP 工具调用的留痕（时间/用户/工具/摘要/客户端 UA/IP/耗时），落盘在 `[server].data_dir/usage.db`（默认保留最近 2 万条，自动滚动）；
+- **健康**：embedding 状态、各用户笔记数/撞车数/守卫统计、客户端清单、近 14 天调用量。
+
+WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。
+
 ## 三、系统提示约定块
 
 贴进每个会写记忆的 agent 的系统提示（原文见 `01-architecture.md` 第八节）：
@@ -136,6 +148,7 @@ uv run yacmemo-mcp --root /srv/yacmemo/yachen/memory
 
 - [ ] `systemctl status yacmemo` 正常，`/health` 返回两个用户
 - [ ] 笔记本 A（Claude Code）写入 → 手机/另一台（Cursor）能搜到
+- [ ] 浏览器打开 /ui/ ：笔记可浏览编辑、审计可运行、使用记录能看到刚才那次写入
 - [ ] user2 实例与 yachen 实例互不可见（各写同名标题不冲突）
 - [ ] 直接在 memory 目录手动改一个文件 → `memory_audit` 报告"外部修改已重建"
 - [ ] 断开 omlx 写入 → 内容仍在、FTS 可搜；恢复后向量自动补齐

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import socket as _socket
+import threading as _threading
+import time as _time
+
 import pytest
+import uvicorn as _uvicorn
 
 from yacmemo.config import (
     Config,
@@ -10,6 +15,7 @@ from yacmemo.config import (
     GuardConfig,
     MemoryConfig,
     SearchConfig,
+    load_config,
 )
 from yacmemo.index_db import IndexDB
 from yacmemo.search import Searcher
@@ -83,3 +89,59 @@ def store(cfg, db, emb, vectors) -> Store:
 @pytest.fixture
 def searcher(cfg, db, emb, vectors) -> Searcher:
     return Searcher(cfg, db, emb, vectors)
+
+
+# ---- HTTP server fixture (shared by test_server / test_webui) ----
+
+
+def _free_port() -> int:
+    s = _socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+@pytest.fixture
+def http_server(tmp_path):
+    """Two-user HTTP server (FTS-only: no embedding endpoint configured)."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        f"""
+[embedding]
+base_url = ""
+model = ""
+
+[server]
+data_dir = "{(tmp_path / "server-data").as_posix()}"
+
+[[users]]
+id = "alice"
+root = "{(tmp_path / "alice").as_posix()}"
+
+[[users]]
+id = "bob"
+root = "{(tmp_path / "bob").as_posix()}"
+""",
+        encoding="utf-8",
+    )
+    from yacmemo.server import create_app
+
+    config = load_config(str(config_file))
+    app = create_app(config)
+
+    port = _free_port()
+    server = _uvicorn.Server(_uvicorn.Config(app, host="127.0.0.1", port=port,
+                                             log_level="error"))
+    thread = _threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        _time.sleep(0.1)
+    assert server.started, "uvicorn did not start"
+
+    yield port
+
+    server.should_exit = True
+    thread.join(timeout=5)

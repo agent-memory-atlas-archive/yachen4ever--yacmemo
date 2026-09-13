@@ -1,15 +1,14 @@
-"""yacmemo HTTP MCP server: one process, every user, every machine.
+"""yacmemo HTTP MCP server: one process, every user, every machine — plus WebUI.
 
     yacmemo-server --config config.toml
 
-Each user's memory mounts at `/{user_id}/mcp` (streamable HTTP, stateless).
-Any MCP-capable agent on any machine connects with just a URL — nothing to
-install client-side, no per-machine processes:
+- MCP: each user mounts at `/{user_id}/mcp` (streamable HTTP, stateless).
+  Any MCP-capable agent on any machine connects with just a URL.
+- WebUI: `/ui/` — notes browse/edit, search, audit, usage log, health.
+- Health: `GET /health`.
 
-    http://debsvc.local:9721/yachen/mcp
-    http://debsvc.local:9721/user2/mcp
-
-Also serves `GET /health`. For a same-box stdio agent use `yacmemo-mcp`.
+Nothing to install client-side; no per-machine processes.
+For a same-box stdio agent use `yacmemo-mcp`.
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+from pathlib import Path
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
@@ -30,7 +30,9 @@ from yacmemo.index_db import IndexDB
 from yacmemo.search import Searcher
 from yacmemo.store import Store
 from yacmemo.tools import register_tools
+from yacmemo.usage import UsageDB
 from yacmemo.vector import VectorStore
+from yacmemo.webui.app import create_webui_routes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,8 +41,9 @@ logging.basicConfig(
 logger = logging.getLogger("yacmemo.server")
 
 
-def build_user_mcp(config: Config, user: UserEntry) -> FastMCP:
-    """Build one FastMCP instance bound to a single user's memory root."""
+def build_user_mcp(config: Config, user: UserEntry, usage: UsageDB | None
+                   ) -> tuple[FastMCP, dict]:
+    """Build one FastMCP instance + its context dict for a single user root."""
     mcp = FastMCP(
         f"yacmemo-{user.id}",
         stateless_http=True,  # no session affinity — any client, any proxy
@@ -48,7 +51,8 @@ def build_user_mcp(config: Config, user: UserEntry) -> FastMCP:
         port=config.server.port,
     )
 
-    db = IndexDB(str(config.user_root_abs(user) / ".index" / "index.db"))
+    root = config.user_root_abs(user)
+    db = IndexDB(str(root / ".index" / "index.db"))
     emb = None
     vectors = None
     if config.embedding.base_url and config.embedding.model:
@@ -57,19 +61,28 @@ def build_user_mcp(config: Config, user: UserEntry) -> FastMCP:
             model=config.embedding.model, dimensions=config.embedding.dimensions,
             timeout=config.embedding.timeout,
         )
-        vectors = VectorStore(str(config.user_root_abs(user) / ".index" / "lancedb"),
+        vectors = VectorStore(str(root / ".index" / "lancedb"),
                               config.embedding.dimensions)
     else:
         logger.warning("[%s] Embedding endpoint not configured — FTS-only.", user.id)
 
-    store = Store(config, db, emb, vectors, root=config.user_root_abs(user))
+    store = Store(config, db, emb, vectors, root=root)
     searcher = Searcher(config, db, emb, vectors)
-    register_tools(mcp, store, searcher)
-    return mcp
+    register_tools(mcp, store, searcher, usage=usage, user_id=user.id)
+    ctx = {"store": store, "searcher": searcher, "db": db, "usage": usage,
+           "emb": emb, "vectors": vectors}
+    return mcp, ctx
 
 
 def create_app(config: Config) -> Starlette:
-    servers = {u.id: build_user_mcp(config, u) for u in config.users}
+    usage = UsageDB(str(Path(config.server.data_dir) / "usage.db"))
+
+    servers: dict[str, FastMCP] = {}
+    contexts: dict[str, dict] = {}
+    for u in config.users:
+        mcp, ctx = build_user_mcp(config, u, usage)
+        servers[u.id] = mcp
+        contexts[u.id] = ctx
     if not servers:
         raise SystemExit("config.toml 未定义任何 [[users]] — HTTP 服务至少需要一个用户")
 
@@ -85,16 +98,22 @@ def create_app(config: Config) -> Starlette:
                 await stack.enter_async_context(mcp.session_manager.run())
             yield
 
-    routes = [Route("/health", health, methods=["GET"])]
+    # WebUI/API routes go FIRST so /api, /ui can never be shadowed by a
+    # user mount (config additionally reserves those ids).
+    routes = [
+        Route("/health", health, methods=["GET"]),
+        *create_webui_routes(config, contexts),
+    ]
     for uid, mcp in servers.items():
         routes.append(Mount(f"/{uid}", app=mcp.streamable_http_app()))
 
     logger.info("Mounted users: %s", [f"/{uid}/mcp" for uid in servers])
+    logger.info("WebUI at /ui/")
     return Starlette(routes=routes, lifespan=lifespan)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="yacmemo HTTP MCP server")
+    parser = argparse.ArgumentParser(description="yacmemo HTTP MCP server + WebUI")
     parser.add_argument("--config", default=None, help="Path to config.toml")
     args = parser.parse_args()
 

@@ -252,6 +252,14 @@ class IndexDB:
         )
         self.conn.commit()
 
+    def resolve_collision(self, collision_id: str, status: str):
+        """Mark a collision resolved/dismissed (human decision via WebUI/audit)."""
+        if status not in ("open", "resolved", "dismissed"):
+            raise ValueError(f"非法状态: {status}")
+        self.conn.execute("UPDATE collisions SET status=? WHERE id=?",
+                          (status, collision_id))
+        self.conn.commit()
+
     def prune_stale_collisions(self) -> int:
         """Drop open collisions whose notes no longer exist (deleted or never re-found)."""
         rows = self.conn.execute(

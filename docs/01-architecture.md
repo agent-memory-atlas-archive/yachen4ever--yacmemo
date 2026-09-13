@@ -92,6 +92,7 @@ yacmemo-server（debsvc，单进程，streamable HTTP，无状态会话）
   │     ├── index_db.py   SQLite: 元数据/FTS/冲突记录/守卫事件/向量缓存
   │     ├── vector.py     LanceDB: note_vectors + obs_vectors
   │     └── embedding.py  omlx /v1/embeddings（唯一的模型调用）
+  ├── /ui/          → WebUI 控制台（笔记/搜索/审计/使用记录/健康）
   └── GET /health
   │
   ▼

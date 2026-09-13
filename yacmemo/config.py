@@ -48,6 +48,7 @@ class GuardConfig:
 class ServerConfig:
     host: str = "0.0.0.0"  # LAN-exposed so any machine's agent can reach it
     port: int = 9721
+    data_dir: str = "data"  # server-level state (usage log); relative to cwd
 
 
 @dataclass
@@ -55,6 +56,10 @@ class UserEntry:
     """One mounted memory root in the HTTP server; id must be URL-safe."""
     id: str
     root: str
+
+
+# ids that would shadow server routes
+_RESERVED_IDS = {"api", "ui", "health"}
 
 
 @dataclass
@@ -113,6 +118,8 @@ def load_config(path: str | None = None) -> Config:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", uid):
             raise ValueError(
                 f"用户 id 非法（需 [A-Za-z0-9_-]，1-32 位，用作 URL 路径）: {uid!r}")
+        if uid in _RESERVED_IDS:
+            raise ValueError(f"用户 id 不能是保留字: {uid!r}")
         users.append(UserEntry(id=uid, root=str(u.get("root", ""))))
 
     return Config(
@@ -146,6 +153,7 @@ def load_config(path: str | None = None) -> Config:
         server=ServerConfig(
             host=srv.get("host", ServerConfig.host),
             port=srv.get("port", ServerConfig.port),
+            data_dir=srv.get("data_dir", ServerConfig.data_dir),
         ),
         users=users,
     )

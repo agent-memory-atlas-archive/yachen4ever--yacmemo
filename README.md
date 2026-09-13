@@ -9,6 +9,7 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
 - **markdown 是唯一真相**——笔记就是你服务器上的普通文件：人可读、可 git、可 Obsidian。SQLite + LanceDB 只是派生索引，删掉随时可重建。
 - **一个服务，所有设备**——唯一的服务进程跑在数据所在的机器上（streamable HTTP）。Claude Code、Codex、Cursor、自研 runtime……任何 MCP 客户端只需添加一个 URL，客户端零安装、零进程。
 - **记忆子系统里没有生成式 LLM**——唯一的模型调用是 0.6B 的 embedding（~50ms）。结构靠约定产生，一致性靠确定性 API 守卫强制，模糊判断交给你的主模型在读取时完成。
+- **WebUI 控制台**——浏览器打开 `/ui/`：笔记浏览/编辑（markdown 渲染）、在线搜索、人工审计裁决、调用留痕、健康总览；
 - **一致性是被强制的，不是被希望的**——`memory_write` 拒绝近似重复标题，`memory_edit` 强制锚点唯一，矛盾在检索结果里带 ⚠ 标注并存呈现，系统永不静默删除或隐藏任何记忆。
 
 ## 架构
@@ -42,6 +43,8 @@ cp config.example.toml config.toml   # 填 embedding 端点与各用户 root
 uv run yacmemo-server --config config.toml
 curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["user2","yachen"]}
 ```
+
+浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（笔记 / 搜索 / 审计 / 使用记录 / 健康）。
 
 ### 客户端（你的每台电脑、每个 agent）
 
