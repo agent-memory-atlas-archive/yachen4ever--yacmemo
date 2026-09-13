@@ -1,6 +1,7 @@
 # yacmemo example configuration
 # Copy to config.toml and edit values for your environment.
 
+# ---- Global LLM defaults (shared by all users unless overridden) ----
 [llm]
 base_url = "http://localhost:11234/v1"
 api_key = "sk-your-key"
@@ -12,6 +13,7 @@ extract_timeout = 60
 consistency_timeout = 30
 response_format = "json_object"  # mlx-serve supports this for pure JSON output
 
+# ---- Global embedding defaults ----
 [embedding]
 base_url = "http://localhost:11235/v1"
 api_key = "sk-your-key"
@@ -19,23 +21,43 @@ model = "your-embedding-model"
 dimensions = 1024
 timeout = 30
 
+# ---- Storage defaults (used when user doesn't override) ----
 [storage]
-# memory_root can be absolute or relative to the working directory.
-# All .md files live here; split directories are created alongside originals.
-memory_root = "./memory"
 sqlite_path = ".index/memory.db"
 lancedb_path = ".index/lancedb/"
 
+# ---- Scheduler ----
 [schedule]
 # Cron format: minute hour day month day-of-week
 extract_cron = "0 */6 * * *"      # every 6 hours
 consistency_cron = "0 3 * * *"    # daily at 03:00
 
+# ---- Consistency checking ----
 [consistency]
 similarity_threshold = 0.85       # LanceDB cosine distance threshold for candidates
 confidence_threshold = 0.8        # LLM confidence above this = auto-invalidate
 auto_invalidate = true
 
+# ---- Webhook server ----
 [server]
 host = "127.0.0.1"
 port = 9721
+
+# ---- Users ----
+# Each user has an isolated memory directory and index.
+# LLM/embedding api_key can be overridden per user (empty string = inherit global).
+# Start MCP server with: yacmemo-mcp --user <id>
+#
+# [[users]]
+# id = "yachen"
+# display_name = "yachen"
+# memory_root = "./data/yachen/memory"
+# # llm_api_key = ""        # override global LLM api_key (empty = inherit)
+# # embedding_api_key = ""  # override global embedding api_key (empty = inherit)
+
+# [[users]]
+# id = "wife"
+# display_name = "老婆"
+# memory_root = "./data/wife/memory"
+# llm_api_key = "sk-wife-separate-key"
+# # embedding_api_key = "sk-wife-separate-key"
