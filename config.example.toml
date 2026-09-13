@@ -1,0 +1,41 @@
+# yacmemo example configuration
+# Copy to config.toml and edit values for your environment.
+
+[llm]
+base_url = "http://localhost:11234/v1"
+api_key = "sk-your-key"
+model = "your-model-name"
+enable_thinking = false          # Ling-3.0-tiny: top-level enable_thinking=false works
+extract_max_tokens = 2048
+consistency_max_tokens = 512
+extract_timeout = 60
+consistency_timeout = 30
+response_format = "json_object"  # mlx-serve supports this for pure JSON output
+
+[embedding]
+base_url = "http://localhost:11235/v1"
+api_key = "sk-your-key"
+model = "your-embedding-model"
+dimensions = 1024
+timeout = 30
+
+[storage]
+# memory_root can be absolute or relative to the working directory.
+# All .md files live here; split directories are created alongside originals.
+memory_root = "./memory"
+sqlite_path = ".index/memory.db"
+lancedb_path = ".index/lancedb/"
+
+[schedule]
+# Cron format: minute hour day month day-of-week
+extract_cron = "0 */6 * * *"      # every 6 hours
+consistency_cron = "0 3 * * *"    # daily at 03:00
+
+[consistency]
+similarity_threshold = 0.85       # LanceDB cosine distance threshold for candidates
+confidence_threshold = 0.8        # LLM confidence above this = auto-invalidate
+auto_invalidate = true
+
+[server]
+host = "127.0.0.1"
+port = 9721

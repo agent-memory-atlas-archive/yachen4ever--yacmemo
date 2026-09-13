@@ -1,0 +1,20 @@
+# yacmemo
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+.uv-cache/
+
+# Data (generated at runtime)
+.index/
+*.db
+*.db-wal
+*.db-shm
+
+# Config with secrets (copy config.example.toml)
+config.toml
+
+# OS
+.DS_Store
+Thumbs.db
