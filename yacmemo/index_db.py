@@ -7,16 +7,19 @@ Tables:
 - guard_events: write-guard refusals and force bypasses — the violation-rate metric source
 - vec_cache:    content-hash keyed embedding cache (survives note churn)
 
-Schema deviation from docs/06: `guard_events` was added beyond the 4 documented tables
-to make force-usage countable (P4 metric). Doc updated in P2 polish.
+Thread safety: the HTTP server runs sync MCP tools in a threadpool, so every
+public method takes the instance lock (RLock — reentrant, methods call each
+other). The connection is shared across threads with check_same_thread=False.
 """
 
 from __future__ import annotations
 
+import functools
 import os
 import sqlite3
+import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS notes (
@@ -52,6 +55,17 @@ CREATE TABLE IF NOT EXISTS vec_cache (
 );
 """
 
+# Methods that must not interleave across threads (everything touching conn).
+_LOCKED_METHODS = (
+    "upsert_note", "remove_note", "get_note", "get_note_by_title", "all_titles",
+    "list_notes", "move_note", "clear_all",
+    "fts_replace", "fts_remove", "fts_move", "fts_search",
+    "add_guard_event", "guard_stats", "count_forced_since",
+    "add_collision", "collisions_for", "list_collisions",
+    "remove_collisions_involving", "prune_stale_collisions",
+    "get_cached_vector", "put_cached_vector", "close",
+)
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -68,11 +82,20 @@ class IndexDB:
         parent = os.path.dirname(db_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        self.conn = sqlite3.connect(db_path)
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
+        for name in _LOCKED_METHODS:
+            fn = getattr(self, name)
+            wrapped = lambda *a, _fn=fn, **kw: self._call(_fn, *a, **kw)  # noqa: E731
+            setattr(self, name, functools.wraps(fn)(wrapped))
+
+    def _call(self, fn, *args, **kwargs):
+        with self._lock:
+            return fn(*args, **kwargs)
 
     # ---- notes ----
 
@@ -186,8 +209,6 @@ class IndexDB:
 
     def count_forced_since(self, hours: int = 24) -> int:
         """Forced bypasses within a rolling window (force-confirmation ladder)."""
-        from datetime import timedelta
-
         cutoff = (datetime.now(UTC) - timedelta(hours=hours)).isoformat(
             timespec="seconds")
         row = self.conn.execute(

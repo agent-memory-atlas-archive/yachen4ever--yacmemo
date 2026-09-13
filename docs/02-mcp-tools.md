@@ -1,0 +1,147 @@
+# MCP 工具规格（8 个）
+
+> 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。
+> 所有工具返回人类可读文本；错误以中文消息直接返回（不抛协议错误），agent 可读可自纠。
+
+## 总则
+
+- **路径语义**：所有 `path` 参数接受相对 memory_root 的路径或笔记标题（标题精确匹配，见 `memory_read` 的解析顺序）。
+- **同步索引**：所有写工具在返回成功前完成文件写入 → hash → embedding → FTS/向量/冲突表更新，单次典型开销 < 300ms。返回成功即索引可用。
+- **失败语义**：文件永远是第一位。embedding 失败时内容照常写入、FTS 照常更新，仅向量/D2 缺失（下次写入或 `memory_audit` 自愈补齐）。
+- **守卫拒绝是正常返回**（不是错误）：agent 应读拒绝消息并改用建议的工具。
+
+## 1. memory_search
+
+```
+memory_search(query: str, limit: int = 10, kind: str = "hybrid") -> str
+```
+
+双通道检索 + Reciprocal Rank Fusion（k=60，只用名次不用分值）：
+
+| 通道 | 机制 | 擅长 |
+|---|---|---|
+| fts | SQLite FTS5 trigram，BM25 排序 | 关键词式查询（子串字面匹配，token ≥ 3 字符） |
+| vector | Qwen3-Embedding 最近笔记（cosine/L2） | 自然语句、同义改写 |
+
+- `kind="fts"` / `"vector"` 强制单通道（评测用）；默认 hybrid。
+- **查询措辞建议**：给 FTS 通道喂关键词（"端口 9721"、"restic 备份"），自然语句交给向量通道。混合查询（"yacmemo 端口"）两通道同时工作。
+
+返回格式：
+
+```
+1. yacmemo部署配置 (score 0.0316, fts+vector)
+   path: projects/yacmemo部署配置.md
+   ⚠ 与 [[yacmemo部署记录0910]] 疑似重复（score 0.91）— 建议读两篇后用 memory_edit 合并。对方内容: 服务端口为 8080
+```
+
+**遇到 ⚠ 标注的处置约定**：先 `memory_read` 两篇 → `memory_edit` 合并 → 再回答用户。合并后冲突对自动消失（内容 hash 变化触发重算）。
+
+## 2. memory_read
+
+```
+memory_read(path_or_title: str) -> str
+```
+
+解析顺序：① 相对路径精确存在 → ② 笔记标题精确匹配 → ③ 补 `.md` 后缀再试路径。
+
+返回 = 标题头 + 正文 + `## 相关笔记`：
+
+- `[[wiki-link]]` 目标存在的：列出标题 + 对方首条 observation（`via: link`）；
+- 目标不存在的：标注"目标不存在"（agent 可顺手创建或清理）；
+- 语义近邻 top-2（`via: vector`，需要 embedding 端点）。
+
+## 3. memory_write
+
+```
+memory_write(title: str, content: str, force: bool = False,
+             force_confirm: bool = False) -> str
+```
+
+新建笔记。`title` 可含目录前缀（`"projects/foo"` → `projects/foo.md`），目录只是归档，**笔记的标题是去掉目录后的主题名**。文件名对非法字符（`\ / : * ? " < > |`）做替换清洗。
+
+**近重名守卫**：归一化（小写、去标点空白、剥离日期串/`-2`/`(新)`/`更新`/`v3` 等后缀）后与所有既有标题做模糊比对，相似度 ≥ `title_similarity_threshold`（默认 0.85）即拒绝：
+
+```
+已存在近似标题笔记，拒绝新建：
+  - [[yacmemo部署配置]] (projects/yacmemo部署配置.md, 相似度 0.93)
+更新内容请用 memory_edit / memory_edit_section；确属新主题请 memory_write(force=true)。
+```
+
+**force 两级确认**（24 小时滚动窗口内 forced 事件 ≥ `force_confirm_threshold`，默认 3）：
+
+- 裸 `force=true` 被拒，返回"需要人工确认"并列出候选笔记；
+- 确认确属新主题后，`force=true, force_confirm=true` 放行；
+- 全程记入 `guard_events`——refused / forced 次数即违约率指标。
+
+**journal 豁免**：`journal/` 目录下的写入不做重名拦截（时间线流水天然按日期命名）。
+
+## 4. memory_edit
+
+```
+memory_edit(path: str, old_string: str, new_string: str) -> str
+```
+
+唯一文本锚点替换（与 Claude Code 的 Edit 语义一致）：
+
+- `old_string` 未找到 → 拒绝，提示先 `memory_read`；
+- 命中多处 → 拒绝并列出近似行号，要求扩展锚点上下文；
+- 恰好一处 → 替换、写盘、全量重索引该笔记（FTS/向量/冲突重算）。
+
+**这是更新事实的正确方式**——事实变更永远就地编辑，不新建笔记。
+
+## 5. memory_edit_section
+
+```
+memory_edit_section(path: str, heading: str, new_content: str) -> str
+```
+
+按 `##` 及更深层标题替换整个小节：保留标题行，替换体到下一个同级/更高级标题或文末。
+
+- 标题不存在 → 拒绝并列出**现有全部小节名**；
+- 同名标题多处命中 → 拒绝并列出行号；
+- 一级标题（`# 笔记标题`）不可用——那是笔记本身，请用 `memory_edit`。
+
+适合重写一整段（如"## 部署步骤"全换），比多次 `memory_edit` 高效。
+
+## 6. memory_move
+
+```
+memory_move(path: str, new_path: str) -> str
+```
+
+移动文件到新相对路径（自动补 `.md`）。notes/FTS/向量全部随路径更新（embedding 走 vec_cache，零 API 调用）。`[[链接]]` 按标题解析，移动不改标题，因此**不需要改写链接**。目标已存在则拒绝。
+
+## 7. memory_audit
+
+```
+memory_audit() -> str
+```
+
+全量一致性审计，兼**自愈**：
+
+1. **外部修改自愈**：磁盘 hash ≠ `notes.content_hash` 的笔记自动重建索引（外部编辑在 Obsidian/vim 里做的也能对齐）；
+2. **外部删除清理**：文件已消失的笔记清理全部索引并列入报告；
+3. D1 标题重复全量两两扫描；
+4. open 状态的 D2 语义撞车清单（含双方文本与分数）；
+5. D3 悬空 `[[链接]]`；
+6. 守卫统计（refused / forced 次数）。
+
+修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。
+
+## 8. memory_list
+
+```
+memory_list(path: str = "", sort: str = "name") -> str
+```
+
+列出 memory_root（或子目录）下全部 `.md`，`sort="mtime"` 时最近变更优先。`.index/` 永不列出。
+
+## Agent 选择工具的决策树
+
+```
+要记一个新主题？        → memory_search 查重 → memory_write（被拒就转 edit）
+要更新已有事实？        → memory_edit（锚点唯一）/ memory_edit_section（整段重写）
+要找"某件事记在哪"？    → memory_search（关键词式 query）
+要梳理一个主题全貌？    → memory_read（看相关笔记链路）
+定期体检？              → memory_audit
+```

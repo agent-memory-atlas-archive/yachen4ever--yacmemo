@@ -1,8 +1,7 @@
 # yacmemo 精简记忆层设计（v2 终形态）
 
-> 2026-09-13
-> 状态：设计定稿，待实现
-> 本文档描述项目的目标架构。01–05 号文档描述的三层架构（extractor/enhancer/一致性 LLM）**已决定退役**，保留作为决策过程记录，勿按其实现。
+> 2026-09-13 设计定稿；2026-09-14 更新（HTTP 多机部署模型，P0–P2 已实现）
+> v1 三层架构的设计文档在 `legacy/docs/`，保留作为决策记录。本目录其余文档为 v2 现行技术文档：02 工具规格、03 存储与检索、04 一致性、05 部署、06 评测。
 
 ---
 
@@ -79,24 +78,32 @@ SQLite（FTS/元数据/冲突记录）与 LanceDB（向量）全部是派生索�
 ## 三、架构总览
 
 ```
-TeleAgent (MCP client，每用户一个实例)
+你的电脑们（任意 agent：Claude Code / Codex / Cursor / 自研 runtime…）
+  │  各端只添加一个远程 MCP URL，客户端零安装、零进程
+  │      http://debsvc.local:9721/yachen/mcp
+  │      http://debsvc.local:9721/wife/mcp
+  ▼
+yacmemo-server（debsvc，单进程，streamable HTTP，无状态会话）
+  ├── /yachen/mcp → Store(root=/srv/yacmemo/yachen/memory)
+  ├── /wife/mcp   → Store(root=/srv/yacmemo/wife/memory)
+  │     ├── store.py      markdown CRUD + 写路径守卫 + 同步索引
+  │     ├── search.py     FTS5(trigram) + 向量 RRF 融合
+  │     ├── detectors.py  D1/D3 确定性检测器
+  │     ├── index_db.py   SQLite: 元数据/FTS/冲突记录/守卫事件/向量缓存
+  │     ├── vector.py     LanceDB: note_vectors + obs_vectors
+  │     └── embedding.py  omlx /v1/embeddings（唯一的模型调用）
+  └── GET /health
   │
   ▼
-yacmemo MCP server (stdio，单进程)
-  ├── store.py      markdown CRUD + 写路径守卫 + 链接改写
-  ├── search.py     FTS5(trigram) + 向量 RRF 融合
-  ├── detectors.py  D1/D2/D3 确定性检测器
-  ├── index_db.py   SQLite: 元数据/FTS/冲突记录/向量缓存
-  ├── vector.py     LanceDB: note_vectors + obs_vectors（复用）
-  └── embedding.py  omlx /v1/embeddings（复用）
-  │
-  ▼
-磁盘 (source of truth)
-  ~/memory/yachen/   ← git 仓库（ wife 对称独立 ）
-  ~/memory/yachen/.index/  ← SQLite + LanceDB（可随时删除重建，不进 git）
+磁盘 (source of truth，单点存放)
+  /srv/yacmemo/yachen/memory/  ← git 仓库
+  /srv/yacmemo/wife/memory/    ← git 仓库
+  各 memory/.index/            ← 可随时删除重建，不进 git
 ```
 
 数据模型从第一版的 nodes/edges/events 三表塌缩为 **notes + observations** 两级：笔记是主体，observation（若 agent 使用语法）是笔记内的事实行，用于更细粒度的检索与撞车检测。没有实体表、没有边表、没有事件表。
+
+两个用户的内存完全独立：各自的 Store 在构造时绑定各自 root（边界固定，不存在懒解析导致的串目录）；HTTP 传输用无状态会话，任意 MCP 客户端无需会话亲和。8 个工具在 `yacmemo/tools.py` 注册一次，stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`）两个入口共享同一工具面。
 
 ---
 
@@ -268,7 +275,7 @@ memory_write / memory_edit 完成 embedding 后：
 
 ---
 
-## 八、Agent 使用约定（贴入 TeleAgent 系统提示）
+## 八、Agent 使用约定（贴入任意 agent 的系统提示）
 
 ```text
 # 记忆使用约定（yacmemo）
@@ -292,11 +299,11 @@ memory_write / memory_edit 完成 embedding 后：
 
 ## 九、部署与多用户
 
-- 运行位置：debsvc（与 TeleAgent 同机，stdio 传输）；
-- 每用户一个 MCP 实例：`yacmemo-mcp --root ~/memory/yachen`，wife 对称，**目录即边界**，无 user_id 纪律需求；
+**一个服务，所有机器，所有 agent**。yacmemo-server 跑在数据所在的 debsvc 上，以 streamable HTTP 暴露 MCP；任何电脑上的任何 MCP 客户端只需添加 URL（`http://debsvc.local:9721/{user}/mcp`），客户端零安装、零进程。用户隔离 = URL 路径 = 磁盘目录，构造时固定边界。部署细节（systemd、各客户端配置示例、备份）见 `05-deployment.md`。
+
 - git：每个 memory_root 一个仓库，`.index/` 入 `.gitignore`；事实历史由 git 承载；
-- 可选：Syncthing 同步到 Mac 用 Obsidian 浏览；
-- 依赖：`mcp`（FastMCP，锁 `<2`，2.x 的 MCPServer 迁移列为 P2 评估项）、`lancedb`、`pyarrow`、`numpy`、`rapidfuzz`、`httpx`、可选 `jieba`。无常驻服务、无容器、无图数据库。
+- 可选：Syncthing 同步 memory 目录到 Mac 用 Obsidian 浏览；
+- 依赖：`mcp`（FastMCP，锁 `<2`，2.x 的 MCPServer 迁移列为评估项）、`lancedb`、`pyarrow`、`numpy`、`rapidfuzz`、`httpx`、可选 `jieba`。服务端单进程；客户端零依赖。
 
 配置示例：
 
@@ -341,14 +348,14 @@ obs_topk = 5
 
 ## 十一、分阶段落地
 
-> **实现状态（2026-09-14）**：P0–P2 已实现并提交（49 个测试通过；三通道基线 fts 6/10 → hybrid 9/10）。P3（约定块进 TeleAgent + wife 实例部署）与 P4（两周实测）待执行。
+> **实现状态（2026-09-14）**：P0–P2 已实现并提交（51 个测试通过；三通道基线 fts 6/10 → hybrid 9/10；HTTP 多用户回环测试通过）。P3（部署 + 约定块进 agent 系统提示）与 P4（两周实测）待执行。
 
 | 阶段 | 内容 | 工作量 | 验收标准 |
 |---|---|---|---|
 | P0 | 仓库转型（旧模块移出运行路径）、骨架、**trigram 中文实测** | 0.5 天 | 用 10 条真实中文查询记录 fts/vector/hybrid 三通道召回基线 |
 | P1 | `search/read/write/edit` + 同步索引 | 1–2 天 | 写入 < 300ms；评测集上 hybrid ≥ 单通道最优 |
 | P2 | 守卫完善（force 两级确认）、`edit_section/move`、D1–D3、`audit` 自愈、碰撞标注 | 1 天 | 人造 5 组重复/矛盾样本全被拦截或标出，误报 ≤ 2 |
-| P3 | 约定块进 TeleAgent、wife 实例 | 0.5 天 | 双用户隔离运行一天无串数据 |
+| P3 | 部署 yacmemo-server + 约定块进各 agent 系统提示 | 0.5 天 | 多机多客户端隔离运行一天无串数据 |
 | P4 | 两周实测 | — | 7.4 全部指标产出；据数据调阈值 |
 
 每阶段可独立回滚：P1 完成后系统已可用（无守卫），守卫是纯增量。

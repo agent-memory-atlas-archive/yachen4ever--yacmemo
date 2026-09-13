@@ -60,7 +60,7 @@ omlx 提供 OpenAI 兼容 embedding 服务。
 - [主机] Apple M2 Ultra，192GB 统一内存
 - [配置] mlx-serve 端口 11234，跑 Qwen3.8 Flash Next
 """,
-    "teleagent架构": """# teleagent架构
+    "个人agent方案": """# 个人agent方案
 
 自研 agent runtime，通过 MCP 接入工具。
 
@@ -109,7 +109,7 @@ QUERIES: list[tuple[str, str]] = [
     ("怎么备份数据", "备份策略"),                      # natural phrasing
     ("VLAN 划分", "家庭网络拓扑"),                     # keyword-style
     ("M2 Ultra 内存多大", "m2ultra推理服务器"),        # natural phrasing
-    ("TeleAgent 记忆接入", "teleagent架构"),           # mixed
+    ("agent 记忆接入", "个人agent方案"),             # mixed
     ("Qwen3 embedding 部署", "Qwen3-Embedding部署"),   # mixed
 ]
 

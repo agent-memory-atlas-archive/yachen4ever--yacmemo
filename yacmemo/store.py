@@ -13,9 +13,11 @@ Design invariants (docs/06-lean-architecture.md):
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 
 from .config import Config
@@ -54,15 +56,34 @@ class AnchorError(StoreError):
 
 
 class Store:
+    # Methods serialized under the instance lock: the HTTP server runs tools
+    # in a threadpool, and mutating ops must not interleave.
+    _MUTATING = ("write", "edit", "edit_section", "move", "read", "audit", "reindex")
+
     def __init__(self, config: Config, db: IndexDB,
                  emb: EmbeddingClient | None = None,
-                 vectors: VectorStore | None = None):
+                 vectors: VectorStore | None = None,
+                 root: str | Path | None = None):
         self.config = config
         self.db = db
         self.emb = emb
         self.vectors = vectors
-        self.root = config.root_abs
+        # Explicit root for multi-user servers; falls back to the single-user
+        # [memory].root. Never derived lazily — the boundary must be fixed at
+        # construction time or two users could share one directory.
+        self.root = (Path(root).expanduser().resolve() if root
+                     else config.root_abs)
         self.root.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        for name in self._MUTATING:
+            fn = getattr(self, name)
+            setattr(self, name,
+                    functools.wraps(fn)(
+                        lambda *a, _fn=fn, **kw: self._locked_call(_fn, *a, **kw)))
+
+    def _locked_call(self, fn, *args, **kwargs):
+        with self._lock:
+            return fn(*args, **kwargs)
 
     # ------------------------------------------------------------------ paths
 

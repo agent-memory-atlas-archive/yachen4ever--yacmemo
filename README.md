@@ -1,95 +1,95 @@
 # yacmemo
 
-Personal memory layer with three-tier extraction and consistency checking.
+Personal memory layer with API-enforced consistency — markdown-first, local-only, agent-agnostic.
 
-## What it does
+## What it is
 
-yacmemo gives your AI agent a persistent, searchable, self-consistent memory:
+yacmemo gives **any AI agent on any of your machines** one shared, self-consistent long-term memory:
 
-- **Layer 1** — Agent writes `.md` work logs (free format, no frontmatter required)
-- **Layer 2** — A local LLM reads those `.md` files, splits them into independent topics, and extracts entities + events with provenance pointers back to the source
-- **Layer 3** — The LLM scans for contradictions between old and new facts, auto-invalidates stale ones (high confidence) or flags for human review (low confidence)
-
-All data stays on your machine. The `.md` files are the source of truth; SQLite + LanceDB are derived indexes that can be rebuilt at any time.
+- **Markdown is the source of truth** — notes are plain files on your server: human-readable, git-versioned, Obsidian-compatible. The SQLite + LanceDB indexes are derived and rebuildable at any time.
+- **One service, every device** — a single MCP server runs where the data lives (streamable HTTP). Claude Code, Codex, Cursor, your own runtime — any MCP client just adds a URL. Nothing to install client-side.
+- **Zero generative LLM in the loop** — the only model call is a 0.6B embedding. Structure comes from conventions, consistency comes from deterministic API guards, judgment comes from your main model at read time.
+- **Consistency is enforced, not hoped for** — `memory_write` refuses near-duplicate titles, `memory_edit` requires unique anchors, collisions are flagged at search time and never silently hidden.
 
 ## Architecture
 
 ```
-memory/                        ← your .md files (Layer 1)
-├── projects/
-│   ├── 01-data-portal.md      ← Agent writes this
-│   └── 01-data-portal/        ← LLM creates split files (Layer 2)
-│       ├── feat-a.md
-│       └── fix-b.md
-.index/
-├── memory.db                  ← SQLite (nodes, edges, events, consistency_log)
-└── lancedb/                   ← vector index (entity + event embeddings)
+your machines (any MCP agent)
+   │  add one URL, nothing to install:
+   │  http://debsvc.local:9721/yachen/mcp
+   ▼
+yacmemo-server (single process, streamable HTTP, stateless sessions)
+   ├── /yachen/mcp → Store(root=.../yachen/memory)
+   └── /wife/mcp   → Store(root=.../wife/memory)
+         store.py      CRUD + write guards + sync indexing
+         search.py     FTS5 trigram + vector, RRF fusion
+         detectors.py  deterministic D1/D3 checks
+         index_db.py   SQLite: metadata/FTS/collisions/guard events
+         vector.py     LanceDB: note + observation vectors
+         embedding.py  the only model call (0.6B, ~50ms)
+   ▼
+markdown files (source of truth, git-versioned)
 ```
 
 ## Quick start
 
-### Prerequisites
-
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) for dependency management
-- A local LLM server with OpenAI-compatible API (tested with mlx-serve + Ling-3.0-tiny-MLX-4bit)
-- An embedding server with OpenAI-compatible API (tested with omlx + Qwen3-Embedding-0.6B)
-- `ripgrep` installed on the system
-
-### Setup
+### Server (where your data lives)
 
 ```bash
-# Clone and install
 git clone <your-repo> yacmemo && cd yacmemo
 uv sync
-
-# Configure
-cp config.example.toml config.toml
-# Edit config.toml: set LLM/embedding endpoints, memory_root path
-
-# Initialize (first-time extraction of all .md files)
-uv run yacmemo-enhancer --config config.toml --init
-
-# Start the enhancer service (cron + webhook)
-uv run yacmemo-enhancer --config config.toml
-
-# In another terminal, start the MCP server (for your AI agent)
-uv run yacmemo-mcp
+cp config.example.toml config.toml   # set embedding endpoint + user roots
+uv run yacmemo-server --config config.toml
+curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["wife","yachen"]}
 ```
 
-### MCP tools
+### Clients (every machine, every agent)
 
-| Tool | Description |
+```
+http://debsvc.local:9721/yachen/mcp
+http://debsvc.local:9721/wife/mcp
+```
+
+```bash
+# Claude Code
+claude mcp add --transport http yacmemo http://debsvc.local:9721/yachen/mcp
+# Codex CLI
+codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
+```
+
+Same-box agents can use stdio instead: `uv run yacmemo-mcp --root /path/to/memory`.
+
+## MCP tools (8)
+
+| Tool | Purpose |
 |---|---|
-| `memory_search` | Semantic search across entities, events, and edges |
-| `memory_grep` | Regex search through .md files (ripgrep) |
-| `memory_read` | Read a .md file |
-| `memory_write` | Write a .md file (triggers async extraction) |
-| `memory_edit` | Edit a .md file (triggers async extraction) |
-| `memory_list` | List the .md file tree |
-| `memory_history` | View all versions of an entity (including invalidated) |
-| `memory_consistency_status` | List pending contradiction reviews |
-| `memory_consistency_resolve` | Confirm or dismiss a flagged contradiction |
+| `memory_search` | Hybrid retrieval (FTS trigram + vector, RRF); inlines ⚠ duplicate/contradiction warnings |
+| `memory_read` | Full note + related notes (wiki-links + semantic neighbors) |
+| `memory_write` | New note; **refuses near-duplicate titles** (force needs two-step confirmation) |
+| `memory_edit` | In-place update with a **unique** text anchor |
+| `memory_edit_section` | Replace one `##` section |
+| `memory_move` | Move file, indexes follow |
+| `memory_audit` | Self-healing consistency audit (external edits/deletes, D1/D2/D3, guard stats) |
+| `memory_list` | Directory tree / recent changes |
 
-## Configuration
+Full specs: [docs/02-mcp-tools.md](docs/02-mcp-tools.md). Agent usage conventions: [docs/01-architecture.md](docs/01-architecture.md) §8.
 
-See `config.example.toml` for all options. Key settings:
+## Docs
 
-- `storage.memory_root` — directory containing your `.md` files
-- `llm.model` — model name for extraction + consistency checking
-- `llm.enable_thinking` — `false` for speed (recommended for Ling-3.0-tiny)
-- `consistency.auto_invalidate` — `true` to auto-invalidate high-confidence contradictions
+| Doc | Content |
+|---|---|
+| [01-architecture.md](docs/01-architecture.md) | Design, decision record, principles |
+| [02-mcp-tools.md](docs/02-mcp-tools.md) | Tool specifications |
+| [03-storage-and-search.md](docs/03-storage-and-search.md) | File format, index schema, hybrid retrieval, self-healing |
+| [04-consistency.md](docs/04-consistency.md) | Three defense layers, force ladder, metrics |
+| [05-deployment.md](docs/05-deployment.md) | systemd, client configs, backup, security |
+| [06-evaluation.md](docs/06-evaluation.md) | Retrieval baseline & how to rerun |
+
+Legacy v1 (three-tier extraction) is frozen in [`legacy/`](legacy/) — kept as a decision record.
 
 ## Tech stack
 
-| Component | Choice | Why |
-|---|---|---|
-| Language | Python 3.11+ | LLM I/O bound, not CPU bound |
-| LLM | Ling-3.0-tiny-MLX-4bit (7.9B/1.3B activated) | 74% less memory, 3-5x faster than 35B |
-| Embedding | Qwen3-Embedding-0.6B-4bit-DWQ (1024-dim) | Lightweight, effective |
-| Storage | SQLite (WAL) + LanceDB | Zero-ops, rebuildable from .md |
-| MCP | mcp SDK (stdio) | Standard agent interface |
-| Scheduler | APScheduler (cron) | Built-in, no external deps |
+Python 3.11+ · mcp SDK (FastMCP) · SQLite (FTS5 trigram, WAL) · LanceDB · Qwen3-Embedding-0.6B via any OpenAI-compatible endpoint · rapidfuzz. Single service process; no daemons, no queues, no cron, no graph DB, no second LLM.
 
 ## License
 

@@ -45,11 +45,26 @@ class GuardConfig:
 
 
 @dataclass
+class ServerConfig:
+    host: str = "0.0.0.0"  # LAN-exposed so any machine's agent can reach it
+    port: int = 9721
+
+
+@dataclass
+class UserEntry:
+    """One mounted memory root in the HTTP server; id must be URL-safe."""
+    id: str
+    root: str
+
+
+@dataclass
 class Config:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     guard: GuardConfig = field(default_factory=GuardConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
+    users: list[UserEntry] = field(default_factory=list)
 
     @property
     def root_abs(self) -> Path:
@@ -71,9 +86,15 @@ class Config:
     def journal_prefix(self) -> str:
         return self.memory.journal_dir.replace("\\", "/").strip("/") + "/"
 
+    def user_root_abs(self, user: UserEntry) -> Path:
+        """Absolute memory root for an HTTP-server user entry."""
+        return Path(user.root).expanduser().resolve()
+
 
 def load_config(path: str | None = None) -> Config:
     """Load config.toml; every section/key is optional and falls back to defaults."""
+    import re
+
     data: dict = {}
     if path:
         with open(path, "rb") as f:
@@ -83,6 +104,16 @@ def load_config(path: str | None = None) -> Config:
     emb = data.get("embedding", {})
     search = data.get("search", {})
     guard = data.get("guard", {})
+    srv = data.get("server", {})
+    users_raw = data.get("users", [])
+
+    users = []
+    for u in users_raw:
+        uid = str(u.get("id", "")).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", uid):
+            raise ValueError(
+                f"用户 id 非法（需 [A-Za-z0-9_-]，1-32 位，用作 URL 路径）: {uid!r}")
+        users.append(UserEntry(id=uid, root=str(u.get("root", ""))))
 
     return Config(
         memory=MemoryConfig(
@@ -112,4 +143,9 @@ def load_config(path: str | None = None) -> Config:
                 "force_confirm_threshold", GuardConfig.force_confirm_threshold
             ),
         ),
+        server=ServerConfig(
+            host=srv.get("host", ServerConfig.host),
+            port=srv.get("port", ServerConfig.port),
+        ),
+        users=users,
     )

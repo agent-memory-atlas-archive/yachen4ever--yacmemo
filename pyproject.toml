@@ -16,7 +16,8 @@ dependencies = [
 ]
 
 [project.scripts]
-yacmemo-mcp = "yacmemo.mcp_server:main"
+yacmemo-mcp = "yacmemo.mcp_server:main"       # stdio, single user, same-box agents
+yacmemo-server = "yacmemo.server:main"        # HTTP, multi-user, multi-machine agents
 
 [build-system]
 requires = ["hatchling"]

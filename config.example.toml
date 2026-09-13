@@ -3,17 +3,17 @@
 # Everything is optional — missing keys fall back to the defaults shown here.
 
 [memory]
-# This MCP instance's memory root. Override at launch with: yacmemo-mcp --root <dir>
-# One process per user; the directory IS the isolation boundary.
+# Root for `yacmemo-mcp` (single-user stdio mode). Ignored by `yacmemo-server`,
+# which uses the [[users]] roots below.
 root = "memory"
 # Timeline notes live here; exempt from the near-duplicate title guard.
 journal_dir = "journal"
 
 [embedding]
-# OpenAI-compatible /v1/embeddings endpoint (omlx + Qwen3-Embedding-0.6B).
-base_url = "http://localhost:11235/v1"
+# OpenAI-compatible /v1/embeddings endpoint (omlx + Qwen3-Embedding).
+base_url = "http://m2ultra:11235/v1"
 api_key = "sk-your-key"
-model = "your-embedding-model"
+model = "Qwen3-Embedding-0.6B-4bit-DWQ"
 dimensions = 1024
 timeout = 30
 # Leave base_url or model empty to run FTS-only (no vectors, no D2 collision checks).
@@ -26,3 +26,22 @@ fts_seg_fallback = false          # reserved: jieba shadow column if trigram rec
 title_similarity_threshold = 0.85   # memory_write refuses near-duplicate titles above this
 collision_cosine_threshold = 0.86   # D2 observation-collision threshold (cosine)
 obs_topk = 5                        # candidates compared per new observation
+force_confirm_threshold = 3         # forced bypasses / 24h before force also needs force_confirm
+
+[server]
+# HTTP MCP server (`yacmemo-server`). 0.0.0.0 = reachable from any machine on the LAN.
+host = "0.0.0.0"
+port = 9721
+
+# ---- Users (HTTP server) ----
+# Each user mounts at /{id}/mcp on the server port; the root directory IS the
+# isolation boundary. Agents on any machine add e.g.:
+#   http://debsvc.local:9721/yachen/mcp
+
+[[users]]
+id = "yachen"
+root = "/srv/yacmemo/yachen/memory"
+
+[[users]]
+id = "wife"
+root = "/srv/yacmemo/wife/memory"
