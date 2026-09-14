@@ -16,8 +16,10 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import posixpath
 import re
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import Config
@@ -37,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 _ILLEGAL_FILENAME = re.compile(r'[\\/:*?"<>|]')
 _HEADING_RE = re.compile(r"^(#{2,6})\s+(.+?)\s*$")
+TOPICS_FILE = "TOPICS.md"
+# 免注册区：不参与主题注册与游离检测的目录
+FREE_ZONES = ("journal/", "archive/", "curator/")
+_TOPIC_FIELD_RE = re.compile(r"^-\s*(卡|相关|现状|注册):\s*(.*)$")
 
 
 class StoreError(Exception):
@@ -294,11 +300,16 @@ class Store:
         return {"path": rel, "heading": wanted}
 
     def save(self, path: str, content: str) -> dict:
-        """Overwrite a note's full content (WebUI editor path). Title follows
-        the first `#` heading; index fully resynced."""
-        rel = self.resolve(path)
+        """Create-or-overwrite by exact path (WebUI editor, curator reports).
+        Title follows the first `#` heading; index fully resynced."""
+        rel = path.replace("\\", "/").strip("/")
+        if not rel or ".." in rel.split("/"):
+            raise StoreError(f"非法路径: {path}")
+        if not rel.endswith(".md"):
+            rel += ".md"
         abs_path = self.root / rel
-        old_title = self._title_of(rel)
+        old_title = self._title_of(rel) if abs_path.is_file() else None
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(content, encoding="utf-8")
         title = self._title_from_content(rel, content) or old_title
         self._index_note(rel, title, content)
@@ -368,6 +379,126 @@ class Store:
         else:
             entries.sort()
         return [e[0] for e in entries]
+
+    # ------------------------------------------------------------------ topics
+
+    def topics_file(self) -> Path:
+        return self.root / TOPICS_FILE
+
+    def load_topics(self) -> list[dict]:
+        """Parse TOPICS.md registry: [{title, card, related[], status, registered}]."""
+        p = self.topics_file()
+        if not p.is_file():
+            return []
+        topics, cur = [], None
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.startswith("## "):
+                if cur:
+                    topics.append(cur)
+                cur = {"title": line[3:].strip(), "card": "", "related": [],
+                       "status": "", "registered": ""}
+            elif cur is not None:
+                m = _TOPIC_FIELD_RE.match(line)
+                if m:
+                    key, val = m.group(1), m.group(2).strip()
+                    if key == "卡":
+                        cur["card"] = val
+                    elif key == "相关":
+                        cur["related"] = [x.strip().rstrip("/")
+                                          for x in val.split(",") if x.strip()]
+                    elif key == "现状":
+                        cur["status"] = val
+                    elif key == "注册":
+                        cur["registered"] = val
+        if cur:
+            topics.append(cur)
+        return topics
+
+    def topic_register(self, title: str, description: str = "",
+                       related: str = "", card_path: str = "") -> dict:
+        """Register a new topic: append to TOPICS.md and create the topic card.
+
+        Called only on explicit user instruction (约定：用户明确要求时才注册).
+        """
+        title = (title or "").strip()
+        if not title:
+            raise StoreError("主题名不能为空。")
+        if title in {t["title"] for t in self.load_topics()}:
+            raise StoreError(f"主题已存在: {title}（如需更新请直接编辑主题卡）")
+
+        if card_path:
+            card_path = card_path.replace("\\", "/").lstrip("/")
+            if not (self.root / card_path).is_file():
+                raise StoreError(f"指定的主题卡不存在: {card_path}")
+        else:
+            folder = f"topics/{_ILLEGAL_FILENAME.sub('_', title).strip('. ')}"
+            card_path = f"{folder}/主题卡.md"
+            abs_card = self.root / card_path
+            if abs_card.exists():
+                raise StoreError(f"主题卡文件已存在: {card_path}")
+            abs_card.parent.mkdir(parents=True, exist_ok=True)
+            abs_card.write_text(f"# {title}\n\n{description or '（待补充现状）'}\n",
+                                encoding="utf-8")
+
+        from .fs_utils import content_hash as _ch  # noqa: F401 (kept for parity)
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        with open(self.topics_file(), "a", encoding="utf-8") as f:
+            f.write(f"\n## {title}\n- 卡: {card_path}\n- 相关: {related}\n"
+                    f"- 现状: {description}\n- 注册: {now}\n")
+
+        # index the new/updated files so search sees them immediately
+        self._index_note(card_path, title,
+                         (self.root / card_path).read_text(encoding="utf-8"))
+        self._index_note(TOPICS_FILE, "主题记忆注册表",
+                         self.topics_file().read_text(encoding="utf-8"))
+        return {"title": title, "card": card_path, "registered": now}
+
+    def memory_context(self, card_lines: int = 12) -> str:
+        """Cold-start context: registry + topic-card excerpts. Call once per session."""
+        topics = self.load_topics()
+        tf = self.topics_file()
+        if not topics and not tf.is_file():
+            return "（尚无主题记忆——用 topic_register 注册第一个主题）"
+        parts = []
+        if tf.is_file():
+            parts.append(tf.read_text(encoding="utf-8"))
+        cards = []
+        for t in topics:
+            p = self.root / t["card"] if t["card"] else None
+            if t["card"] and p and p.is_file():
+                head = "\n".join(p.read_text(encoding="utf-8").splitlines()[:card_lines])
+                cards.append(f"### {t['title']}（{t['card']}）\n{head}")
+        if cards:
+            parts.append("\n# 主题卡摘要\n" + "\n\n".join(cards))
+        return "\n\n".join(parts)
+
+    def _stray_files(self, topics: list[dict]) -> list[str]:
+        """Markdown files outside any registered topic (and outside free zones)."""
+        covered_files, covered_dirs = set(), set()
+        for t in topics:
+            if t["card"]:
+                covered_files.add(t["card"])
+                d = posixpath.dirname(t["card"])
+                if d:
+                    covered_dirs.add(d)
+            for r in t["related"]:
+                covered_files.add(r)
+                d = posixpath.dirname(r)
+                if d:
+                    covered_dirs.add(d)
+        strays = []
+        for p in sorted(self.root.rglob("*.md")):
+            rel = p.relative_to(self.root).as_posix()
+            if rel == TOPICS_FILE or rel.startswith(FREE_ZONES):
+                continue
+            if "/.index/" in f"/{rel}" or ".git" in p.parts:
+                continue
+            if rel in covered_files:
+                continue
+            if any(rel.startswith(d + "/") for d in covered_dirs):
+                continue
+            strays.append(rel)
+        return strays
 
     # ------------------------------------------------------------------ audit
 

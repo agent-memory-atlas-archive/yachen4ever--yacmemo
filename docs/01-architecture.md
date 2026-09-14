@@ -280,6 +280,8 @@ memory_write / memory_edit 完成 embedding 后：
 
 ```text
 # 记忆使用约定（yacmemo）
+会话开始：
+0. 先调 memory_context 回顾主题体系；需要时用 topic_list 查看主题清单。
 写入前：
 1. 先查后写。写任何记忆前，先用 memory_search 查是否已有同主题笔记。
 2. 已有同主题笔记 → memory_edit / memory_edit_section 增量修改，绝不新建重复笔记。
@@ -292,6 +294,9 @@ memory_write / memory_edit 完成 embedding 后：
 检索时：
 7. memory_search 结果带 ⚠ 标注时，先读两篇，用 memory_edit 合并，然后才回答用户。
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
+主题：
+9. 用户明确要求时（"把 X 加入长期记忆"）用 topic_register 注册新主题；主题现状写入主题卡并就地更新。
+10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
 ```
 
 约定仍会写进提示（第 1、2、4 条减少无效往返），但系统不再**依赖**模型守约——守卫与检测器兜底，这正是本设计与第一版的本质区别。

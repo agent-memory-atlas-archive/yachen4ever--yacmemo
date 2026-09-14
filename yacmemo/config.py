@@ -45,6 +45,18 @@ class GuardConfig:
 
 
 @dataclass
+class CuratorConfig:
+    # Periodic quality reviewer (proposal-only; never auto-applies)
+    enabled: bool = False
+    schedule: str = "0 4 * * 6"  # systemd timer is deployed separately; kept for reference
+    base_url: str = ""           # OpenAI-compatible endpoint (e.g. the main model on m2ultra)
+    api_key: str = ""
+    model: str = ""
+    max_tokens: int = 4096
+    timeout: int = 180
+
+
+@dataclass
 class ServerConfig:
     host: str = "0.0.0.0"  # LAN-exposed so any machine's agent can reach it
     port: int = 9721
@@ -69,6 +81,7 @@ class Config:
     search: SearchConfig = field(default_factory=SearchConfig)
     guard: GuardConfig = field(default_factory=GuardConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    curator: CuratorConfig = field(default_factory=CuratorConfig)
     users: list[UserEntry] = field(default_factory=list)
 
     @property
@@ -110,6 +123,7 @@ def load_config(path: str | None = None) -> Config:
     search = data.get("search", {})
     guard = data.get("guard", {})
     srv = data.get("server", {})
+    cur = data.get("curator", {})
     users_raw = data.get("users", [])
 
     users = []
@@ -154,6 +168,15 @@ def load_config(path: str | None = None) -> Config:
             host=srv.get("host", ServerConfig.host),
             port=srv.get("port", ServerConfig.port),
             data_dir=srv.get("data_dir", ServerConfig.data_dir),
+        ),
+        curator=CuratorConfig(
+            enabled=cur.get("enabled", CuratorConfig.enabled),
+            schedule=cur.get("schedule", CuratorConfig.schedule),
+            base_url=cur.get("base_url", CuratorConfig.base_url),
+            api_key=cur.get("api_key", CuratorConfig.api_key),
+            model=cur.get("model", CuratorConfig.model),
+            max_tokens=cur.get("max_tokens", CuratorConfig.max_tokens),
+            timeout=cur.get("timeout", CuratorConfig.timeout),
         ),
         users=users,
     )

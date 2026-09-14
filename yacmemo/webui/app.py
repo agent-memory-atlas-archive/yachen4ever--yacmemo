@@ -61,11 +61,19 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         def _collect():
             users = []
             for uid, c in contexts.items():
+                topics = c["store"].load_topics()
+                curator_dir = c["store"].root / "curator"
+                proposals = (
+                    len(list(curator_dir.glob("提案-*.md")))
+                    if curator_dir.is_dir() else 0)
                 users.append({
                     "id": uid,
                     "note_count": len(c["store"].list_notes()),
                     "open_collisions": len(c["db"].list_collisions(status="open")),
                     "guard": c["db"].guard_stats(),
+                    "topics": [{"title": t["title"], "card": t["card"],
+                                "status": t["status"]} for t in topics],
+                    "curator_proposals": proposals,
                 })
             return users
 

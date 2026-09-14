@@ -18,6 +18,7 @@ dependencies = [
 [project.scripts]
 yacmemo-mcp = "yacmemo.mcp_server:main"       # stdio, single user, same-box agents
 yacmemo-server = "yacmemo.server:main"        # HTTP, multi-user, multi-machine agents
+yacmemo-curator = "yacmemo.curator:main"      # periodic quality review -> proposal report
 
 [build-system]
 requires = ["hatchling"]

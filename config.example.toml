@@ -4,7 +4,16 @@
 
 [memory]
 # Root for `yacmemo-mcp` (single-user stdio mode). Ignored by `yacmemo-server`,
-# which uses the [[users]] roots below.
+# which uses the [curator]
+# 定期质量审查（只产出提案报告，绝不自动执行）。建议指向主模型端点，闲时运行。
+enabled = false
+schedule = "0 4 * * 6"            # 参考：systemd timer 建议每周一次
+base_url = "http://m2ultra:11234/v1"
+api_key = "sk-your-key"
+model = "your-main-model"
+max_tokens = 4096
+
+[[users]] roots below.
 root = "memory"
 # Timeline notes live here; exempt from the near-duplicate title guard.
 journal_dir = "journal"
@@ -38,9 +47,27 @@ port = 9721
 # isolation boundary. Agents on any machine add e.g.:
 #   http://debsvc.local:9721/yachen/mcp
 
+[curator]
+# 定期质量审查（只产出提案报告，绝不自动执行）。建议指向主模型端点，闲时运行。
+enabled = false
+schedule = "0 4 * * 6"            # 参考：systemd timer 建议每周一次
+base_url = "http://m2ultra:11234/v1"
+api_key = "sk-your-key"
+model = "your-main-model"
+max_tokens = 4096
+
 [[users]]
 id = "yachen"
 root = "/srv/yacmemo/yachen/memory"
+
+[curator]
+# 定期质量审查（只产出提案报告，绝不自动执行）。建议指向主模型端点，闲时运行。
+enabled = false
+schedule = "0 4 * * 6"            # 参考：systemd timer 建议每周一次
+base_url = "http://m2ultra:11234/v1"
+api_key = "sk-your-key"
+model = "your-main-model"
+max_tokens = 4096
 
 [[users]]
 id = "user2"

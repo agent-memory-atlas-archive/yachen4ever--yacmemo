@@ -362,6 +362,8 @@ function renderAudit(a) {
     }).join("") || `<div class="muted" style="margin-bottom:10px">无</div>`) +
     sec("悬空链接", a.dangling_links, (d) => `
       <div class="section pair"><div class="texts">${esc(d.path)} → [[${esc(d.link)}]]</div>${openBtn(d.path)}</div>`) +
+    sec("游离文件（未归入任何主题）", a.stray || [], (p) => `
+      <div class="section pair"><div class="texts">${esc(p)}</div>${openBtn(p)}</div>`) +
     `<h3>守卫统计</h3><div class="section">
       拒绝 ${a.guard_stats.refused} 次 · force 越过 ${a.guard_stats.forced} 次</div>
       <button id="btn-reindex2" style="margin-top:8px">全量重建索引</button>`;
@@ -448,8 +450,17 @@ async function loadHealth() {
         ${overview.users.map((u) => `
           <div class="card"><div class="k">${esc(u.id)}</div>
             <div class="v">${u.note_count}</div>
-            <div class="k">笔记 · 撞车 ${u.open_collisions} · 守卫 ${u.guard.refused}/${u.guard.forced}</div></div>`).join("")}
+            <div class="k">笔记 · 撞车 ${u.open_collisions} · 守卫 ${u.guard.refused}/${u.guard.forced}</div>
+            <div class="k">主题 ${u.topics.length} 个 · 提案 ${u.curator_proposals}</div></div>`).join("")}
       </div>
+      <h3 style="font-size:14px">主题记忆</h3>
+      <table class="grid">
+        <tr><th>用户</th><th>主题</th><th>主题卡</th><th>现状</th></tr>
+        ${overview.users.flatMap((u) => u.topics.map((t) => `
+          <tr><td>${esc(u.id)}</td><td>${esc(t.title)}</td>
+              <td class="muted">${esc(t.card)}</td><td>${esc(t.status)}</td></tr>`)).join("")
+          || `<tr><td colspan="4" class="muted center">（尚无注册主题）</td></tr>`}
+      </table>
       <h3 style="font-size:14px">客户端</h3>
       <table class="grid">
         <tr><th>客户端 (UA)</th><th>IP</th><th class="num">调用</th><th>最近</th></tr>

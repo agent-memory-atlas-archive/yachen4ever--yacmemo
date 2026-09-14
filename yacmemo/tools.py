@@ -264,3 +264,59 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"列出失败: {e}"
             return "\n".join(entries) if entries else "（空）"
+
+    # ------------------------------------------------------------ topics
+
+    @mcp.tool()
+    def topic_list(ctx: Context = None) -> str:
+        """列出当前注册的全部长期记忆主题（注册表 + 各主题卡位置）。"""
+        out = {"ok": True, "error": ""}
+        with _logged("topic_list", ctx, "", out):
+            try:
+                topics = store.load_topics()
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"读取失败: {e}"
+            if not topics:
+                return "尚无注册主题。用 topic_register 注册第一个（需用户明确要求）。"
+            lines = [f"共 {len(topics)} 个主题："]
+            for t in topics:
+                lines.append(f"- {t['title']} — {t['status']}")
+                lines.append(f"    卡: {t['card']}")
+            lines.append("（免注册区：journal/、archive/、curator/）")
+            return "\n".join(lines)
+
+    @mcp.tool()
+    def topic_register(title: str, description: str = "", related: str = "",
+                       ctx: Context = None) -> str:
+        """注册一个新的长期记忆主题。仅在用户明确要求时调用（如"把 X 加入长期记忆"）。
+
+        Args:
+            title: 主题名（如 "notecalc"、"女儿教育"）
+            description: 一句话现状描述（写入主题卡）
+            related: 相关笔记路径，逗号分隔（可选）
+        """
+        out = {"ok": True, "error": ""}
+        with _logged("topic_register", ctx,
+                     summarize_args("topic_register", locals()), out):
+            try:
+                r = store.topic_register(title, description=description,
+                                         related=related)
+            except StoreError as e:
+                return f"{e}"
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"注册失败: {e}"
+            return (f"已注册主题「{r['title']}」，主题卡: {r['card']}。"
+                    f"该主题后续的笔记写入主题卡所在目录；现状变化就地更新主题卡。")
+
+    @mcp.tool()
+    def memory_context(ctx: Context = None) -> str:
+        """返回核心记忆上下文：主题注册表 + 各主题卡摘要头。每次会话开始时先调用一次。"""
+        out = {"ok": True, "error": ""}
+        with _logged("memory_context", ctx, "", out):
+            try:
+                return store.memory_context()
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"读取失败: {e}"

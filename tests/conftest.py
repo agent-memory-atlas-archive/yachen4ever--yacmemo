@@ -91,6 +91,23 @@ def searcher(cfg, db, emb, vectors) -> Searcher:
     return Searcher(cfg, db, emb, vectors)
 
 
+@pytest.fixture
+def tstore(store: Store) -> Store:
+    """Store with TOPICS.md pre-seeded (one topic covering notes/)."""
+    (store.root / "notes").mkdir(exist_ok=True)
+    (store.root / "notes" / "a.md").write_text("# a\n内容A\n", encoding="utf-8")
+    (store.root / "notes" / "b.md").write_text("# b\n内容B\n", encoding="utf-8")
+    store.reindex()
+    (store.root / "TOPICS.md").write_text(
+        "# 主题记忆注册表\n\n## 笔记主题\n- 卡: notes/a.md\n"
+        "- 相关: notes/b.md\n- 现状: 测试主题\n- 注册: 2026-09-14\n",
+        encoding="utf-8",
+    )
+    store._index_note("TOPICS.md", "主题记忆注册表",
+                      (store.root / "TOPICS.md").read_text(encoding="utf-8"))
+    return store
+
+
 # ---- HTTP server fixture (shared by test_server / test_webui) ----
 
 
