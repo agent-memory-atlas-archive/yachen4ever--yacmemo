@@ -1,7 +1,7 @@
 # 一致性机制
 
 > 核心立场：**失效语义优于检测语义**。系统从不删除、从不隐藏任何记忆；违约可见、可逆、可数。
-> 代码位置：`store.py`（守卫 + D2）、`detectors.py`（D1/D3 + 归一化）、`index_db.py`（collisions / guard_events）。
+> 代码位置：`store.py`（守卫 + D2 + 游离检测）、`detectors.py`（D1/D3 + 归一化）、`index_db.py`（collisions / guard_events）。
 
 ## 一、为什么一致性要三层防线
 
@@ -45,7 +45,9 @@
 - **刻意不裁决**：不判断"是否矛盾"、不决定"谁有效"——只标记"疑似在说同一件事"；
 - 自愈联动：涉及笔记被编辑/外部修改/删除时，collisions 行删除并重算（`remove_collisions_involving` + audit 的 hash 级 resync）。
 
-**D3 悬空链接**：`[[目标]]` 不匹配任何既有标题 → audit 列出（多为手误或待创建）。
+**D3 悬空链接**：`[[目标]]` 不匹配任何既有标题 → audit 列出（多为手误或待创建）。引用目标不含文字的标记（如文献引注 `[[1,28,28]]`）不算链接，已过滤。
+
+**D4 游离文件**：不属于任何注册主题的 markdown 被 audit 点名（免注册区 journal/、archive/、curator/ 豁免）。这是主题注册制的执法机制——主题之外不留藏身之处，注册制本身见 [01-architecture.md](01-architecture.md) §十四。
 
 已知盲区（接受）：措辞距离远但逻辑矛盾的 D2 漏检（如"sys_user 无 role_color"vs"新增 role_color 字段"）。堵住它的代价是全量 LLM 扫描——v1 的教训，不做。
 
