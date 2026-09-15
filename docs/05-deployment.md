@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'ab94abf1-09c0-4168-94c3-307833b17dc6'
-  PropagateID: 'ab94abf1-09c0-4168-94c3-307833b17dc6'
-  ReservedCode1: '1372734b-1b09-4ea5-bd3c-e4fa4532daea'
-  ReservedCode2: '1372734b-1b09-4ea5-bd3c-e4fa4532daea'
+  ProduceID: '8bc8fb81-6af5-4639-8dfe-1bb9d6d05b63'
+  PropagateID: '8bc8fb81-6af5-4639-8dfe-1bb9d6d05b63'
+  ReservedCode1: '28b8a115-bff3-4213-b635-1857e5fdc26c'
+  ReservedCode2: '28b8a115-bff3-4213-b635-1857e5fdc26c'
 ---
 
 # 部署指南
@@ -194,7 +194,7 @@ systemctl enable --now yacmemo-curator.timer
 ```text
 # 记忆使用约定（yacmemo）
 会话开始：
-0. 先调 memory_context 回顾主题体系；需要时用 topic_list 查看主题清单。
+0. 先调 memory_context 回顾画像/偏好与主题体系；需要时用 topic_list 查看主题清单。
 写入前：
 1. 先查后写。写任何记忆前，先用 memory_search 查是否已有同主题笔记。
 2. 已有同主题笔记 → memory_edit / memory_edit_section 增量修改，绝不新建重复笔记。
@@ -208,7 +208,7 @@ systemctl enable --now yacmemo-curator.timer
 7. memory_search 结果带 ⚠ 标注时，先读两篇，用 memory_edit 合并，然后才回答用户。
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
 主题：
-9. 主题的注册与注销都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了"）→ topic_register / topic_unregister；主题现状写入主题卡并就地更新。
+9. 主题的注册、注销与归档都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了" / "X 归档吧"）→ topic_register / topic_unregister / archive_topic；主题现状写入 abstract（topics/<主题>/abstract.md）并就地更新，目录内可按模块增设详细 md。
 10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
 删除：
 11. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。

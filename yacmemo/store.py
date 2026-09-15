@@ -41,9 +41,11 @@ logger = logging.getLogger(__name__)
 _ILLEGAL_FILENAME = re.compile(r'[\\/:*?"<>|]')
 _HEADING_RE = re.compile(r"^(#{2,6})\s+(.+?)\s*$")
 TOPICS_FILE = "TOPICS.md"
+# 用户画像与偏好：记忆层功能文件（不注册主题、不游离检测、memory_context 前置）
+PROFILE_FILE = "PROFILE.md"
 # 免注册区：不参与主题注册与游离检测的目录
 FREE_ZONES = ("journal/", "archive/", "curator/")
-_TOPIC_FIELD_RE = re.compile(r"^-\s*(卡|相关|现状|注册):\s*(.*)$")
+_TOPIC_FIELD_RE = re.compile(r"^-\s*(卡|相关|现状|注册|状态):\s*(.*)$")
 
 
 class StoreError(Exception):
@@ -408,7 +410,7 @@ class Store:
                 if cur:
                     topics.append(cur)
                 cur = {"title": line[3:].strip(), "card": "", "related": [],
-                       "status": "", "registered": ""}
+                       "status": "", "archived": False, "registered": ""}
             elif cur is not None:
                 m = _TOPIC_FIELD_RE.match(line)
                 if m:
@@ -422,6 +424,8 @@ class Store:
                         cur["status"] = val
                     elif key == "注册":
                         cur["registered"] = val
+                    elif key == "状态":
+                        cur["archived"] = "archived" in val
         if cur:
             topics.append(cur)
         return topics
@@ -441,13 +445,13 @@ class Store:
         if card_path:
             card_path = card_path.replace("\\", "/").lstrip("/")
             if not (self.root / card_path).is_file():
-                raise StoreError(f"指定的主题卡不存在: {card_path}")
+                raise StoreError(f"指定的主题 abstract 不存在: {card_path}")
         else:
             folder = f"topics/{_ILLEGAL_FILENAME.sub('_', title).strip('. ')}"
-            card_path = f"{folder}/主题卡.md"
+            card_path = f"{folder}/abstract.md"
             abs_card = self.root / card_path
             if abs_card.exists():
-                raise StoreError(f"主题卡文件已存在: {card_path}")
+                raise StoreError(f"abstract 文件已存在: {card_path}")
             abs_card.parent.mkdir(parents=True, exist_ok=True)
             abs_card.write_text(f"# {title}\n\n{description or '（待补充现状）'}\n",
                                 encoding="utf-8")
@@ -497,24 +501,125 @@ class Store:
         self.snapshots.commit(f"topic: unregister {title}")
         return {"title": title, "card": removed_card}
 
+    def archive_topic(self, title: str) -> dict:
+        """Archive a topic (user-instructed): the abstract moves under
+        archive/<topic>/, the registry entry gets 状态: archived (kept for
+        lookup, out of active lists and memory_context). Notes stay
+        searchable; archived topics never count as stray (archive/ is a free
+        zone). Reversible by hand (git history + registry edit)."""
+        topics = self.load_topics()
+        active = [t for t in topics if not t.get("archived")]
+        t = next((x for x in active if x["title"] == title), None)
+        if t is None:
+            known = "、".join(x["title"] for x in active) or "（空）"
+            raise StoreError(f"没有活跃主题: {title}。现有主题: {known}")
+
+        new_card = t["card"]
+        if t["card"] and (self.root / t["card"]).is_file():
+            new_card = (f"archive/{_ILLEGAL_FILENAME.sub('_', title).strip('. ')}"
+                        "/abstract.md")
+            self.move(t["card"], new_card)  # move() snapshots "move: ..."
+
+        p = self.topics_file()
+        lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+        start = None
+        for i, ln in enumerate(lines):
+            if ln.rstrip("\r\n") == f"## {title}":
+                start = i
+                break
+        if start is not None:
+            end = len(lines)
+            for j in range(start + 1, len(lines)):
+                if lines[j].startswith("## "):
+                    end = j
+                    break
+            if not any(ln.startswith("- 状态: ") for ln in lines[start:end]):
+                k = start
+                while k + 1 < end and lines[k + 1].startswith("- "):
+                    k += 1
+                lines.insert(k + 1, "- 状态: archived\n")
+                p.write_text("".join(lines), encoding="utf-8")
+                self._index_note(TOPICS_FILE, "主题记忆注册表",
+                                 p.read_text(encoding="utf-8"))
+                self.snapshots.commit(f"topic: archive {title}")
+        return {"title": title, "card": new_card, "archived": True}
+
     def memory_context(self, card_lines: int = 12) -> str:
-        """Cold-start context: registry + topic-card excerpts. Call once per session."""
+        """Cold-start context: user profile first, then registry + active abstracts."""
         topics = self.load_topics()
         tf = self.topics_file()
-        if not topics and not tf.is_file():
+        profile = self.root / PROFILE_FILE
+        active = [t for t in topics if not t.get("archived")]
+        if not topics and not tf.is_file() and not profile.is_file():
             return "（尚无主题记忆——用 topic_register 注册第一个主题）"
         parts = []
+        if profile.is_file():
+            parts.append(profile.read_text(encoding="utf-8"))
         if tf.is_file():
             parts.append(tf.read_text(encoding="utf-8"))
         cards = []
-        for t in topics:
+        for t in active:
             p = self.root / t["card"] if t["card"] else None
             if t["card"] and p and p.is_file():
                 head = "\n".join(p.read_text(encoding="utf-8").splitlines()[:card_lines])
                 cards.append(f"### {t['title']}（{t['card']}）\n{head}")
         if cards:
-            parts.append("\n# 主题卡摘要\n" + "\n\n".join(cards))
+            parts.append("\n# 主题摘要（abstract）\n" + "\n\n".join(cards))
         return "\n\n".join(parts)
+
+    # -------------------------------------------------------------- profile
+
+    def _find_profile_section(self, text: str, section: str) -> tuple[int, int] | None:
+        """Span (start, end) of one ## section's body, or None if absent."""
+        for m in re.finditer(r"^##\s+(.+?)\s*$", text, re.MULTILINE):
+            if m.group(1).strip() == section:
+                start = m.end()
+                mm = re.search(r"^##\s+", text[start:], re.MULTILINE)
+                end = start + mm.start() if mm else len(text)
+                return start, end
+        return None
+
+    def get_preference(self, section: str = "") -> str:
+        """Whole PROFILE.md or one ## section of it (memory-layer function)."""
+        p = self.root / PROFILE_FILE
+        if not p.is_file():
+            return "（尚无用户画像/偏好记录——用 update_user_preference 建立）"
+        text = p.read_text(encoding="utf-8")
+        if not section.strip():
+            return text
+        wanted = section.strip()
+        span = self._find_profile_section(text, wanted)
+        if span is None:
+            raise StoreError(
+                f"PROFILE.md 中没有小节 '{wanted}'，可用 update_user_preference 创建")
+        return text[span[0]:span[1]].strip("\n") or "（该小节为空）"
+
+    def update_preference(self, section: str, content: str) -> dict:
+        """Create-or-replace one ## section of PROFILE.md. The agent-maintained
+        user profile & preferences: not a topic, never registered, first thing
+        every session sees via memory_context."""
+        wanted = (section or "").strip()
+        if not wanted:
+            raise StoreError("小节名不能为空。")
+        body = (content or "").strip("\n")
+        p = self.root / PROFILE_FILE
+        if not p.is_file():
+            text = f"# 用户画像与偏好\n\n## {wanted}\n\n{body}\n"
+            p.write_text(text, encoding="utf-8")
+            self._index_note(PROFILE_FILE, "用户画像与偏好", text)
+            self.snapshots.commit(f"profile: init '{wanted}'")
+            return {"path": PROFILE_FILE, "section": wanted, "created": True}
+        text = p.read_text(encoding="utf-8")
+        if self._find_profile_section(text, wanted) is not None:
+            r = self.edit_section(PROFILE_FILE, wanted, body)  # snapshots "edit:"
+            return {"path": PROFILE_FILE, "section": wanted,
+                    "heading": r["heading"]}
+        new_text = text.rstrip("\n") + f"\n\n## {wanted}\n\n{body}\n"
+        p.write_text(new_text, encoding="utf-8")
+        title = self._title_of(PROFILE_FILE, new_text)
+        self._index_note(PROFILE_FILE, title, new_text)
+        self.snapshots.commit(f"profile: add '{wanted}'")
+        return {"path": PROFILE_FILE, "section": wanted, "created": True}
 
     def _stray_files(self, topics: list[dict]) -> list[str]:
         """Markdown files outside any registered topic (and outside free zones)."""
@@ -533,7 +638,7 @@ class Store:
         strays = []
         for p in sorted(self.root.rglob("*.md")):
             rel = p.relative_to(self.root).as_posix()
-            if rel == TOPICS_FILE or rel.startswith(FREE_ZONES):
+            if rel in (TOPICS_FILE, PROFILE_FILE) or rel.startswith(FREE_ZONES):
                 continue
             if "/.index/" in f"/{rel}" or ".git" in p.parts:
                 continue

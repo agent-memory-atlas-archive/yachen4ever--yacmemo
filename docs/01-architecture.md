@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'c2e4bb91-5116-4c19-9452-b62f75e7b5ca'
-  PropagateID: 'c2e4bb91-5116-4c19-9452-b62f75e7b5ca'
-  ReservedCode1: '76d3847b-271a-4253-8eaf-e80db33156d8'
-  ReservedCode2: '76d3847b-271a-4253-8eaf-e80db33156d8'
+  ProduceID: 'be875381-6fa3-4704-b402-61be5f4d1ef7'
+  PropagateID: 'be875381-6fa3-4704-b402-61be5f4d1ef7'
+  ReservedCode1: 'd9dda544-9ff5-42be-9eff-b8e1373b3ea3'
+  ReservedCode2: 'd9dda544-9ff5-42be-9eff-b8e1373b3ea3'
 ---
 
 # yacmemo 精简记忆层设计（v2 终形态）
@@ -125,18 +125,7 @@ yacmemo-curator（systemd timer，每周）——读注册表/主题卡/审计 �
 
 ## 四、存储设计
 
-### 4.1 目录约定
 
-```
-memory_root/
-├── journal/          时间线流水（按日期命名），不参与重名拦截与合并
-├── projects/         事项类笔记
-├── infra/            基础设施类笔记
-├── people/
-└── preferences/
-```
-
-目录划分只服务人类浏览，检索不依赖目录。
 
 ### 4.2 笔记格式
 
@@ -235,10 +224,13 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 | `memory_delete` | `path` | **仅用户明确要求时调用**；删文件 + 全部索引行；git 快照保留历史 |
 | `memory_audit` | — | 自愈（外部改动/删除 hash 级重算与清理）+ D1 全量扫描 + collisions 报告 + D3/D4 + 守卫统计 + git 快照状态行 |
 | `memory_list` | `path="", sort="name"\|"mtime"` | 目录树 / 最近变更 |
-| `memory_context` | — | **会话开始先调**：注册表 + 各主题卡摘要头（冷启动回顾） |
-| `topic_list` | — | 列出已注册主题 |
-| `topic_register` | `title, description, related` | 注册新主题（**仅用户明确要求**） |
+| `memory_context` | — | **会话开始先调**：PROFILE 前置 + 注册表 + 活跃主题 abstract 摘要头（冷启动回顾） |
+| `topic_list` | — | 列出活跃/已归档主题（分组） |
+| `topic_register` | `title, description, related` | 注册新主题（**仅用户明确要求**），创建 topics/<主题>/abstract.md |
 | `topic_unregister` | `title` | 注销主题（**仅用户明确要求**；仅移出注册表，笔记不动，游离后裁决） |
+| `archive_topic` | `title` | 归档主题（**仅用户明确要求**）：abstract 移入 archive/，检索可用、context 不注入 |
+| `get_user_preference` | `section=""` | 读画像/偏好全文或指定小节（PROFILE.md 功能层） |
+| `update_user_preference` | `section, content` | 创建/替换画像/偏好的一个小节（agent 维护） |
 
 完整规格见 [02-mcp-tools.md](02-mcp-tools.md)。
 
@@ -314,7 +306,7 @@ memory_write / memory_edit 完成 embedding 后：
 ```text
 # 记忆使用约定（yacmemo）
 会话开始：
-0. 先调 memory_context 回顾主题体系；需要时用 topic_list 查看主题清单。
+0. 先调 memory_context 回顾画像/偏好与主题体系；需要时用 topic_list 查看主题清单。
 写入前：
 1. 先查后写。写任何记忆前，先用 memory_search 查是否已有同主题笔记。
 2. 已有同主题笔记 → memory_edit / memory_edit_section 增量修改，绝不新建重复笔记。
@@ -328,7 +320,7 @@ memory_write / memory_edit 完成 embedding 后：
 7. memory_search 结果带 ⚠ 标注时，先读两篇，用 memory_edit 合并，然后才回答用户。
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
 主题：
-9. 主题的注册与注销都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了"）→ topic_register / topic_unregister；主题现状写入主题卡并就地更新。
+9. 主题的注册、注销与归档都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了" / "X 归档吧"）→ topic_register / topic_unregister / archive_topic；主题现状写入 abstract（topics/<主题>/abstract.md）并就地更新，目录内可按模块增设详细 md。
 10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
 删除：
 11. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
@@ -421,12 +413,13 @@ obs_topk = 5
 
 > 背景：历史记忆迁移后发现"纷繁而无主次"——所有笔记在系统里平权，冷启动失忆，同主题快照群靠人工偶然发现。解决方案是把"主次"从**检索排序的运气**变成**显式声明的结构**。
 
-### 主题注册制
+### 主题注册制（2026-09-16 目录化改造）
 
 - **主题由用户显式声明**（"把 X 加入长期记忆"），agent 调用 `topic_register` 注册——工具调用即用户授权的凭证；agent 平时只能提案，不能自行注册；
-- 每个主题 = **主题卡**（现状手册，就地更新）+ 相关笔记/子目录。TOPICS.md 为注册表与目录；
-- `memory_context` 工具（会话开始先调）返回注册表 + 各主题卡摘要头，解决冷启动失忆；
-- audit 新增**游离文件检测**：不属于任何注册主题的散文件被点名（免注册区：journal/、archive/、curator/）；
+- **每个主题一个目录**：`abstract.md`（现状手册，agent 维护、就地更新）+ 主题内详细记忆的模块 md（agent 可按需增设）——目录即归属，取代注册表手工维护路径列表；
+- TOPICS.md 为注册表与目录；**主题生命周期**：注册 → 活跃（context 注入摘要）→ **归档**（`archive_topic`，注册表加`状态: archived`，abstract 移入 archive/，检索仍可用、context 不再注入、不计游离）→ 注销（topic_unregister，仅移出注册表，笔记变游离走 D4 裁决）——全程无静默数据损失；
+- **画像/偏好是记忆层功能，不是主题**：`PROFILE.md` 单文件分小节，agent 用 `get_user_preference` / `update_user_preference` 维护（元信息与领域知识分层：前者是"怎么和用户协作"，后者是"知道什么"）；`memory_context` 将 PROFILE 前置注入；
+- audit 新增**游离文件检测**：不属于任何注册主题的散文件被点名（免注册区：journal/、archive/、curator/；TOPICS.md/PROFILE.md 豁免）；
 - 设计立场：**主次是被声明的，不是被算出来的**——不做重要度打分/衰减函数/自动摘要。
 
 ### curator 质量策展
@@ -437,9 +430,9 @@ obs_topk = 5
 - **铁律：只提案，绝不执行**——这是 v1"自动失效不问人"教训的最终形态：维护者 LLM 回来了，但被剥夺了一切写权力；
 - 批准的提案由 agent 或人工执行，执行后在报告笔记中留痕。
 
-### 工具面（8 → 11）
+### 工具面（累计 16 个）
 
-新增 `topic_list` / `topic_register` / `topic_unregister` / `memory_context`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。注销只移出注册表、不动笔记（注销后笔记成游离文件，由 D4 点名走裁决），保证主题生命周期全程无静默数据损失。
+主题生命周期四件套 `topic_list` / `topic_register` / `topic_unregister` / `archive_topic` + 冷启动 `memory_context`，画像/偏好功能对 `get_user_preference` / `update_user_preference`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。注销只移出注册表、不动笔记（注销后笔记成游离文件，由 D4 点名走裁决），归档保留检索可用性但退出注入——保证主题生命周期全程无静默数据损失。
 
 ## 十四、被否决的备选方案（决策记录）
 

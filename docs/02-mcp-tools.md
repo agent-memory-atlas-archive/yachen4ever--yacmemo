@@ -3,13 +3,13 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '40a3e2ba-39f4-4467-9c92-69f23eeb85d6'
-  PropagateID: '40a3e2ba-39f4-4467-9c92-69f23eeb85d6'
-  ReservedCode1: '3848ce31-0c5b-403d-9a5c-3d43cec1275c'
-  ReservedCode2: '3848ce31-0c5b-403d-9a5c-3d43cec1275c'
+  ProduceID: '9e6278c1-1f6c-47f9-b5e6-b2e95568fa7f'
+  PropagateID: '9e6278c1-1f6c-47f9-b5e6-b2e95568fa7f'
+  ReservedCode1: '3a08a2e0-f11b-42f0-bc5d-0e7263932dfe'
+  ReservedCode2: '3a08a2e0-f11b-42f0-bc5d-0e7263932dfe'
 ---
 
-# MCP 工具规格（13 个）
+# MCP 工具规格（16 个）
 
 > 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。
 > 所有工具返回人类可读文本；错误以中文消息直接返回（不抛协议错误），agent 可读可自纠。
@@ -173,11 +173,11 @@ topic_list() -> str
 topic_register(title: str, description: str = "", related: str = "") -> str
 ```
 
-注册新的长期记忆主题：追加到 `TOPICS.md` 注册表，并创建主题卡（`topics/<主题>/主题卡.md`，或用既有笔记充当卡）。
+注册新的长期记忆主题：追加到 `TOPICS.md` 注册表，并创建 `topics/<主题>/abstract.md`（或用既有笔记充当 abstract）。
 
 - **调用门槛**：仅在用户明确要求时调用（"把 X 加入长期记忆"）——这条写进约定块，注册行为本身即用户授权的凭证；
-- 重复主题名拒绝（提示直接编辑既有主题卡）；
-- 注册后主题卡与注册表立即入索引。
+- 重复主题名拒绝（提示直接编辑既有 abstract）；
+- 注册后 abstract 与注册表立即入索引；主题目录内 agent 可按模块自由增设详细 md（目录即归属）。
 
 ## 11. topic_unregister
 
@@ -211,17 +211,56 @@ memory_delete(path: str) -> str
 - 未知路径/标题拒绝；
 - 系统（store）自身永远不会主动删除——这是 v1"自动失效错杀"教训的边界：删除永远是被指令的。
 
+## 14. archive_topic
+
+```
+archive_topic(title: str) -> str
+```
+
+归档主题（生命周期：注册 → 活跃 → 归档 → 注销）：abstract 移入 `archive/<主题>/abstract.md`，注册表块内加 `- 状态: archived`。
+
+- **调用门槛**：仅在用户明确要求时调用（"X 归档吧"/"这个项目翻篇了"）；
+- 与注销的区别：**归档不丢检索**——主题笔记仍在索引里可搜，仅 memory_context 不再注入 abstract、topic_list 分入已归档组；archive/ 是免注册区，不计游离；
+- 可逆性：git 历史可回退，手工删除注册表状态行即恢复活跃。
+
+## 15. get_user_preference
+
+```
+get_user_preference(section: str = "") -> str
+```
+
+读取用户画像与偏好（`PROFILE.md`，记忆层功能文件而非主题记忆）。
+
+- `section` 为空返回全文；指定小节返回该小节正文；
+- 文件不存在返回引导文案；小节不存在报错并提示用 update 创建；
+- `memory_context` 会话开始时已将 PROFILE 前置注入，多数场景无需单独调用。
+
+## 16. update_user_preference
+
+```
+update_user_preference(section: str, content: str) -> str
+```
+
+创建或替换画像/偏好的一个小节（agent 加以维护）：
+
+- 小节存在 → 整段替换（edit_section 语义，标题保留）；
+- 小节不存在 → 文末追加新小节；文件不存在 → 连同 `# 用户画像与偏好` 头一起创建；
+- 写提炼后的结论（"- [类别] 内容" 语法），不贴对话原文；
+- 每次更新自动 git 快照，可回溯。
+
 ## Agent 决策树（更新）
 
 ```
-会话开始              → memory_context（回顾主题体系）
-用户要新增长期记忆主题 → topic_register（仅用户明示时）→ memory_write
+会话开始              → memory_context（画像/偏好前置 + 主题体系）
+用户要新增长期记忆主题 → topic_register（仅用户明示时）→ 目录内增设模块 md
 用户不再长期记录某主题 → topic_unregister（仅用户明示）→ 引导归位/清理
+用户说某项目翻篇了    → archive_topic（仅用户明示；检索保留、context 退出）
 用户要删某条记忆      → memory_delete（仅用户明示；git 可恢复）
+用户的画像/偏好变化了 → update_user_preference（按小节替换/追加）
 要记一个新主题？      → memory_search 查重 → memory_write（被拒转 edit）
 要更新已有事实？      → memory_edit / memory_edit_section
 要找"某件事记在哪"？  → memory_search（关键词式 query）
-要梳理一个主题全貌？  → memory_read / 主题卡
+要梳理一个主题全貌？  → memory_read / abstract
 定期体检？            → memory_audit（+ WebUI 审计页）
 不知道有哪些主题？    → topic_list
 ```

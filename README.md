@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '4a138b89-0dc8-44e7-99b7-01fbded774ca'
-  PropagateID: '4a138b89-0dc8-44e7-99b7-01fbded774ca'
-  ReservedCode1: 'f1a12493-6cd1-4833-a174-076e88678465'
-  ReservedCode2: 'f1a12493-6cd1-4833-a174-076e88678465'
+  ProduceID: '7cd74e3c-0b1b-4b33-bc43-311509cc5950'
+  PropagateID: '7cd74e3c-0b1b-4b33-bc43-311509cc5950'
+  ReservedCode1: '8f444990-eb7e-46dd-967f-cbcc5ab2ad88'
+  ReservedCode2: '8f444990-eb7e-46dd-967f-cbcc5ab2ad88'
 ---
 
 # yacmemo
@@ -81,7 +81,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 **第一次用？**请先读 [用户使用手册](docs/00-user-guide.md)——上手、日常用法、常见问题都在里面。
 
-## MCP 工具（13 个）
+## MCP 工具（16 个）
 
 | 工具 | 用途 |
 |---|---|
@@ -95,9 +95,12 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `memory_audit` | 自愈式一致性审计（外部改动/删除、D1/D2/D3、守卫统计） |
 | `memory_list` | 目录树 / 最近变更 |
 | `memory_context` | **会话开始先调**：返回主题注册表 + 各主题卡摘要头（冷启动回顾） |
-| `topic_list` | 列出已注册的长期记忆主题 |
-| `topic_register` | 注册新主题（**仅在用户明确要求时调用**，如"把 X 加入长期记忆"） |
-| `topic_unregister` | 注销主题（仅用户明示；只移出注册表，笔记不动，游离后裁决） |
+| `topic_list` | 列出长期记忆主题（活跃/已归档分组） |
+| `topic_register` | 注册新主题（**仅在用户明确要求时调用**，如"把 X 加入长期记忆"），创建 topics/<主题>/abstract.md |
+| `topic_unregister` | 注销主题（**仅用户明示**，仅移出注册表，笔记不动，游离后裁决） |
+| `archive_topic` | 归档主题（**仅用户明示**）：abstract 移入 archive/，检索保留、context 退出 |
+| `get_user_preference` | 读画像/偏好（PROFILE.md 功能层，全文或指定小节） |
+| `update_user_preference` | 创建/替换画像/偏好的一个小节（agent 维护） |
 
 完整规格：[docs/02-mcp-tools.md](docs/02-mcp-tools.md)；使用约定（贴进 agent 系统提示）：[docs/01-architecture.md](docs/01-architecture.md) 第八节。
 

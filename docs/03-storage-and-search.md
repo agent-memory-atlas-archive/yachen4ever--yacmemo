@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'c3e7e966-c954-4b74-b08c-e772835d69a5'
-  PropagateID: 'c3e7e966-c954-4b74-b08c-e772835d69a5'
-  ReservedCode1: 'a18180cb-487e-4617-b31a-4984a5a5bbea'
-  ReservedCode2: 'a18180cb-487e-4617-b31a-4984a5a5bbea'
+  ProduceID: 'c9ef7a77-45cb-4c2f-b0cd-d0e5e391eca2'
+  PropagateID: 'c9ef7a77-45cb-4c2f-b0cd-d0e5e391eca2'
+  ReservedCode1: 'd6afc94a-8cc1-4ba7-ba40-8944812fcbf9'
+  ReservedCode2: 'd6afc94a-8cc1-4ba7-ba40-8944812fcbf9'
 ---
 
 # 存储与检索
@@ -26,7 +26,7 @@ AIGC:
 
 ## 二、文件格式
 
-
+> 主题注册表 `TOPICS.md` 与画像/偏好 `PROFILE.md` 位于 memory_root 根部（主题注册制见 [01-architecture.md](01-architecture.md) §十三；PROFILE 为记忆层功能文件，不注册、不参与游离检测）；`journal/`、`archive/`、`curator/` 为免注册区——不参与主题游离检测。
 
 - 一篇一主题；文件名 = 标题（允许中文，非法字符清洗）；
 - 首行 `# 标题` 作为标题来源；无 frontmatter 硬要求；

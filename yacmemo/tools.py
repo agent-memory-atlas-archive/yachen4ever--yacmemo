@@ -288,7 +288,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
 
     @mcp.tool()
     def topic_list(ctx: Context = None) -> str:
-        """列出当前注册的全部长期记忆主题（注册表 + 各主题卡位置）。"""
+        """列出当前注册的长期记忆主题（活跃 + 已归档分组，附 abstract 位置）。"""
         out = {"ok": True, "error": ""}
         with _logged("topic_list", ctx, "", out):
             try:
@@ -298,10 +298,16 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 return f"读取失败: {e}"
             if not topics:
                 return "尚无注册主题。用 topic_register 注册第一个（需用户明确要求）。"
-            lines = [f"共 {len(topics)} 个主题："]
-            for t in topics:
+            active = [t for t in topics if not t.get("archived")]
+            archived = [t for t in topics if t.get("archived")]
+            lines = [f"共 {len(active)} 个活跃主题："]
+            for t in active:
                 lines.append(f"- {t['title']} — {t['status']}")
                 lines.append(f"    卡: {t['card']}")
+            if archived:
+                lines.append(f"\n已归档（{len(archived)} 个，检索仍可用、context 不再注入）：")
+                for t in archived:
+                    lines.append(f"- {t['title']} — {t['status']}")
             lines.append("（免注册区：journal/、archive/、curator/）")
             return "\n".join(lines)
 
@@ -326,13 +332,13 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             except Exception as e:
                 out["ok"], out["error"] = False, str(e)
                 return f"注册失败: {e}"
-            return (f"已注册主题「{r['title']}」，主题卡: {r['card']}。"
-                    f"该主题后续的笔记写入主题卡所在目录；现状变化就地更新主题卡。")
+            return (f"已注册主题「{r['title']}」，abstract: {r['card']}。"
+                    f"该主题后续的笔记写入主题卡所在目录；现状变化就地更新 abstract。")
 
     @mcp.tool()
     def topic_unregister(title: str, ctx: Context = None) -> str:
         """注销一个长期记忆主题（仅在用户明确要求时调用，如"X 不用长期记录了"）。
-        仅移出注册表，笔记文件一律不动。
+        仅移出注册表，笔记文件一律不动；归档语义请用 archive_topic。
 
         Args:
             title: 主题名（与 topic_list 中一致）
@@ -347,9 +353,69 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"注销失败: {e}"
             return (f"已注销主题「{r['title']}」：注册表已移除，笔记文件未动。"
-                    f"原主题卡: {r['card'] or '（未记录）'}。"
+                    f"原 abstract: {r['card'] or '（未记录）'}。"
                     f"相关笔记现为游离文件（审计会点名），请与用户确认后用 "
                     f"memory_move 归位 archive/，或明确确认后用 memory_delete 删除。")
+
+    @mcp.tool()
+    def archive_topic(title: str, ctx: Context = None) -> str:
+        """归档主题（仅在用户明确要求时调用，如"X 归档吧"）：abstract 移入 archive/，
+        注册表标记为已归档——检索仍可用，memory_context 不再注入，不计游离。
+
+        Args:
+            title: 主题名（与 topic_list 活跃列表中一致）
+        """
+        out = {"ok": True, "error": ""}
+        with _logged("archive_topic", ctx, f"title={title}", out):
+            try:
+                r = store.archive_topic(title)
+                return (f"已归档主题「{r['title']}」：abstract 移至 {r['card'] or '（原无卡）'}，"
+                        f"注册表已标记为已归档；检索仍可用，context 不再注入。")
+            except StoreError as e:
+                return f"{e}"
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"归档失败: {e}"
+
+    # ------------------------------------------------------------ profile
+
+    @mcp.tool()
+    def get_user_preference(section: str = "", ctx: Context = None) -> str:
+        """读取用户画像与偏好（PROFILE.md，记忆层功能而非主题记忆）。返回全文或指定小节。
+
+        Args:
+            section: 小节名（如"材料与文档偏好"）；空 = 返回全文
+        """
+        out = {"ok": True, "error": ""}
+        with _logged("get_user_preference", ctx, f"section={section}", out):
+            try:
+                return store.get_preference(section)
+            except StoreError as e:
+                return f"{e}"
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"读取失败: {e}"
+
+    @mcp.tool()
+    def update_user_preference(section: str, content: str,
+                               ctx: Context = None) -> str:
+        """创建或替换用户画像/偏好的一个小节（agent 加以维护；写提炼结论，不贴对话原文）。
+
+        Args:
+            section: 小节名（如"沟通风格"、"材料与文档偏好"）
+            content: 小节内容（事实行用 "- [类别] 内容" 语法）
+        """
+        out = {"ok": True, "error": ""}
+        with _logged("update_user_preference", ctx, f"section={section}", out):
+            try:
+                r = store.update_preference(section, content)
+                where = "新建小节" if r.get("created") else "替换小节"
+                return f"已更新 PROFILE.md（{where}）: {r['section']}"
+            except StoreError as e:
+                return f"{e}"
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"更新失败: {e}"
 
     @mcp.tool()
     def memory_context(ctx: Context = None) -> str:

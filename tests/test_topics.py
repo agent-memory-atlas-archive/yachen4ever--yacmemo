@@ -20,11 +20,11 @@ def test_load_topics_parses_registry(tstore: Store):
 def test_topic_register_appends_and_indexes(tstore: Store):
     r = tstore.topic_register("女儿教育", description="启蒙阶段记录",
                               related="notes/b.md")
-    assert r["card"] == "topics/女儿教育/主题卡.md"
+    assert r["card"] == "topics/女儿教育/abstract.md"
     assert (tstore.root / r["card"]).is_file()
     topics = tstore.load_topics()
     assert [t["title"] for t in topics] == ["笔记主题", "女儿教育"]
-    # new card is searchable
+    # new abstract is searchable
     assert tstore.db.fts_search("启蒙阶段记录")
 
 
@@ -85,5 +85,48 @@ def test_topic_unregister_unknown_title_lists_existing(tstore: Store):
 def test_re_register_after_unregister(tstore: Store):
     tstore.topic_unregister("笔记主题")
     r = tstore.topic_register("笔记主题", description="重新注册")
-    assert r["card"] == "topics/笔记主题/主题卡.md"
+    assert r["card"] == "topics/笔记主题/abstract.md"
     assert len(tstore.load_topics()) == 1
+
+
+def test_archive_topic_full_flow(tstore: Store):
+    """archive: abstract moves to archive/<topic>/, registry gets 状态 line,
+    topic stays searchable, out of context and stray detection."""
+    tstore.topic_register("旧项目", description="已被替代的老项目")
+    r = tstore.archive_topic("旧项目")
+    assert r["archived"] is True
+    assert r["card"] == "archive/旧项目/abstract.md"
+    assert (tstore.root / r["card"]).is_file()
+    assert not (tstore.root / "topics/旧项目/abstract.md").exists()
+
+    topics = tstore.load_topics()
+    assert [t["archived"] for t in topics] == [False, True]  # 笔记主题 active, 旧项目 archived
+
+    # archived abstract is in a free zone -> never stray
+    assert tstore.audit()["stray"] == []
+    # still searchable
+    assert tstore.db.fts_search("已被替代的老项目")
+    # memory_context excludes archived topics' abstracts (registry full text
+    # stays — only the abstract digest section is filtered)
+    ctx = tstore.memory_context()
+    assert "### 旧项目" not in ctx
+    assert "### 笔记主题" in ctx or "内容A" in ctx  # active topic still present
+
+
+def test_archive_topic_registry_block_format(tstore: Store):
+    """The 状态: archived line lands after the registry fields."""
+    tstore.topic_register("旧项目", description="x")
+    tstore.archive_topic("旧项目")
+    text = tstore.topics_file().read_text(encoding="utf-8")
+    block = text.split("## 旧项目", 1)[1].split("## ")[0]
+    assert "- 状态: archived" in block
+    assert block.index("- 注册:") < block.index("- 状态: archived")
+
+
+def test_archive_topic_unknown_or_already_archived(tstore: Store):
+    with pytest.raises(StoreError, match="没有活跃主题"):
+        tstore.archive_topic("不存在")
+    tstore.topic_register("旧项目", description="x")
+    tstore.archive_topic("旧项目")
+    with pytest.raises(StoreError, match="没有活跃主题"):
+        tstore.archive_topic("旧项目")  # twice -> not active anymore
