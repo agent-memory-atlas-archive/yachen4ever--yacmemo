@@ -104,6 +104,17 @@ def parse_proposal(raw: str) -> dict:
     return json.loads(text.strip())
 
 
+def _format_findings(findings: list) -> list[str]:
+    lines = []
+    for i, f in enumerate(findings, 1):
+        lines.append(
+            f"{i}. **[{f.get('severity', '?')}] {f.get('type', '?')}** — {f.get('reason', '')}")
+        for p in f.get("paths", []):
+            lines.append(f"   - 涉及: {p}")
+        lines.append(f"   - 建议: {f.get('proposal', '')}")
+    return lines
+
+
 def render_report(proposal: dict, user_id: str) -> str:
     lines = [
         f"# 记忆质量提案（{user_id}，{date.today().isoformat()}）",
@@ -119,14 +130,24 @@ def render_report(proposal: dict, user_id: str) -> str:
     lines.append(f"## 提案（{len(findings)} 条）")
     if not findings:
         lines.append("无。")
-    for i, f in enumerate(findings, 1):
-        lines.append(
-            f"{i}. **[{f.get('severity', '?')}] {f.get('type', '?')}** — {f.get('reason', '')}")
-        for p in f.get("paths", []):
-            lines.append(f"   - 涉及: {p}")
-        lines.append(f"   - 建议: {f.get('proposal', '')}")
+    lines.extend(_format_findings(findings))
     lines.append("")
     lines.append("> 裁决后在本行下追加执行记录；被采纳并执行的条目由 agent 在对应笔记中落实。")
+    return "\n".join(lines)
+
+
+def render_review_section(proposal: dict) -> str:
+    """Same-day re-run result, appended to the existing report note.
+    One note per day keeps the fixed title unique (D1 guard friendly)."""
+    lines = ["", "---", "",
+             f"## 复审（{datetime.now().strftime('%Y-%m-%d %H:%M')}）", ""]
+    findings = proposal.get("findings", [])
+    if not findings:
+        lines.append("本次复审未发现新问题（0 条），此前提案维持原状。")
+    else:
+        lines.append(f"本次复审发现 {len(findings)} 条新问题，待裁决：")
+        lines.extend(_format_findings(findings))
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -159,12 +180,15 @@ def run_check(config: Config, user: UserEntry, dry_run: bool = False,
     report = render_report(proposal, user.id)
 
     if not dry_run:
-        base = f"curator/提案-{date.today().isoformat()}"
-        path = base + ".md"
-        if (store.root / path).is_file():
-            # 同日重跑不覆盖（旧报告可能已带裁决记录）
-            path = f"{base}-{datetime.now().strftime('%H%M')}.md"
-        store.save(path, report)
+        path = f"curator/提案-{date.today().isoformat()}.md"
+        abs_path = store.root / path
+        if abs_path.is_file():
+            # 同日重跑 = 复审：追加复审小节而非新建笔记——
+            # 每天一份报告、标题天然唯一，D1 标题守卫不再被重跑命中
+            old = abs_path.read_text(encoding="utf-8")
+            store.save(path, old + render_review_section(proposal))
+        else:
+            store.save(path, report)
     db.close()
     return report
 

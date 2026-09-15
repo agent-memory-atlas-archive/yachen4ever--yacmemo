@@ -51,3 +51,28 @@ def test_run_check_writes_proposal_report(tstore: Store):
     assert proposals, "proposal report note should be saved"
     # 报告本身入库后可被检索
     assert tstore.db.fts_search("待裁决")
+
+
+def test_run_check_same_day_rerun_appends_review(tstore: Store):
+    from yacmemo.config import UserEntry
+
+    def llm_with_findings(system: str, user: str) -> str:
+        return ('{"summary": "1 条建议。", "findings": ['
+                '{"type": "stale-card", "severity": "low", '
+                '"paths": ["notes/a.md"], "reason": "现状描述偏旧", '
+                '"proposal": "更新主题卡现状"}]}')
+
+    def llm_clean(system: str, user: str) -> str:
+        return '{"summary": "无发现。", "findings": []}'
+
+    user = UserEntry(id="tester", root=str(tstore.root))
+    run_check(tstore.config, user, dry_run=False, llm_call=llm_with_findings)
+    # 同日重跑（复审，无新发现）不得新建同标题笔记（D1 守卫不应被 curator 自身触发）
+    report = run_check(tstore.config, user, dry_run=False, llm_call=llm_clean)
+
+    proposals = list((tstore.root / "curator").glob("提案-*.md"))
+    assert len(proposals) == 1, "同日重跑应追加复审小节，而不是新建提案文件"
+    text = proposals[0].read_text(encoding="utf-8")
+    assert text.count("# 记忆质量提案") == 1, "标题必须保持唯一"
+    assert "## 复审" in text and "未发现新问题" in text
+    assert "待裁决" in report  # 返回值仍是本次复审的完整报告文本
