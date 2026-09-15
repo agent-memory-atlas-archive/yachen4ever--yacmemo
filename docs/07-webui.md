@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '8e4d5faf-57dc-45c0-85ea-c3bbf28cce2c'
+  PropagateID: '8e4d5faf-57dc-45c0-85ea-c3bbf28cce2c'
+  ReservedCode1: '7a11995b-8f8d-41ea-bbf8-66046109482a'
+  ReservedCode2: '7a11995b-8f8d-41ea-bbf8-66046109482a'
+---
+
 # WebUI 控制台
 
 > 服务端自带，浏览器打开 `http://<host>:9721/ui/` 即用。与 MCP 同进程同端口，无独立部署、无构建链。
@@ -29,7 +40,7 @@
 审计页提供**两种审计引擎**，按需选择：
 
 - **确定性审计**（默认按钮）：快速、零 LLM、含自愈——等价 `memory_audit`；另提供"全量重建索引"按钮（`POST /api/{user}/reindex`）；
-- **深度审查**（curator）：把注册表、主题卡与审计结果交给 `[curator]` 配置的 LLM，产出提案报告（约 1-2 分钟）；报告落盘 `curator/提案-<日期>.md`，**同日重跑自动加时间戳不覆盖**（旧报告可能已带裁决记录）。
+- **深度审查**（curator）：把注册表、主题卡与审计结果交给 `[curator]` 配置的 LLM，产出提案报告（约 1-2 分钟）；报告落盘 `curator/提案-<日期>.md`；**同日重跑不新建文件**——结果以"复审（HH:MM）"小节追加进当天报告（标题保持每日唯一，不触发 D1 告警）。
 
 审计页下方是**质量提案区**：历史报告按日期 chips 切换、markdown 渲染，裁决后建议在报告末尾追加执行记录。输出六类：
 

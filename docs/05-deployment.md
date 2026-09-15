@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: 'ab94abf1-09c0-4168-94c3-307833b17dc6'
+  PropagateID: 'ab94abf1-09c0-4168-94c3-307833b17dc6'
+  ReservedCode1: '1372734b-1b09-4ea5-bd3c-e4fa4532daea'
+  ReservedCode2: '1372734b-1b09-4ea5-bd3c-e4fa4532daea'
+---
+
 # 部署指南
 
 > 目标形态：**一个服务（debsvc），所有电脑，所有 agent**。记忆数据单点存放，各端零安装。
@@ -59,6 +70,10 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=/srv/yacmemo
+# git 快照需要 HOME：systemd 默认不设，git 读不到 ~/.gitconfig 的
+# safe.directory 豁免，会对非本用户属主的 memory 目录报 dubious ownership
+# 导致快照静默降级（代码层已有 pwd 回填兑底，这里显式声明更稳）
+Environment=HOME=/root
 ExecStart=/srv/yacmemo/.venv/bin/yacmemo-server --config /srv/yacmemo/config.toml
 Restart=on-failure
 RestartSec=3
@@ -70,6 +85,17 @@ WantedBy=multi-user.target
 ```bash
 systemctl enable --now yacmemo
 ```
+
+### 1.4 记忆仓库与 git 快照
+
+memory 目录就是 git 仓库，每次写入/编辑/移动/删除/主题操作自动产生一条 commit，仓库保持 git-clean：
+
+- 首次写入自动 `git init`，`.index/` 自动入 `.gitignore`；
+- commit 身份：`[[users]]` 的 `git_user_name` / `git_user_email`（可选）→ 默认 `<id>` / `<id>@yacmemo.com`；仓库已有身份（local/global）绝不覆盖；
+- 外部编辑（Obsidian/vim）在下次 audit 时以 `external:` 快照统一收编；
+- git 不可用时只跳过快照、不阻塞写入；audit 输出末尾的 `== git ==` 行会显示最近一次失败原因，部署后建议看一眼确认"启用"；
+- **unit 必须有 HOME**（见 1.3 注释）；
+- 无远程：记忆仓库纯本地，远程备份（私有 remote / 定期 `git bundle`）列为后续功能。
 
 ## 二、客户端（你的每台电脑，任意 agent）
 
@@ -159,7 +185,7 @@ uv run yacmemo-mcp --root /srv/yacmemo/yachen/memory
 systemctl enable --now yacmemo-curator.timer
 ```
 
-每周产出《curator/提案-<日期>.md》——**只提案，绝不执行**；裁决走 WebUI 审计页或让 agent 执行。详见 [01-architecture.md](01-architecture.md) §十四。
+每周产出《curator/提案-<日期>.md》——**只提案，绝不执行**；裁决走 WebUI 审计页或让 agent 执行。详见 [01-architecture.md](01-architecture.md) §十三。
 
 ## 三、系统提示约定块
 
@@ -167,25 +193,32 @@ systemctl enable --now yacmemo-curator.timer
 
 ```text
 # 记忆使用约定（yacmemo）
+会话开始：
+0. 先调 memory_context 回顾主题体系；需要时用 topic_list 查看主题清单。
 写入前：
 1. 先查后写。写任何记忆前，先用 memory_search 查是否已有同主题笔记。
 2. 已有同主题笔记 → memory_edit / memory_edit_section 增量修改，绝不新建重复笔记。
 3. 新建时标题 = 主题名（如"yacmemo部署配置"），禁止日期后缀和"-2"/"新"等尾巴
    （时间线流水放 journal/ 目录）。
 写入时：
-4. 写提炼后的结论，不贴对话原文；一篇笔记一个主题。
+4. 写提炼后的结论，不贴对话原文；一篇笔记一个主题。状态/部署/选型类信息**就地更新已有笔记**，不新建带日期的快照（标题守卫会拦截同名新笔记）；过程性记录（调研/评估/排查）放 journal/ 或不存。
 5. 事实行用 observation 语法：- [配置] 服务端口为 9721
-6. 与其他笔记相关时写关系：- 部署于 [[debsvc服务器]]
+6. 与其他笔记相关时写关系：- 部署于 [[debsvc]]
 检索时：
 7. memory_search 结果带 ⚠ 标注时，先读两篇，用 memory_edit 合并，然后才回答用户。
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
+主题：
+9. 主题的注册与注销都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了"）→ topic_register / topic_unregister；主题现状写入主题卡并就地更新。
+10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
+删除：
+11. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 ```
 
 不守约也有兜底：守卫拒绝 + force 两级确认 + audit 自愈（见 `04-consistency.md`）。
 
 ## 四、数据管理
 
-- **git**：每个 memory_root 一个仓库（`.index/` 已 ignore）。服务端 `git init` + 定期 commit 即可；真正的事实历史在 git；
+- **git**：每个 memory_root 一个仓库（`.index/` 已 ignore）。**快照全自动**：每次写入/编辑/删除/主题操作自动 commit，仓库永远 git-clean（见 1.4），无需人工维护；
 - **备份**：备份两个 memory 目录（含 `.index` 可省，索引可重建）；
 - **Obsidian**：Syncthing/共享挂载把 memory 目录同步到桌面机，直接打开浏览；
 - **索引重建**：删除 `.index/` 后由任意一次 `memory_audit` 触发的自愈或重启即可全量重建（内容多时用 `reindex`）；

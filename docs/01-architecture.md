@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: 'c2e4bb91-5116-4c19-9452-b62f75e7b5ca'
+  PropagateID: 'c2e4bb91-5116-4c19-9452-b62f75e7b5ca'
+  ReservedCode1: '76d3847b-271a-4253-8eaf-e80db33156d8'
+  ReservedCode2: '76d3847b-271a-4253-8eaf-e80db33156d8'
+---
+
 # yacmemo 精简记忆层设计（v2 终形态）
 
 > 2026-09-13 设计定稿；2026-09-14 更新（HTTP 多机部署模型，P0–P2 已实现）
@@ -69,9 +80,11 @@ SQLite（FTS/元数据/冲突记录）与 LanceDB（向量）全部是派生索�
 
 系统**从不删除、从不隐藏**任何记忆。冲突的两条事实都可见、都返回，只加标注。错杀在架构上不可能发生，git 承载真实历史。
 
-### 原则 5：无常驻服务、无 cron、无队列
+### 原则 5：写入同步，无后台补偿
 
-唯一进程形态是 MCP server（stdio），按 agent 会话启停。索引在写入时同步维护（毫秒级），没有后台扫描、没有 webhook、没有 APScheduler。这直接消灭第一版"每次写入触发全量扫描"的回归。
+唯一的常驻进程是数据所在机器上的 yacmemo-server（HTTP 多用户）与每周一次的 curator timer（只读审查 + 提案落盘，Type=oneshot）。索引与 git 快照在写入时同步完成（毫秒级），没有后台扫描、没有 webhook、没有 APScheduler、没有队列。这直接消灭第一版"每次写入触发全量扫描"的回归。
+
+（演进记录：初版为 stdio 按会话启停、无常驻服务；P3 转 HTTP 多用户后"无状态会话、客户端零进程"不变，服务端常驻成为部署形态的一部分。）
 
 ---
 
@@ -86,7 +99,7 @@ SQLite（FTS/元数据/冲突记录）与 LanceDB（向量）全部是派生索�
 yacmemo-server（debsvc，单进程，streamable HTTP，无状态会话）
   ├── /yachen/mcp → Store(root=/srv/yacmemo/yachen/memory)
   ├── /user2/mcp   → Store(root=/srv/yacmemo/user2/memory)
-  │     ├── store.py      markdown CRUD + 写路径守卫 + 同步索引
+  │     ├── store.py      markdown CRUD + 写路径守卫 + 同步索引 + git 快照
   │     ├── search.py     FTS5(trigram) + 向量 RRF 融合
   │     ├── detectors.py  D1/D3 确定性检测器
   │     ├── index_db.py   SQLite: 元数据/FTS/冲突记录/守卫事件/向量缓存
@@ -99,14 +112,14 @@ yacmemo-curator（systemd timer，每周）——读注册表/主题卡/审计 �
   │
   ▼
 磁盘 (source of truth，单点存放)
-  /srv/yacmemo/yachen/memory/  ← git 仓库
+  /srv/yacmemo/yachen/memory/  ← git 仓库（每次变更自动 commit，永远 git-clean）
   /srv/yacmemo/user2/memory/    ← git 仓库
   各 memory/.index/            ← 可随时删除重建，不进 git
 ```
 
 数据模型从第一版的 nodes/edges/events 三表塌缩为 **notes + observations** 两级：笔记是主体，observation（若 agent 使用语法）是笔记内的事实行，用于更细粒度的检索与撞车检测。没有实体表、没有边表、没有事件表。
 
-两个用户的内存完全独立：各自的 Store 在构造时绑定各自 root（边界固定，不存在懒解析导致的串目录）；HTTP 传输用无状态会话，任意 MCP 客户端无需会话亲和。8 个工具在 `yacmemo/tools.py` 注册一次，stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`）两个入口共享同一工具面。
+两个用户的内存完全独立：各自的 Store 在构造时绑定各自 root（边界固定，不存在懒解析导致的串目录）；HTTP 传输用无状态会话，任意 MCP 客户端无需会话亲和。13 个工具在 `yacmemo/tools.py` 注册一次，stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`）两个入口共享同一工具面。
 
 ---
 
@@ -158,6 +171,17 @@ LanceDB 两张向量表（沿用现有 `vector.py`，三表改两表，维度 10
 
 写入顺序：**先写文件，再更新索引**。进程崩溃最坏情况是索引滞后（下次写入或 `reindex` 修复），文件永不损坏。重建命令：删除 `.index/` 后调 `reindex` 工具。
 
+### 4.4 git 快照（source of truth 的历史层）
+
+每次 store 变更成功后自动产生一个 git commit（write/edit/edit_section/move/save/delete/topic_register/topic_unregister 各有 message 格式），不变式：**记忆仓库永远 git-clean**。
+
+- 首次写入自动 `git init`（写 `.gitignore` 忽略 `.index/`，并设置 repo-local 身份）；已有身份绝不覆盖；
+- 身份可配置：`[[users].git_user_name/git_user_email]` > `[memory].git_user_name/git_user_email]` > 默认 `<id>` / `<id>@yacmemo.com`；
+- 外部直接改文件（Obsidian/vim）由 `memory_audit` 自愈时统一以 `external:` 快照收编；
+- 降级语义：git 不可用/调用失败只跳过快照（warning 日志 + audit 输出 `== git ==` 行显示最近失败原因），**绝不阻塞记忆写入**；
+- 部署注意：systemd 服务默认无 HOME → git 读不到 global gitconfig 的 safe.directory 豁免 → dubious ownership 静默降级（2026-09-16 实测踩坑）；unit 需 `Environment=HOME=/root`，代码层另有 pwd 回填兑底；
+- 无远程：记忆仓库纯本地，远程备份（私有 remote / 定期 bundle）列为后续功能。
+
 ---
 
 ## 五、检索设计
@@ -198,7 +222,7 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 
 ---
 
-## 六、MCP 工具面（8 个）
+## 六、MCP 工具面（13 个）
 
 | 工具 | 签名 | 关键行为 |
 |---|---|---|
@@ -206,10 +230,17 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 | `memory_read` | `path_or_title` | 正文 + 1-hop 相关笔记 |
 | `memory_write` | `title, content, force=false, force_confirm=false` | **近重名拦截**（见 6.1，含两级 force 确认）；写入即同步索引 |
 | `memory_edit` | `path, old_string, new_string` | **锚点唯一性强制**：找不到/命中多处 → 拒绝并列出候选位置 |
-| `memory_edit_section` | `path, heading, new_content` | 按 `##` 标题段替换（P2 实现） |
+| `memory_edit_section` | `path, heading, new_content` | 按 `##` 标题段替换 |
 | `memory_move` | `path, new_path` | 移动 + 全库索引随路径更新（[[链接]] 按标题解析，移动不改标题故无需改写链接） |
-| `memory_audit` | — | 自愈（外部改动/删除的 hash 级重算与清理）+ D1 全量扫描 + collisions 报告 + D3 悬空链接 |
+| `memory_delete` | `path` | **仅用户明确要求时调用**；删文件 + 全部索引行；git 快照保留历史 |
+| `memory_audit` | — | 自愈（外部改动/删除 hash 级重算与清理）+ D1 全量扫描 + collisions 报告 + D3/D4 + 守卫统计 + git 快照状态行 |
 | `memory_list` | `path="", sort="name"\|"mtime"` | 目录树 / 最近变更 |
+| `memory_context` | — | **会话开始先调**：注册表 + 各主题卡摘要头（冷启动回顾） |
+| `topic_list` | — | 列出已注册主题 |
+| `topic_register` | `title, description, related` | 注册新主题（**仅用户明确要求**） |
+| `topic_unregister` | `title` | 注销主题（**仅用户明确要求**；仅移出注册表，笔记不动，游离后裁决） |
+
+完整规格见 [02-mcp-tools.md](02-mcp-tools.md)。
 
 ### 6.1 写路径守卫（本设计的一致性核心）
 
@@ -234,9 +265,9 @@ memory_write(title, content):
 - journal/ 目录不参与拦截；
 - 阈值 `title_similarity_threshold`（默认 0.85）可配，拒绝事件全量落日志用于调阈值。
 
-### 6.2 索引同步性
+### 6.2 索引与快照同步性
 
-所有写工具（write/edit/edit_section/move）在返回成功前同步完成：文件写入 → hash → embedding（仅变更部分）→ FTS/向量/冲突表更新。单次调用总开销 < 300ms（典型笔记）。无懒索引、无后台补偿。
+所有写工具（write/edit/edit_section/move/delete）在返回成功前同步完成：文件写入 → hash → embedding（仅变更部分）→ FTS/向量/冲突表更新 → git 快照。单次调用总开销 < 300ms（典型笔记）。无懒索引、无后台补偿。
 
 ---
 
@@ -292,13 +323,15 @@ memory_write / memory_edit 完成 embedding 后：
 写入时：
 4. 写提炼后的结论，不贴对话原文；一篇笔记一个主题。状态/部署/选型类信息**就地更新已有笔记**，不新建带日期的快照（标题守卫会拦截同名新笔记）；过程性记录（调研/评估/排查）放 journal/ 或不存。
 5. 事实行用 observation 语法：- [配置] 服务端口为 9721
-6. 与其他笔记相关时写关系：- 部署于 [[debsvc服务器]]
+6. 与其他笔记相关时写关系：- 部署于 [[debsvc]]
 检索时：
 7. memory_search 结果带 ⚠ 标注时，先读两篇，用 memory_edit 合并，然后才回答用户。
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
 主题：
 9. 主题的注册与注销都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了"）→ topic_register / topic_unregister；主题现状写入主题卡并就地更新。
 10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
+删除：
+11. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 ```
 
 约定仍会写进提示（第 1、2、4 条减少无效往返），但系统不再**依赖**模型守约——守卫与检测器兜底，这正是本设计与第一版的本质区别。
@@ -309,7 +342,7 @@ memory_write / memory_edit 完成 embedding 后：
 
 **一个服务，所有机器，所有 agent**。yacmemo-server 跑在数据所在的 debsvc 上，以 streamable HTTP 暴露 MCP；任何电脑上的任何 MCP 客户端只需添加 URL（`http://debsvc.local:9721/{user}/mcp`），客户端零安装、零进程。用户隔离 = URL 路径 = 磁盘目录，构造时固定边界。部署细节（systemd、各客户端配置示例、备份）见 `05-deployment.md`。
 
-- git：每个 memory_root 一个仓库，`.index/` 入 `.gitignore`；事实历史由 git 承载；
+- git：每个 memory_root 一个仓库，`.index/` 入 `.gitignore`；每次变更自动快照（见 4.4），事实历史由 git 承载，仓库永远 git-clean；
 - 可选：Syncthing 同步 memory 目录到 Mac 用 Obsidian 浏览；
 - 依赖：`mcp`（FastMCP，锁 `<2`，2.x 的 MCPServer 迁移列为评估项）、`lancedb`、`pyarrow`、`numpy`、`rapidfuzz`、`httpx`、可选 `jieba`。服务端单进程；客户端零依赖。
 
@@ -384,7 +417,7 @@ obs_topk = 5
 
 ---
 
-## 十四、主题注册制与质量策展（2026-09-15 增补）
+## 十三、主题注册制与质量策展（2026-09-15 增补）
 
 > 背景：历史记忆迁移后发现"纷繁而无主次"——所有笔记在系统里平权，冷启动失忆，同主题快照群靠人工偶然发现。解决方案是把"主次"从**检索排序的运气**变成**显式声明的结构**。
 
@@ -399,7 +432,7 @@ obs_topk = 5
 ### curator 质量策展
 
 - `yacmemo-curator` CLI + systemd timer（默认每周六 04:00）；LLM 用主模型端点（`[curator]` 配置节）；
-- 流程：读注册表 + 主题卡 + 审计结果 → LLM 审查 → **提案报告笔记**（`curator/提案-<日期>.md`，状态"待裁决"）；
+- 流程：读注册表 + 主题卡 + 审计结果 → LLM 审查 → **提案报告笔记**（`curator/提案-<日期>.md`，状态"待裁决"）；同日重跑不新建文件，结果以"复审（HH:MM）"小节追加进当天报告（标题保持每日唯一，不触发 D1）；
 - 审查维度：duplicate / outdated / stray / stale-card / merge / forget；
 - **铁律：只提案，绝不执行**——这是 v1"自动失效不问人"教训的最终形态：维护者 LLM 回来了，但被剥夺了一切写权力；
 - 批准的提案由 agent 或人工执行，执行后在报告笔记中留痕。
@@ -408,7 +441,7 @@ obs_topk = 5
 
 新增 `topic_list` / `topic_register` / `topic_unregister` / `memory_context`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。注销只移出注册表、不动笔记（注销后笔记成游离文件，由 D4 点名走裁决），保证主题生命周期全程无静默数据损失。
 
-## 十三、被否决的备选方案（决策记录）
+## 十四、被否决的备选方案（决策记录）
 
 | 方案 | 否决原因 |
 |---|---|

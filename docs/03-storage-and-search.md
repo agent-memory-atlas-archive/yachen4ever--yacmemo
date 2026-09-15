@@ -1,12 +1,24 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: 'c3e7e966-c954-4b74-b08c-e772835d69a5'
+  PropagateID: 'c3e7e966-c954-4b74-b08c-e772835d69a5'
+  ReservedCode1: 'a18180cb-487e-4617-b31a-4984a5a5bbea'
+  ReservedCode2: 'a18180cb-487e-4617-b31a-4984a5a5bbea'
+---
+
 # 存储与检索
 
 > 代码位置：`store.py`（CRUD/守卫/索引）、`index_db.py`（SQLite）、`vector.py`（LanceDB）、`search.py`（融合检索）、`embedding.py`（embedding 客户端）。
 
-## 一、三种存储的角色
+## 一、四种存储的角色
 
 | 存储 | 回答的问题 | 性质 |
 |---|---|---|
-| markdown 文件 | 发生了什么 | **source of truth**，人可读可 git 可 Obsidian |
+| markdown 文件 | 发生了什么 | **source of truth**，人可读可 Obsidian |
+| git 仓库 | 什么时候发生的、改了什么 | 历史层，每次变更自动 commit（见 [01-architecture.md](01-architecture.md) §4.4） |
 | SQLite | 我们知道什么（元数据/全文/冲突/守卫事件/向量缓存） | 派生索引，可重建 |
 | LanceDB | 什么和什么语义相关 | 派生索引，可重建 |
 
@@ -14,7 +26,7 @@
 
 ## 二、文件格式
 
-> 主题注册表 `TOPICS.md` 位于 memory_root 根部（主题注册制见 [01-architecture.md](01-architecture.md) §十四）；`journal/`、`archive/`、`curator/` 为免注册区——不参与主题游离检测。
+
 
 - 一篇一主题；文件名 = 标题（允许中文，非法字符清洗）；
 - 首行 `# 标题` 作为标题来源；无 frontmatter 硬要求；
@@ -94,8 +106,10 @@ fts 落空的 4 条全是自然语句（"服务端口是多少"等），向量�
 |---|---|---|
 | 外部编辑（Obsidian/vim） | audit 比对磁盘 hash ≠ content_hash → 重建该笔记索引 | `memory_audit` |
 | 外部删除 | audit 清理索引行 + 列入 `missing` 报告 | `memory_audit` |
+| 外部改动（编辑/删除/新建） | 索引自愈后统一以一条 `external:` git 快照收编（记录历史，不改文件） | `memory_audit` |
 | 向量索引损坏/丢失 | `reindex`（内部接口）或删除 `.index/` 全量重建 | 人工 |
 | embedding 端点宕机期间写入 | 内容+FTS 正常，向量缺失自动在下一次成功写入/audit 补齐 | 自动 |
+| git 不可用 | 快照跳过不阻塞写入；audit 的 `== git ==` 行显示最近失败原因 | 自动 |
 
 自愈只补索引，**永不改动 markdown 文件**——文件是唯一真相，系统对它的唯一写路径是用户/agent 的显式写工具调用。
 

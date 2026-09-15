@@ -1,6 +1,18 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '35f45d3d-f751-41a0-a58c-4beefcc8bf4a'
+  PropagateID: '35f45d3d-f751-41a0-a58c-4beefcc8bf4a'
+  ReservedCode1: '4c18b8b4-dbd8-4434-8afc-ecc5685cb828'
+  ReservedCode2: '4c18b8b4-dbd8-4434-8afc-ecc5685cb828'
+---
+
 # 一致性机制
 
 > 核心立场：**失效语义优于检测语义**。系统从不删除、从不隐藏任何记忆；违约可见、可逆、可数。
+> 删除只发生在用户明确指令（`memory_delete` / WebUI 删除按钮），且每次删除自动产生 git 快照、历史可恢复——系统自身永不主动删除，这与 v1"自动失效"有本质区别。
 > 代码位置：`store.py`（守卫 + D2 + 游离检测）、`detectors.py`（D1/D3 + 归一化）、`index_db.py`（collisions / guard_events）。
 
 ## 一、为什么一致性要三层防线
@@ -47,7 +59,7 @@
 
 **D3 悬空链接**：`[[目标]]` 不匹配任何既有标题 → audit 列出（多为手误或待创建）。引用目标不含文字的标记（如文献引注 `[[1,28,28]]`）不算链接，已过滤。
 
-**D4 游离文件**：不属于任何注册主题的 markdown 被 audit 点名（免注册区 journal/、archive/、curator/ 豁免）。这是主题注册制的执法机制——主题之外不留藏身之处，注册制本身见 [01-architecture.md](01-architecture.md) §十四。
+**D4 游离文件**：不属于任何注册主题的 markdown 被 audit 点名（免注册区 journal/、archive/、curator/ 豁免）。这是主题注册制的执法机制——主题之外不留藏身之处，注册制本身见 [01-architecture.md](01-architecture.md) §十三。
 
 已知盲区（接受）：措辞距离远但逻辑矛盾的 D2 漏检（如"sys_user 无 role_color"vs"新增 role_color 字段"）。堵住它的代价是全量 LLM 扫描——v1 的教训，不做。
 

@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'bedddb39-70cc-4817-b845-23da65644f1d'
-  PropagateID: 'bedddb39-70cc-4817-b845-23da65644f1d'
-  ReservedCode1: '087e6e8c-fa6c-4225-8c5f-50420f79bd76'
-  ReservedCode2: '087e6e8c-fa6c-4225-8c5f-50420f79bd76'
+  ProduceID: '40a3e2ba-39f4-4467-9c92-69f23eeb85d6'
+  PropagateID: '40a3e2ba-39f4-4467-9c92-69f23eeb85d6'
+  ReservedCode1: '3848ce31-0c5b-403d-9a5c-3d43cec1275c'
+  ReservedCode2: '3848ce31-0c5b-403d-9a5c-3d43cec1275c'
 ---
 
 # MCP 工具规格（13 个）
@@ -18,7 +18,7 @@ AIGC:
 
 - **路径语义**：所有 `path` 参数接受相对 memory_root 的路径或笔记标题（标题精确匹配，见 `memory_read` 的解析顺序）。
 - **同步索引**：所有写工具在返回成功前完成文件写入 → hash → embedding → FTS/向量/冲突表更新，单次典型开销 < 300ms。返回成功即索引可用。
-- **git 快照**：所有写/删除/主题操作在成功后自动产生一个 git commit（`{tool}: {path}` 格式），记忆仓库永远 git-clean；首次写入自动 `git init`（含 `.index/` 忽略与 repo-local 身份）；git 不可用时降级为只写不快照，绝不阻塞记忆功能。外部直接改文件（Obsidian/vim）的改动由 `memory_audit` 自愈时统一快照（`external:` 前缀）。
+- **git 快照**：所有写/删除/主题操作在成功后自动产生一个 git commit（`{tool}: {path}` 格式），记忆仓库永远 git-clean；首次写入自动 `git init`（含 `.index/` 忽略与 repo-local 身份）；git 不可用时降级为只写不快照，绝不阻塞记忆功能。外部直接改文件（Obsidian/vim）的改动由 `memory_audit` 自愈时统一快照（`external:` 前缀）。commit 身份按 `[[users].git_user_name/email]` > `[memory].git_user_name/email]` > 默认 `<id>` / `<id>@yacmemo.com` 解析，仓库已有身份绝不覆盖；最近一次快照失败会显示在 `memory_audit` 输出的 `== git ==` 行（消灭静默降级）。
 - **失败语义**：文件永远是第一位。embedding 失败时内容照常写入、FTS 照常更新，仅向量/D2 缺失（下次写入或 `memory_audit` 自愈补齐）。
 - **守卫拒绝是正常返回**（不是错误）：agent 应读拒绝消息并改用建议的工具。
 

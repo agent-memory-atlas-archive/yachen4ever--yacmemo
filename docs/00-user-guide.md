@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '11afbb7e-04f0-479a-922b-80946560a070'
+  PropagateID: '11afbb7e-04f0-479a-922b-80946560a070'
+  ReservedCode1: '518fff94-ba23-477e-bb99-aad08d19ed0c'
+  ReservedCode2: '518fff94-ba23-477e-bb99-aad08d19ed0c'
+---
+
 # 用户使用手册
 
 > 这份手册写给**使用者**：你怎么把 yacmemo 用起来、用好。设计与实现细节在 01–06 号文档，本篇只讲"怎么做"。
@@ -168,6 +179,8 @@ memory 目录就是普通 markdown，你可以完全绕开 agent：
 - 你删了文件 → audit 清理索引并报告；
 - 你新建的文件 → audit 重算时纳入索引。
 
+这些外部改动在 audit 时同时被 git 收编为一条 `external:` 快照——索引与历史保持一致。
+
 三条纪律：
 
 1. **别动 `.index/` 目录**——那是派生索引，动了也没事，删掉能重建，但没必要碰；
@@ -195,7 +208,7 @@ root = "/srv/yacmemo/user2/memory"
 ## 五、备份与迁移
 
 - **备份 = 备份两个 memory 目录**。`.index/` 不用备（可重建）；真正不可再生的只有 markdown 和 git 历史；
-- git 是最好的备份：服务端 `git init` 后让 agent 养成"大改动后 commit"的习惯，或加个定时 commit 的 cron；
+- git 历史是自动的：每次写入/编辑/删除/主题操作都会自动 commit（无需人工维护，仓库永远干净），误删可从历史找回；
 - **迁移**：新机器拷贝 memory 目录 → 改 config 里的 root 路径 → 启动。索引会自动重建。
 
 ---
@@ -246,13 +259,16 @@ root = "/srv/yacmemo/user2/memory"
 **Q：我想重置一切从头开始？**
 删掉两个 memory 目录（或 git 里开新分支）→ 重启服务。索引与记忆一起归零。`.index/` 单独删则是只重置索引。
 
+**Q：怎么删除某条记忆？**
+对 agent 说"删掉 X"，它会调 `memory_delete`（仅在你明确要求时才会执行）；WebUI 笔记页也有删除按钮。删除会自动产生 git 快照，随时可从历史找回。
+
 ---
 
 ## 八、好习惯清单
 
 - [ ] 系统提示里贴了约定块
-- [ ] 每周做一次 `memory_audit`（或 WebUI 审计页点一下）
-- [ ] memory 目录有 git（或别的备份）
+- [ ] 每周做一次 `memory_audit`（或 WebUI 审计页点一下），顺带确认 `== git ==` 行显示"启用"（快照机制健康）
+- [ ] memory 目录有异地备份（本地 git 快照只防误删，不防磁盘损坏）
 - [ ] 让 agent 大量记录前，先用几条真实事项试一周，看看它的命名和合并习惯
 - [ ] `journal/` 只放流水账，别把该立主题的笔记埋进去
 - [ ] 记忆超过几百篇后，重跑一次 [评测脚本](06-evaluation.md)，看看真实数据下的命中率
