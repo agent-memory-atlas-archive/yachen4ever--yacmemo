@@ -53,7 +53,10 @@ def main():
     else:
         logger.warning("Embedding endpoint not configured — running FTS-only.")
 
-    store = Store(config, db, emb, vectors)
+    from yacmemo.config import resolve_git_identity
+    git_name, git_email = resolve_git_identity(None, config)
+    store = Store(config, db, emb, vectors,
+                  git_user=git_name, git_email=git_email)
     searcher = Searcher(config, db, emb, vectors)
 
     mcp = FastMCP("yacmemo")

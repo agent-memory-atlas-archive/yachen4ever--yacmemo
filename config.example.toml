@@ -54,10 +54,16 @@ timeout = 300
 # Each user mounts at /{id}/mcp on the server port; the root directory IS the
 # isolation boundary. Agents on any machine add e.g.:
 #   http://debsvc.local:9721/yachen/mcp
+#
+# Optional per-user git identity for memory-repo snapshot commits
+# (empty -> [memory].git_user_name/email -> "<id>" / "<id>@yacmemo.com").
+# Only applied when the repo has no identity yet; existing config wins.
 
 [[users]]
 id = "yachen"
 root = "/srv/yacmemo/yachen/memory"
+# git_user_name = "王旭晨"
+# git_user_email = "wangxc4@chinatelecom.cn"
 
 [[users]]
 id = "user2"

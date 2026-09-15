@@ -29,9 +29,12 @@ _GITIGNORE = ".index/\n"
 class GitSnapshots:
     """Best-effort per-mutation git commits for one memory root."""
 
-    def __init__(self, root: Path, enabled: bool = True):
+    def __init__(self, root: Path, enabled: bool = True,
+                 user_name: str = "", user_email: str = ""):
         self.root = root
         self._lock = threading.Lock()
+        self._user_name = user_name
+        self._user_email = user_email
         self._disabled_reason = ""
         self._git = shutil.which("git") if enabled else None
         if not enabled:
@@ -48,23 +51,24 @@ class GitSnapshots:
                               capture_output=True, text=True, check=check)
 
     def _ensure_repo(self) -> bool:
-        """Auto-init a fresh memory root on first snapshot; set a repo-local
-        identity so commits work on machines without global git config."""
+        """Auto-init a fresh memory root on first snapshot, and make sure a
+        commit identity exists (configured value, else yacmemo local defaults).
+        Repo-local config is only written when neither local nor global
+        identity is set — an existing identity is never overwritten."""
         r = self._run("rev-parse", "--is-inside-work-tree", check=False)
-        if r.returncode == 0 and r.stdout.strip() == "true":
-            return True
-        init = self._run("init", "-q", check=False)
-        if init.returncode != 0:
-            self._disabled_reason = init.stderr.strip() or "git init 失败"
-            return False
-        ignore = self.root / ".gitignore"
-        if not ignore.exists():
-            ignore.write_text(_GITIGNORE, encoding="utf-8")
-        if self._run("config", "user.email", "yacmemo@local",
-                     check=False).returncode != 0:
-            self._disabled_reason = "git config user.email 失败"
-            return False
-        self._run("config", "user.name", "yacmemo", check=False)
+        if r.returncode != 0 or r.stdout.strip() != "true":
+            init = self._run("init", "-q", check=False)
+            if init.returncode != 0:
+                self._disabled_reason = init.stderr.strip() or "git init 失败"
+                return False
+            ignore = self.root / ".gitignore"
+            if not ignore.exists():
+                ignore.write_text(_GITIGNORE, encoding="utf-8")
+        for key, fallback in (("user.name", self._user_name or "yacmemo"),
+                              ("user.email", self._user_email or "yacmemo@local")):
+            cur = self._run("config", key, check=False)
+            if cur.returncode != 0 or not cur.stdout.strip():
+                self._run("config", key, fallback, check=False)
         return True
 
     def commit(self, message: str) -> str | None:

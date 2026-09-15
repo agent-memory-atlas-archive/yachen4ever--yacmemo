@@ -24,7 +24,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from yacmemo.config import Config, UserEntry, load_config
+from yacmemo.config import Config, UserEntry, load_config, resolve_git_identity
 from yacmemo.embedding import EmbeddingClient
 from yacmemo.index_db import IndexDB
 from yacmemo.search import Searcher
@@ -66,7 +66,9 @@ def build_user_mcp(config: Config, user: UserEntry, usage: UsageDB | None
     else:
         logger.warning("[%s] Embedding endpoint not configured — FTS-only.", user.id)
 
-    store = Store(config, db, emb, vectors, root=root)
+    git_name, git_email = resolve_git_identity(user, config)
+    store = Store(config, db, emb, vectors, root=root,
+                  git_user=git_name, git_email=git_email)
     searcher = Searcher(config, db, emb, vectors)
     register_tools(mcp, store, searcher, usage=usage, user_id=user.id)
     ctx = {"store": store, "searcher": searcher, "db": db, "usage": usage,

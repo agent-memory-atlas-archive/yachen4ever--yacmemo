@@ -70,7 +70,8 @@ class Store:
     def __init__(self, config: Config, db: IndexDB,
                  emb: EmbeddingClient | None = None,
                  vectors: VectorStore | None = None,
-                 root: str | Path | None = None):
+                 root: str | Path | None = None,
+                 git_user: str = "", git_email: str = ""):
         self.config = config
         self.db = db
         self.emb = emb
@@ -82,7 +83,8 @@ class Store:
                      else config.root_abs)
         self.root.mkdir(parents=True, exist_ok=True)
         self.snapshots = GitSnapshots(self.root,
-                                      enabled=config.memory.git_snapshots)
+                                      enabled=config.memory.git_snapshots,
+                                      user_name=git_user, user_email=git_email)
         self._lock = threading.RLock()
         for name in self._MUTATING:
             fn = getattr(self, name)

@@ -83,3 +83,45 @@ def test_disabled_via_config(tmp_path):
         assert "停用" in s.snapshots.status_line()
     finally:
         db.close()
+
+
+def test_resolve_git_identity_priorities():
+    """user override > [memory] override > id defaults."""
+    from yacmemo.config import Config, MemoryConfig, UserEntry, resolve_git_identity
+
+    cfg = Config(memory=MemoryConfig(root="/tmp/x"))
+    u = UserEntry(id="yachen", root="/m")
+    assert resolve_git_identity(u, cfg) == ("yachen", "yachen@yacmemo.com")
+    assert resolve_git_identity(None, cfg) == ("local", "local@yacmemo.com")
+
+    u2 = UserEntry(id="yachen", root="/m",
+                   git_user_name="王旭晨", git_user_email="w@x.cn")
+    assert resolve_git_identity(u2, cfg) == ("王旭晨", "w@x.cn")
+
+    cfg2 = Config(memory=MemoryConfig(root="/tmp/x",
+                                      git_user_name="全局", git_user_email="g@x.cn"))
+    assert resolve_git_identity(u, cfg2) == ("全局", "g@x.cn")
+    assert resolve_git_identity(u2, cfg2) == ("王旭晨", "w@x.cn")  # user wins
+
+
+def test_configured_identity_lands_on_commits(store: Store):
+    """Store(git_user=..., git_email=...) -> commits carry that identity."""
+    s = Store(store.config, store.db, store.emb, store.vectors,
+              root=store.root, git_user="王旭晨",
+              git_email="wangxc4@chinatelecom.cn")
+    r = s.write("身份测试", "# 身份测试\n内容\n")
+    author = _git(store.root, "log", "--format=%an <%ae>",
+                  "--", r["path"]).strip()
+    assert author == "王旭晨 <wangxc4@chinatelecom.cn>"
+
+
+def test_existing_identity_not_overwritten(store: Store):
+    """A repo with pre-set identity keeps it — no silent overwrite."""
+    _git(store.root, "init", "-q")
+    _git(store.root, "config", "user.name", "预置用户")
+    _git(store.root, "config", "user.email", "pre@set.dev")
+    s = Store(store.config, store.db, store.emb, store.vectors,
+              root=store.root, git_user="不应生效", git_email="no@pe.com")
+    r = s.write("预置身份", "# 预置身份\n内容\n")
+    author = _git(store.root, "log", "--format=%an", "--", r["path"]).strip()
+    assert author == "预置用户"

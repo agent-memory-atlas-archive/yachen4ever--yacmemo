@@ -19,6 +19,10 @@ class MemoryConfig:
     # Per-mutation git snapshots ("memory repo is always git-clean");
     # auto-init on first write, degrade to no-op when git is unavailable
     git_snapshots: bool = True
+    # Optional git identity for snapshot commits; empty -> "local"/
+    # "local@yacmemo.com" in stdio mode (server users default to their id)
+    git_user_name: str = ""
+    git_user_email: str = ""
 
 
 @dataclass
@@ -71,6 +75,10 @@ class UserEntry:
     """One mounted memory root in the HTTP server; id must be URL-safe."""
     id: str
     root: str
+    # Optional per-user git identity for memory-repo snapshot commits;
+    # empty -> fall back to [memory].git_user_name/email, then to id/id@yacmemo.com
+    git_user_name: str = ""
+    git_user_email: str = ""
 
 
 # ids that would shadow server routes
@@ -138,13 +146,17 @@ def load_config(path: str | None = None) -> Config:
                 f"用户 id 非法（需 [A-Za-z0-9_-]，1-32 位，用作 URL 路径）: {uid!r}")
         if uid in _RESERVED_IDS:
             raise ValueError(f"用户 id 不能是保留字: {uid!r}")
-        users.append(UserEntry(id=uid, root=str(u.get("root", ""))))
+        users.append(UserEntry(id=uid, root=str(u.get("root", "")),
+                               git_user_name=str(u.get("git_user_name", "")),
+                               git_user_email=str(u.get("git_user_email", ""))))
 
     cfg = Config(
         memory=MemoryConfig(
             root=mem.get("root", MemoryConfig.root),
             journal_dir=mem.get("journal_dir", MemoryConfig.journal_dir),
             git_snapshots=mem.get("git_snapshots", MemoryConfig.git_snapshots),
+            git_user_name=str(mem.get("git_user_name", "")),
+            git_user_email=str(mem.get("git_user_email", "")),
         ),
         embedding=EmbeddingConfig(
             base_url=emb.get("base_url", EmbeddingConfig.base_url),
@@ -187,3 +199,17 @@ def load_config(path: str | None = None) -> Config:
     )
     cfg.config_path = path
     return cfg
+
+
+def resolve_git_identity(user: UserEntry | None, config: Config) -> tuple[str, str]:
+    """Git identity for one memory repo's snapshot commits.
+
+    Priority: per-user override ([[users].git_user_name/email]) > global
+    [memory].git_user_name/email > defaults (user id / id@yacmemo.com;
+    "local" in single-user stdio mode)."""
+    uid = user.id if user else "local"
+    name = ((user.git_user_name if user else "")
+            or config.memory.git_user_name or uid)
+    email = ((user.git_user_email if user else "")
+             or config.memory.git_user_email or f"{uid}@yacmemo.com")
+    return name, email

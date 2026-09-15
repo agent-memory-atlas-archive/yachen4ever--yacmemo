@@ -171,7 +171,10 @@ def run_check(config: Config, user: UserEntry, dry_run: bool = False,
                               timeout=config.embedding.timeout)
         vectors = VectorStore(str(root / ".index" / "lancedb"),
                               config.embedding.dimensions)
-    store = Store(config, db, emb, vectors, root=root)
+    from yacmemo.config import resolve_git_identity
+    git_name, git_email = resolve_git_identity(user, config)
+    store = Store(config, db, emb, vectors, root=root,
+                  git_user=git_name, git_email=git_email)
 
     material = build_material(store)
     call = llm_call or default_llm_call(config)
