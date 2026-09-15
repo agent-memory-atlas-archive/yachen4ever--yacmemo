@@ -328,7 +328,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"注销失败: {e}"
             return (f"已注销主题「{r['title']}」：注册表已移除，笔记文件未动。"
-                    f"原主题卡: {r['card'] or '（未记录）'}"
+                    f"原主题卡: {r['card'] or '（未记录）'}。"
                     f"相关笔记现为游离文件（审计会点名），请与用户确认后用 "
                     f"memory_move 归位 archive/，或明确确认后删除。")
 
