@@ -1,4 +1,4 @@
-# MCP 工具规格（8 个）
+# MCP 工具规格（11 个）
 
 > 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。
 > 所有工具返回人类可读文本；错误以中文消息直接返回（不抛协议错误），agent 可读可自纠。
@@ -144,4 +144,46 @@ memory_list(path: str = "", sort: str = "name") -> str
 要找"某件事记在哪"？    → memory_search（关键词式 query）
 要梳理一个主题全貌？    → memory_read（看相关笔记链路）
 定期体检？              → memory_audit
+```
+
+
+## 9. topic_list
+
+```
+topic_list() -> str
+```
+
+列出当前注册的全部长期记忆主题（标题、一句话现状、主题卡路径）。免注册区（journal/、archive/、curator/）单列说明。
+
+## 10. topic_register
+
+```
+topic_register(title: str, description: str = "", related: str = "") -> str
+```
+
+注册新的长期记忆主题：追加到 `TOPICS.md` 注册表，并创建主题卡（`topics/<主题>/主题卡.md`，或用既有笔记充当卡）。
+
+- **调用门槛**：仅在用户明确要求时调用（"把 X 加入长期记忆"）——这条写进约定块，注册行为本身即用户授权的凭证；
+- 重复主题名拒绝（提示直接编辑既有主题卡）；
+- 注册后主题卡与注册表立即入索引。
+
+## 11. memory_context
+
+```
+memory_context() -> str
+```
+
+**每次会话开始先调用**。返回核心记忆上下文 = `TOPICS.md` 注册表全文 + 各主题卡摘要头（前 12 行）。解决冷启动失忆：agent 不必"想到去搜什么"，主题体系直接在场。
+
+## Agent 决策树（更新）
+
+```
+会话开始              → memory_context（回顾主题体系）
+用户要新增长期记忆主题 → topic_register（仅用户明示时）→ memory_write
+要记一个新主题？      → memory_search 查重 → memory_write（被拒转 edit）
+要更新已有事实？      → memory_edit / memory_edit_section
+要找"某件事记在哪"？  → memory_search（关键词式 query）
+要梳理一个主题全貌？  → memory_read / 主题卡
+定期体检？            → memory_audit（+ WebUI 审计页）
+不知道有哪些主题？    → topic_list
 ```

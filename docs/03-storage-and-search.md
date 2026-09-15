@@ -14,6 +14,8 @@
 
 ## 二、文件格式
 
+> 主题注册表 `TOPICS.md` 位于 memory_root 根部（主题注册制见 [01-architecture.md](01-architecture.md) §十四）；`journal/`、`archive/`、`curator/` 为免注册区——不参与主题游离检测。
+
 - 一篇一主题；文件名 = 标题（允许中文，非法字符清洗）；
 - 首行 `# 标题` 作为标题来源；无 frontmatter 硬要求；
 - 正文自由格式。两个**可选**语法增强检索与一致性：

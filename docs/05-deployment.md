@@ -148,6 +148,18 @@ uv run yacmemo-mcp --root /srv/yacmemo/yachen/memory
 
 页面与 API 的完整说明见 [08-webui.md](08-webui.md)。WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。
 
+### 2.3 curator 质量策展（可选）
+
+`[curator]` 配置节指向主模型端点后，部署每周 timer：
+
+```bash
+# /etc/systemd/system/yacmemo-curator.service（Type=oneshot，ExecStart=.venv/bin/yacmemo-curator --config ...）
+# /etc/systemd/system/yacmemo-curator.timer（OnCalendar=Sat *-*-* 04:00:00, Persistent=true）
+systemctl enable --now yacmemo-curator.timer
+```
+
+每周产出《curator/提案-<日期>.md》——**只提案，绝不执行**；裁决走 WebUI 审计页或让 agent 执行。详见 [01-architecture.md](01-architecture.md) §十四。
+
 ## 三、系统提示约定块
 
 贴进每个会写记忆的 agent 的系统提示（原文见 `01-architecture.md` 第八节）：

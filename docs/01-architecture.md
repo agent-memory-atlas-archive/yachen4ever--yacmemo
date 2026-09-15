@@ -94,6 +94,8 @@ yacmemo-server（debsvc，单进程，streamable HTTP，无状态会话）
   │     └── embedding.py  omlx /v1/embeddings（唯一的模型调用）
   ├── /ui/          → WebUI 控制台（笔记/搜索/审计/使用记录/健康）
   └── GET /health
+  ▼
+yacmemo-curator（systemd timer，每周）——读注册表/主题卡/审计 → 产出质量提案报告（只提案，绝不执行）
   │
   ▼
 磁盘 (source of truth，单点存放)
@@ -381,6 +383,30 @@ obs_topk = 5
 | 7 | 双索引（FTS/LanceDB）与文件的一致性 | 先文件后索引的写序 + 索引可全量重建，最坏降级不损坏 |
 
 ---
+
+## 十四、主题注册制与质量策展（2026-09-15 增补）
+
+> 背景：历史记忆迁移后发现"纷繁而无主次"——所有笔记在系统里平权，冷启动失忆，同主题快照群靠人工偶然发现。解决方案是把"主次"从**检索排序的运气**变成**显式声明的结构**。
+
+### 主题注册制
+
+- **主题由用户显式声明**（"把 X 加入长期记忆"），agent 调用 `topic_register` 注册——工具调用即用户授权的凭证；agent 平时只能提案，不能自行注册；
+- 每个主题 = **主题卡**（现状手册，就地更新）+ 相关笔记/子目录。TOPICS.md 为注册表与目录；
+- `memory_context` 工具（会话开始先调）返回注册表 + 各主题卡摘要头，解决冷启动失忆；
+- audit 新增**游离文件检测**：不属于任何注册主题的散文件被点名（免注册区：journal/、archive/、curator/）；
+- 设计立场：**主次是被声明的，不是被算出来的**——不做重要度打分/衰减函数/自动摘要。
+
+### curator 质量策展
+
+- `yacmemo-curator` CLI + systemd timer（默认每周六 04:00）；LLM 用主模型端点（`[curator]` 配置节）；
+- 流程：读注册表 + 主题卡 + 审计结果 → LLM 审查 → **提案报告笔记**（`curator/提案-<日期>.md`，状态"待裁决"）；
+- 审查维度：duplicate / outdated / stray / stale-card / merge / forget；
+- **铁律：只提案，绝不执行**——这是 v1"自动失效不问人"教训的最终形态：维护者 LLM 回来了，但被剥夺了一切写权力；
+- 批准的提案由 agent 或人工执行，执行后在报告笔记中留痕。
+
+### 工具面（8 → 11）
+
+新增 `topic_list` / `topic_register` / `memory_context`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。
 
 ## 十三、被否决的备选方案（决策记录）
 
