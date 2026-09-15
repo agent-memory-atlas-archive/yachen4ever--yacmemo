@@ -453,6 +453,36 @@ class Store:
                          self.topics_file().read_text(encoding="utf-8"))
         return {"title": title, "card": card_path, "registered": now}
 
+    def topic_unregister(self, title: str) -> dict:
+        """Remove a topic from TOPICS.md (user-instructed). Notes are untouched:
+        they become stray files (D4) pending an explicit follow-up decision."""
+        p = self.topics_file()
+        if not p.is_file():
+            raise StoreError("尚无主题注册表。")
+        lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+        start = None
+        for i, ln in enumerate(lines):
+            if ln.rstrip("\r\n") == f"## {title}":
+                start = i
+                break
+        if start is None:
+            known = "、".join(t["title"] for t in self.load_topics()) or "（空）"
+            raise StoreError(f"注册表中没有主题: {title}。现有主题: {known}")
+        end = len(lines)
+        for j in range(start + 1, len(lines)):
+            if lines[j].startswith("## "):
+                end = j
+                break
+        removed_card = ""
+        for ln in lines[start:end]:
+            if ln.startswith("- 卡: "):
+                removed_card = ln[len("- 卡: "):].strip()
+        del lines[start:end]
+        p.write_text("".join(lines), encoding="utf-8")
+        self._index_note(TOPICS_FILE, "主题记忆注册表",
+                         p.read_text(encoding="utf-8"))
+        return {"title": title, "card": removed_card}
+
     def memory_context(self, card_lines: int = 12) -> str:
         """Cold-start context: registry + topic-card excerpts. Call once per session."""
         topics = self.load_topics()

@@ -60,3 +60,30 @@ def test_audit_stray_detection(tstore: Store):
     assert "journal/2026-09-14-流水.md" not in tstore._stray_files(tstore.load_topics())
     # audit() must expose stray (regression: the field was once silently missing)
     assert tstore.audit()["stray"] == ["散文件.md"]
+
+
+def test_topic_unregister_removes_block_keeps_header(tstore: Store):
+    header_head = tstore.topics_file().read_text(encoding="utf-8").splitlines()[0]
+    r = tstore.topic_unregister("笔记主题")
+    assert r["card"] == "notes/a.md"
+    text = tstore.topics_file().read_text(encoding="utf-8")
+    assert "笔记主题" not in text
+    assert text.splitlines()[0] == header_head  # header preserved
+    assert tstore.load_topics() == []
+    # notes untouched
+    assert (tstore.root / "notes" / "a.md").is_file()
+    # former related file becomes stray
+    assert tstore.audit()["stray"] == ["notes/a.md", "notes/b.md"]
+
+
+def test_topic_unregister_unknown_title_lists_existing(tstore: Store):
+    with pytest.raises(StoreError) as e:
+        tstore.topic_unregister("不存在的主题")
+    assert "笔记主题" in str(e.value)
+
+
+def test_re_register_after_unregister(tstore: Store):
+    tstore.topic_unregister("笔记主题")
+    r = tstore.topic_register("笔记主题", description="重新注册")
+    assert r["card"] == "topics/笔记主题/主题卡.md"
+    assert len(tstore.load_topics()) == 1

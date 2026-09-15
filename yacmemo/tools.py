@@ -311,6 +311,28 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                     f"该主题后续的笔记写入主题卡所在目录；现状变化就地更新主题卡。")
 
     @mcp.tool()
+    def topic_unregister(title: str, ctx: Context = None) -> str:
+        """注销一个长期记忆主题（仅在用户明确要求时调用，如"X 不用长期记录了"）。
+        仅移出注册表，笔记文件一律不动。
+
+        Args:
+            title: 主题名（与 topic_list 中一致）
+        """
+        out = {"ok": True, "error": ""}
+        with _logged("topic_unregister", ctx, f"title={title}", out):
+            try:
+                r = store.topic_unregister(title)
+            except StoreError as e:
+                return f"{e}"
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"注销失败: {e}"
+            return (f"已注销主题「{r['title']}」：注册表已移除，笔记文件未动。"
+                    f"原主题卡: {r['card'] or '（未记录）'}"
+                    f"相关笔记现为游离文件（审计会点名），请与用户确认后用 "
+                    f"memory_move 归位 archive/，或明确确认后删除。")
+
+    @mcp.tool()
     def memory_context(ctx: Context = None) -> str:
         """返回核心记忆上下文：主题注册表 + 各主题卡摘要头。每次会话开始时先调用一次。"""
         out = {"ok": True, "error": ""}
