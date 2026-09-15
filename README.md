@@ -69,7 +69,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 **第一次用？**请先读 [用户使用手册](docs/00-user-guide.md)——上手、日常用法、常见问题都在里面。
 
-## MCP 工具（11 个）
+## MCP 工具（12 个）
 
 | 工具 | 用途 |
 |---|---|
@@ -84,6 +84,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `memory_context` | **会话开始先调**：返回主题注册表 + 各主题卡摘要头（冷启动回顾） |
 | `topic_list` | 列出已注册的长期记忆主题 |
 | `topic_register` | 注册新主题（**仅在用户明确要求时调用**，如"把 X 加入长期记忆"） |
+| `topic_unregister` | 注销主题（仅用户明示；只移出注册表，笔记不动，游离后裁决） |
 
 完整规格：[docs/02-mcp-tools.md](docs/02-mcp-tools.md)；使用约定（贴进 agent 系统提示）：[docs/01-architecture.md](docs/01-architecture.md) 第八节。
 

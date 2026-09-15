@@ -297,7 +297,7 @@ memory_write / memory_edit 完成 embedding 后：
 7. memory_search 结果带 ⚠ 标注时，先读两篇，用 memory_edit 合并，然后才回答用户。
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
 主题：
-9. 用户明确要求时（"把 X 加入长期记忆"）用 topic_register 注册新主题；主题现状写入主题卡并就地更新。
+9. 主题的注册与注销都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了"）→ topic_register / topic_unregister；主题现状写入主题卡并就地更新。
 10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
 ```
 
@@ -406,7 +406,7 @@ obs_topk = 5
 
 ### 工具面（8 → 11）
 
-新增 `topic_list` / `topic_register` / `memory_context`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。
+新增 `topic_list` / `topic_register` / `topic_unregister` / `memory_context`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。注销只移出注册表、不动笔记（注销后笔记成游离文件，由 D4 点名走裁决），保证主题生命周期全程无静默数据损失。
 
 ## 十三、被否决的备选方案（决策记录）
 

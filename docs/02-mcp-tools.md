@@ -1,4 +1,4 @@
-# MCP 工具规格（11 个）
+# MCP 工具规格（12 个）
 
 > 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。
 > 所有工具返回人类可读文本；错误以中文消息直接返回（不抛协议错误），agent 可读可自纠。
@@ -167,7 +167,19 @@ topic_register(title: str, description: str = "", related: str = "") -> str
 - 重复主题名拒绝（提示直接编辑既有主题卡）；
 - 注册后主题卡与注册表立即入索引。
 
-## 11. memory_context
+## 11. topic_unregister
+
+```
+topic_unregister(title: str) -> str
+```
+
+注销长期记忆主题：把该主题块从 `TOPICS.md` 移除（其余内容逐字保留）。
+
+- **调用门槛与注册相同**：仅在用户明确要求时调用（"X 不用长期记录了"）；
+- **只动注册表，笔记文件一律不动**——注销后相关笔记成为游离文件（D4 点名），工具返回消息会引导 agent 与用户确认后归位 `archive/` 或删除；
+- 未知主题名拒绝并列出现有主题。
+
+## 12. memory_context
 
 ```
 memory_context() -> str
@@ -180,6 +192,7 @@ memory_context() -> str
 ```
 会话开始              → memory_context（回顾主题体系）
 用户要新增长期记忆主题 → topic_register（仅用户明示时）→ memory_write
+用户不再长期记录某主题 → topic_unregister（仅用户明示）→ 引导归位/清理
 要记一个新主题？      → memory_search 查重 → memory_write（被拒转 edit）
 要更新已有事实？      → memory_edit / memory_edit_section
 要找"某件事记在哪"？  → memory_search（关键词式 query）
