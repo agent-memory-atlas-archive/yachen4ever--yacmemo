@@ -83,6 +83,7 @@ class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     curator: CuratorConfig = field(default_factory=CuratorConfig)
     users: list[UserEntry] = field(default_factory=list)
+    config_path: str | None = None  # set by load_config when a TOML file was used
 
     @property
     def root_abs(self) -> Path:
@@ -136,7 +137,7 @@ def load_config(path: str | None = None) -> Config:
             raise ValueError(f"用户 id 不能是保留字: {uid!r}")
         users.append(UserEntry(id=uid, root=str(u.get("root", ""))))
 
-    return Config(
+    cfg = Config(
         memory=MemoryConfig(
             root=mem.get("root", MemoryConfig.root),
             journal_dir=mem.get("journal_dir", MemoryConfig.journal_dir),
@@ -180,3 +181,5 @@ def load_config(path: str | None = None) -> Config:
         ),
         users=users,
     )
+    cfg.config_path = path
+    return cfg

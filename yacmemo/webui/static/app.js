@@ -57,6 +57,8 @@ for (const btn of $("tabs").querySelectorAll("button")) {
     $(`tab-${btn.dataset.tab}`).hidden = false;
     if (btn.dataset.tab === "health") loadHealth();
     if (btn.dataset.tab === "usage") loadUsage();
+    if (btn.dataset.tab === "settings") loadConfig();
+    if (btn.dataset.tab === "audit") loadProposals();
   };
 }
 
@@ -247,21 +249,32 @@ $("btn-new").onclick = () => {
 $("btn-search").onclick = async () => {
   const q = $("search-q").value.trim();
   if (!q) return;
-  $("search-results").innerHTML = `<div class="muted">搜索中…</div>`;
+  $("search-results").innerHTML = `<div class="muted center">搜索中…</div>`;
   try {
     const data = await api(`/api/${state.user}/search?q=${encodeURIComponent(q)}` +
                            `&kind=${$("search-kind").value}`);
     if (!data.results.length) {
-      $("search-results").innerHTML = `<div class="muted center">未找到相关笔记</div>`;
+      $("search-results").innerHTML = `<div class="empty">未找到相关笔记</div>`;
       return;
     }
-    $("search-results").innerHTML = data.results.map((r, i) => `
+    const maxScore = Math.max(...data.results.map((r) => r.score || 0), 1e-6);
+    $("search-results").innerHTML = data.results.map((r, i) => {
+      const pct = Math.round((r.score / maxScore) * 100);
+      const chips = (r.channels || []).map((c) => `<span class="chip ${c}">${c}</span>`).join("");
+      const warns = (r.warnings || []).map((w) => `<div class="warnline">⚠ ${esc(w)}</div>`).join("");
+      return `
       <div class="hit" data-path="${esc(r.path)}">
-        <div>${i + 1}. <b>${esc(r.title)}</b>
-             <span class="muted">(score ${r.score?.toFixed?.(4) ?? r.score}, ${(r.channels || []).join("+")})</span></div>
+        <div class="hit-head">
+          <span class="rank">${i + 1}</span>
+          <span class="hit-title">${esc(r.title)}</span>
+          ${chips}
+          <span class="score-wrap"><span class="score-bar" style="width:${pct}%"></span></span>
+          <span class="score-num">${(r.score ?? 0).toFixed(4)}</span>
+        </div>
         <div class="path">${esc(r.path)}</div>
-        ${(r.warnings || []).map((w) => `<div class="warnline">⚠ ${esc(w)}</div>`).join("")}
-      </div>`).join("");
+        ${warns}
+      </div>`;
+    }).join("");
     for (const el of $("search-results").querySelectorAll(".hit")) {
       el.onclick = () => {
         document.querySelector('#tabs [data-tab="notes"]').click();
@@ -276,8 +289,53 @@ $("search-q").onkeydown = (e) => { if (e.key === "Enter") $("btn-search").click(
 
 // ---------------------------------------------------------------- audit
 
+$("btn-curator-run").onclick = async () => {
+  if (!confirm("深度审查将把注册表、主题卡与审计结果交给配置的 LLM，产出提案报告（只提案，不执行）。继续？")) return;
+  $("audit-status").textContent = "深度审查中（约 1-2 分钟，请勿关闭页面）…";
+  try {
+    const data = await api(`/api/${state.user}/curator`, { method: "POST" });
+    $("audit-status").textContent = "";
+    toast("提案报告已生成并入库");
+    await loadProposals();
+    renderProposalMd(data.report);
+  } catch (e) {
+    $("audit-status").textContent = e.message;
+    toast(e.message, true);
+  }
+};
+
+async function loadProposals() {
+  try {
+    const data = await api(`/api/${state.user}/proposals`);
+    const list = $("proposal-list");
+    if (!data.proposals.length) {
+      list.innerHTML = `<span class="muted">暂无提案——点上方「深度审查」生成，或等每周六 04:00 的定时审查。</span>`;
+      $("proposal-view").hidden = true;
+      return;
+    }
+    list.innerHTML = data.proposals.map((p, i) =>
+      `<button class="prop-chip ${i === 0 ? "active" : ""}" data-f="${esc(p.file)}">${esc(p.file.replace("提案-", "").replace(".md", ""))}</button>`).join("");
+    for (const btn of list.querySelectorAll(".prop-chip")) {
+      btn.onclick = async () => {
+        for (const b of list.querySelectorAll(".prop-chip")) b.classList.remove("active");
+        btn.classList.add("active");
+        const r = await api(`/api/${state.user}/note?path=${encodeURIComponent("curator/" + btn.dataset.f)}`);
+        renderProposalMd(r.content);
+      };
+    }
+    const latest = await api(`/api/${state.user}/note?path=${encodeURIComponent("curator/" + data.proposals[0].file)}`);
+    renderProposalMd(latest.content);
+  } catch (e) { /* 提案区失败不影响审计主流程 */ }
+}
+
+function renderProposalMd(md) {
+  const v = $("proposal-view");
+  v.hidden = false;
+  v.innerHTML = marked.parse(md || "");
+}
+
 $("btn-audit-run").onclick = async () => {
-  $("audit-status").textContent = "运行中…";
+  $("audit-status").textContent = "确定性审计运行中…";
   try {
     const data = await api(`/api/${state.user}/audit`, { method: "POST" });
     renderAudit(data.audit);
@@ -319,8 +377,8 @@ const COLLISION_GUIDE = `
 
 function renderAudit(a) {
   const sec = (title, items, render) =>
-    `<h3>${title}（${items.length}）</h3>` +
-    (items.length ? items.map(render).join("") : `<div class="muted">无</div>`);
+    `<h3 class="sec-title">${title}<span class="count">${items.length}</span></h3>` +
+    (items.length ? items.map(render).join("") : `<div class="empty">无</div>`);
 
   const openBtn = (p, label = "打开") =>
     `<button onclick="jumpToNote(${JSON.stringify(p).replace(/"/g, "&quot;")})">${label}</button>`;
@@ -342,7 +400,7 @@ function renderAudit(a) {
         <div>[[${esc(c.a_title)}]] ↔ [[${esc(c.b_title)}]] (score ${c.score})</div>
         <div class="small">${esc(c.a_path)} · ${esc(c.b_path)} — 建议合并为一篇</div>
       </div>${openBtn(c.a_path, "打开 A")}${openBtn(c.b_path, "打开 B")}</div>`) +
-    `<h3>语义撞车（${a.collisions.length} 处，按笔记对分组）</h3>` + COLLISION_GUIDE +
+    `<h3 class="sec-title red">语义撞车<span class="count">${a.collisions.length}</span>处 · 按笔记对分组</h3>` + COLLISION_GUIDE +
     (Object.values(groups).map((g) => {
       const ids = JSON.stringify(g.rows.map((r) => r.id)).replace(/"/g, "&quot;");
       return `
@@ -364,7 +422,7 @@ function renderAudit(a) {
       <div class="section pair"><div class="texts">${esc(d.path)} → [[${esc(d.link)}]]</div>${openBtn(d.path)}</div>`) +
     sec("游离文件（未归入任何主题）", a.stray || [], (p) => `
       <div class="section pair"><div class="texts">${esc(p)}</div>${openBtn(p)}</div>`) +
-    `<h3>守卫统计</h3><div class="section">
+    `<h3 class="sec-title">守卫统计</h3><div class="section">
       拒绝 ${a.guard_stats.refused} 次 · force 越过 ${a.guard_stats.forced} 次</div>
       <button id="btn-reindex2" style="margin-top:8px">全量重建索引</button>`;
 
@@ -481,6 +539,45 @@ async function loadHealth() {
     $("health-view").innerHTML = `<div class="muted">${esc(e.message)}</div>`;
   }
 }
+
+// ---------------------------------------------------------------- settings
+
+async function loadConfig() {
+  $("cfg-status").textContent = "";
+  try {
+    const data = await api("/api/config");
+    $("cfg-editor").value = data.content;
+    $("cfg-status").textContent = `配置文件: ${data.path}`;
+  } catch (e) {
+    $("cfg-editor").value = "";
+    $("cfg-status").textContent = e.message;
+  }
+}
+
+async function saveConfig(restart) {
+  const verb = restart ? "保存并重启" : "保存";
+  if (restart && !confirm("保存配置并重启服务？服务将在约 3 秒后短暂离线。")) return;
+  $("cfg-status").textContent = `${verb}中…`;
+  try {
+    const data = await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify({ content: $("cfg-editor").value, restart }),
+    });
+    $("cfg-status").textContent = data.restarting
+      ? "已保存，服务重启中…约 3 秒后恢复，稍后刷新页面。"
+      : `已保存（备份: ${data.backup || "无"}）。涉及用户/模型的修改需重启服务生效。`;
+    toast(restart ? "已保存，重启中" : "配置已保存");
+  } catch (e) {
+    $("cfg-status").textContent = "";
+    toast(e.message, true);
+  }
+}
+
+$("btn-cfg-reload").onclick = loadConfig;
+$("btn-cfg-save").onclick = () => saveConfig(false);
+$("btn-cfg-restart").onclick = () => saveConfig(true);
+
+// ---------------------------------------------------------------- boot
 
 // ---------------------------------------------------------------- boot
 

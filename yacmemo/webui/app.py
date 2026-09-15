@@ -10,6 +10,11 @@ those ids).
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
+import threading
+import time
+import tomllib
 from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
@@ -251,6 +256,86 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err(str(e))
         return _ok({})
 
+    # ---- curator（深度审查：LLM 提案，只提案不执行）----
+
+    async def curator_run(request: Request):
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        if not (config.curator.base_url and config.curator.model):
+            return _err("curator 未配置：请在 设置 页的 [curator] 节填写 base_url / model")
+
+        def _run():
+            from yacmemo.curator import run_check
+            return run_check(config, c["user"], dry_run=False)
+
+        try:
+            report = await run_in_threadpool(_run)
+        except Exception as e:
+            return _err(f"深度审查失败: {e}")
+        return _ok({"report": report})
+
+    async def proposals_list(request: Request):
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        d = c["store"].root / "curator"
+        files = sorted(d.glob("提案-*.md"), reverse=True) if d.is_dir() else []
+        return _ok({"proposals": [
+            {"file": f.name, "path": f"curator/{f.name}",
+             "mtime": int(f.stat().st_mtime)} for f in files]})
+
+    # ---- 配置管理（config.toml 在线编辑：用户 / embedding / curator）----
+
+    async def config_get(request: Request):
+        if not config.config_path or not Path(config.config_path).is_file():
+            return _err("服务未使用配置文件启动（全部为默认值），无可编辑内容")
+        text = await run_in_threadpool(Path(config.config_path).read_text,
+                                       encoding="utf-8")
+        return _ok({"path": config.config_path, "content": text})
+
+    async def config_save(request: Request):
+        if not config.config_path:
+            return _err("服务未使用配置文件启动，无法保存")
+        body = await _body(request)
+        content = body.get("content", "")
+        target = Path(config.config_path)
+
+        # 1) TOML 语法 + 结构校验（写到临时文件走完整 load_config）
+        try:
+            tomllib.loads(content)
+        except Exception as e:
+            return _err(f"TOML 语法错误: {e}")
+        tmp = target.with_suffix(".toml.validating")
+        tmp.write_text(content, encoding="utf-8")
+        try:
+            from ..config import load_config as _load
+            _load(str(tmp))
+        except Exception as e:
+            tmp.unlink(missing_ok=True)
+            return _err(f"配置校验失败: {e}")
+        tmp.unlink(missing_ok=True)
+
+        # 2) 备份 + 原子落盘（保留 600 权限）
+        backup = None
+        if target.exists():
+            backup = f"{target.name}.bak-{time.strftime('%Y%m%d%H%M%S')}"
+            await run_in_threadpool(shutil.copy2, target, target.parent / backup)
+        await run_in_threadpool(target.write_text, content, encoding="utf-8")
+        import os as _os
+        _os.chmod(target, 0o600)
+
+        # 3) 可选重启（systemd Restart 由 unit 决定；延迟 1.5s 让响应先送达）
+        restarting = bool(body.get("restart"))
+        if restarting:
+            def _restart():
+                time.sleep(1.5)
+                subprocess.run(["systemctl", "restart", "yacmemo"], check=False)
+            threading.Thread(target=_restart, daemon=True).start()
+        return _ok({"saved": True, "backup": backup, "restarting": restarting})
+
     return [
         Route("/", index, methods=["GET"]),
         Route("/ui", ui_index, methods=["GET"]),
@@ -269,4 +354,8 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         Route("/api/{user}/audit", audit, methods=["POST"]),
         Route("/api/{user}/reindex", reindex, methods=["POST"]),
         Route("/api/{user}/collision", collision_resolve, methods=["POST"]),
+        Route("/api/{user}/curator", curator_run, methods=["POST"]),
+        Route("/api/{user}/proposals", proposals_list, methods=["GET"]),
+        Route("/api/config", config_get, methods=["GET"]),
+        Route("/api/config", config_save, methods=["POST"]),
     ]

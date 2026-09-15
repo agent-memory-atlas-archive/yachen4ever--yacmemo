@@ -150,3 +150,41 @@ def test_webui_overview(http_server):
     ids = {u["id"] for u in data["users"]}
     assert ids == {"alice", "bob"}
     assert "embedding" in data and data["embedding"]["configured"] is False
+
+
+def test_config_get_save_roundtrip(http_server, tmp_path):
+    # GET: 内容含用户段，path 指向 tmp 配置
+    r = httpx.get(f"http://127.0.0.1:{http_server}/api/config", timeout=5).json()
+    assert r["ok"] is True and "[[users]]" in r["content"]
+    assert r["path"].endswith("config.toml")
+
+    # POST 合法修改 → 保存 + 备份
+    new_content = r["content"] + "\n# edited-by-test\n"
+    r = httpx.post(f"http://127.0.0.1:{http_server}/api/config",
+                   json={"content": new_content}, timeout=5).json()
+    assert r["ok"] is True and r["backup"]
+    assert (tmp_path / "config.toml").read_text(encoding="utf-8").endswith("# edited-by-test\n")
+    backups = list((tmp_path).glob("config.toml.bak-*"))
+    assert backups, "backup file should exist"
+
+    # POST 非法 TOML → 拒绝
+    r = httpx.post(f"http://127.0.0.1:{http_server}/api/config",
+                   json={"content": "not [ valid toml"}, timeout=5).json()
+    assert r["ok"] is False and "TOML" in r["error"]
+
+    # POST 合法 TOML 但非法用户 id → 结构校验拒绝
+    bad = httpx.get(f"http://127.0.0.1:{http_server}/api/config", timeout=5).json()["content"]
+    bad = bad.replace('id = "bob"', 'id = "bad id!"')
+    r = httpx.post(f"http://127.0.0.1:{http_server}/api/config",
+                   json={"content": bad}, timeout=5).json()
+    assert r["ok"] is False and "校验失败" in r["error"]
+
+
+def test_proposals_list_empty(http_server):
+    r = httpx.get(f"http://127.0.0.1:{http_server}/api/alice/proposals", timeout=5).json()
+    assert r["ok"] is True and r["proposals"] == []
+
+
+def test_curator_run_requires_config(http_server):
+    r = httpx.post(f"http://127.0.0.1:{http_server}/api/alice/curator", timeout=5).json()
+    assert r["ok"] is False and "未配置" in r["error"]

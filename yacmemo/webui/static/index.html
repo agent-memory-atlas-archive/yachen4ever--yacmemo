@@ -16,6 +16,7 @@
       <button data-tab="audit">审计</button>
       <button data-tab="usage">使用记录</button>
       <button data-tab="health">健康</button>
+      <button data-tab="settings">设置</button>
     </nav>
     <select id="user-select" title="选择用户"></select>
   </header>
@@ -37,10 +38,10 @@
             <span class="spacer"></span>
             <label id="force-wrap" hidden><input type="checkbox" id="force-chk"> 强制(force)</label>
             <button id="btn-edit">编辑</button>
-            <button id="btn-save" hidden>保存</button>
+            <button id="btn-save" hidden class="primary">保存</button>
             <button id="btn-cancel" hidden>取消</button>
             <label class="chk"><input type="checkbox" id="chk-render" checked> 渲染</label>
-            <button id="btn-delete">删除</button>
+            <button id="btn-delete" class="danger">删除</button>
           </div>
           <div id="note-empty" class="muted center">← 从左侧选择一篇笔记</div>
           <div id="note-rendered" class="markdown-body" hidden></div>
@@ -51,14 +52,14 @@
 
     <!-- 搜索 -->
     <section id="tab-search" hidden>
-      <div class="row">
+      <div class="row search-bar">
         <input id="search-q" placeholder="关键词或自然语句，如：端口 9721 / 怎么备份的">
         <select id="search-kind">
           <option value="hybrid">hybrid</option>
           <option value="fts">fts</option>
           <option value="vector">vector</option>
         </select>
-        <button id="btn-search">搜索</button>
+        <button id="btn-search" class="primary">搜索</button>
       </div>
       <div id="search-results"></div>
     </section>
@@ -66,10 +67,20 @@
     <!-- 审计 -->
     <section id="tab-audit" hidden>
       <div class="row">
-        <button id="btn-audit-run">运行审计（会自动修复外部改动/删除）</button>
+        <button id="btn-audit-run" class="primary">确定性审计（快速 · 自愈 · 零 LLM）</button>
+        <button id="btn-curator-run">深度审查（LLM · 约 1-2 分钟 · 产出提案）</button>
         <button id="btn-reindex">全量重建索引</button>
         <span id="audit-status" class="muted"></span>
       </div>
+      <div class="hint">确定性审计：hash 对齐 + 规则检测（D1 标题重复 / D2 语义撞车 / D3 悬空链接 / D4 游离文件），即点即出。
+        深度审查：把注册表、主题卡与审计结果交给配置的 LLM，产出<b>提案报告</b>——只提案，绝不自动执行。</div>
+
+      <div id="proposal-block">
+        <h3>质量提案（curator）</h3>
+        <div id="proposal-list" class="row"></div>
+        <div id="proposal-view" class="markdown-body card" hidden></div>
+      </div>
+
       <div id="audit-results"></div>
     </section>
 
@@ -77,9 +88,7 @@
     <section id="tab-usage" hidden>
       <div class="cards" id="usage-cards"></div>
       <div class="row">
-        <select id="usage-tool">
-          <option value="">全部工具</option>
-        </select>
+        <select id="usage-tool"><option value="">全部工具</option></select>
         <span class="spacer"></span>
         <button id="btn-usage-refresh">刷新</button>
       </div>
@@ -89,6 +98,22 @@
     <!-- 健康 -->
     <section id="tab-health" hidden>
       <div id="health-view"></div>
+    </section>
+
+    <!-- 设置 -->
+    <section id="tab-settings" hidden>
+      <div class="hint">
+        编辑 <b>config.toml</b>（用户 [[users]]、embedding 模型、curator LLM 均在此文件）。
+        保存前自动校验 TOML 与字段并<b>备份原文件</b>；涉及用户、模型、端点的修改需<b>重启服务</b>生效。
+        新增用户：追加一段 [[users]]（id 仅限字母数字_-，不能是 api/ui/health）后重启；删除用户属危险操作，请 SSH 手工处理。
+      </div>
+      <div class="row">
+        <button id="btn-cfg-reload">重新加载</button>
+        <button id="btn-cfg-save" class="primary">保存（校验 + 备份）</button>
+        <button id="btn-cfg-restart" class="danger">保存并重启服务</button>
+        <span id="cfg-status" class="muted"></span>
+      </div>
+      <textarea id="cfg-editor" spellcheck="false"></textarea>
     </section>
   </main>
 

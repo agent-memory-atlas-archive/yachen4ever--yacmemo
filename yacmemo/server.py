@@ -70,7 +70,7 @@ def build_user_mcp(config: Config, user: UserEntry, usage: UsageDB | None
     searcher = Searcher(config, db, emb, vectors)
     register_tools(mcp, store, searcher, usage=usage, user_id=user.id)
     ctx = {"store": store, "searcher": searcher, "db": db, "usage": usage,
-           "emb": emb, "vectors": vectors}
+           "emb": emb, "vectors": vectors, "user": user}
     return mcp, ctx
 
 
