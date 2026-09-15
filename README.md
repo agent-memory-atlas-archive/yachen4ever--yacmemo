@@ -49,7 +49,7 @@ uv run yacmemo-server --config config.toml
 curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["user2","yachen"]}
 ```
 
-浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（笔记 / 搜索 / 审计 / 使用记录 / 健康），详见 [docs/08-webui.md](docs/08-webui.md)。
+浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（笔记 / 搜索 / 审计 / 使用记录 / 健康），详见 [docs/07-webui.md](docs/07-webui.md)。
 
 ### 客户端（你的每台电脑、每个 agent）
 
@@ -67,7 +67,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 同机 agent 也可用 stdio：`uv run yacmemo-mcp --root /path/to/memory`。
 
-**第一次用？**请先读 [用户使用手册](docs/07-user-guide.md)——上手、日常用法、常见问题都在里面。
+**第一次用？**请先读 [用户使用手册](docs/00-user-guide.md)——上手、日常用法、常见问题都在里面。
 
 ## MCP 工具（11 个）
 
@@ -91,14 +91,14 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 | 文档 | 内容 |
 |---|---|
-| [07-user-guide.md](docs/07-user-guide.md) | **用户使用手册（从这里开始）** |
+| [00-user-guide.md](docs/00-user-guide.md) | **用户使用手册（从这里开始）** |
 | [01-architecture.md](docs/01-architecture.md) | 设计、决策记录、原则 |
 | [02-mcp-tools.md](docs/02-mcp-tools.md) | 工具规格 |
 | [03-storage-and-search.md](docs/03-storage-and-search.md) | 文件格式、索引、混合检索、自愈 |
 | [04-consistency.md](docs/04-consistency.md) | 三层防线、force 阶梯、指标 |
 | [05-deployment.md](docs/05-deployment.md) | systemd、客户端配置、备份、安全 |
 | [06-evaluation.md](docs/06-evaluation.md) | 检索基线与复测方法 |
-| [08-webui.md](docs/08-webui.md) | WebUI 控制台：页面与 API 参考 |
+| [07-webui.md](docs/07-webui.md) | WebUI 控制台：页面与 API 参考 |
 
 v1（三层提取架构）冻结在 [`legacy/`](legacy/)，仅作决策记录。
 

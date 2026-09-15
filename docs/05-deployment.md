@@ -146,7 +146,7 @@ uv run yacmemo-mcp --root /srv/yacmemo/yachen/memory
 - **使用记录**：全部 MCP 工具调用的留痕（时间/用户/工具/摘要/客户端 UA/IP/耗时），落盘在 `[server].data_dir/usage.db`（默认保留最近 2 万条，自动滚动）；
 - **健康**：embedding 状态、各用户笔记数/撞车数/守卫统计、客户端清单、近 14 天调用量。
 
-页面与 API 的完整说明见 [08-webui.md](08-webui.md)。WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。
+页面与 API 的完整说明见 [07-webui.md](07-webui.md)。WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。
 
 ### 2.3 curator 质量策展（可选）
 
