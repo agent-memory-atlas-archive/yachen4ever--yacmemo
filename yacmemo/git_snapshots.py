@@ -15,7 +15,10 @@ only the history). Degradation reasons are kept for audit reporting.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
+import pwd  # POSIX only — yacmemo targets Linux/macOS servers
 import shutil
 import subprocess
 import threading
@@ -35,7 +38,8 @@ class GitSnapshots:
         self._lock = threading.Lock()
         self._user_name = user_name
         self._user_email = user_email
-        self._disabled_reason = ""
+        self._disabled_reason = ""   # why the layer is off (config / no git)
+        self._last_error = ""        # most recent runtime failure (per audit)
         self._git = shutil.which("git") if enabled else None
         if not enabled:
             self._disabled_reason = "config: git_snapshots=false"
@@ -46,9 +50,22 @@ class GitSnapshots:
     def active(self) -> bool:
         return self._git is not None
 
+    @staticmethod
+    def _env() -> dict:
+        """systemd services typically run without HOME, which stops git from
+        finding the global config — including safe.directory exemptions.
+        Resolve the home from the password database instead (2026-09-16
+        incident: silent dubious-ownership failures in yacmemo.service)."""
+        env = dict(os.environ)
+        if not env.get("HOME"):
+            with contextlib.suppress(KeyError):
+                env["HOME"] = pwd.getpwuid(os.getuid()).pw_dir
+        return env
+
     def _run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return subprocess.run([self._git, "-C", str(self.root), *args],
-                              capture_output=True, text=True, check=check)
+                              capture_output=True, text=True, check=check,
+                              env=self._env())
 
     def _ensure_repo(self) -> bool:
         """Auto-init a fresh memory root on first snapshot, and make sure a
@@ -60,6 +77,7 @@ class GitSnapshots:
             init = self._run("init", "-q", check=False)
             if init.returncode != 0:
                 self._disabled_reason = init.stderr.strip() or "git init 失败"
+                logger.warning("git ensure-repo failed: %s", self._disabled_reason)
                 return False
             ignore = self.root / ".gitignore"
             if not ignore.exists():
@@ -83,10 +101,12 @@ class GitSnapshots:
         with self._lock:
             try:
                 if not self._ensure_repo():
+                    self._last_error = self._disabled_reason
                     return None
                 st = self._run("status", "--porcelain", check=False)
                 if st.returncode != 0:
-                    self._disabled_reason = st.stderr.strip()
+                    self._last_error = self._disabled_reason = st.stderr.strip()
+                    logger.warning("git status failed: %s", self._last_error)
                     return None
                 if not st.stdout.strip():
                     return None  # nothing changed, nothing to snapshot
@@ -94,17 +114,20 @@ class GitSnapshots:
                 c = self._run("commit", "-q", "-m", message, check=False)
                 if c.returncode != 0:
                     if "nothing to commit" not in (c.stdout + c.stderr):
-                        logger.warning("git commit failed: %s", c.stderr.strip())
-                        self._disabled_reason = c.stderr.strip()
+                        self._last_error = c.stderr.strip()
+                        logger.warning("git commit failed: %s", self._last_error)
                     return None
                 h = self._run("rev-parse", "--short", "HEAD", check=False)
+                self._last_error = ""
                 return h.stdout.strip() if h.returncode == 0 else "?"
             except Exception as e:  # never block the write path
+                self._last_error = str(e)
                 logger.warning("git snapshot failed (non-fatal): %s", e)
-                self._disabled_reason = str(e)
                 return None
 
     def status_line(self) -> str:
-        if self.active:
-            return "启用（每次变更自动 commit，仓库保持 git-clean）"
-        return f"停用（{self._disabled_reason}）"
+        if not self.active:
+            return f"停用（{self._disabled_reason}）"
+        if self._last_error:
+            return f"启用，但最近一次快照失败: {self._last_error}"
+        return "启用（每次变更自动 commit，仓库保持 git-clean）"

@@ -125,3 +125,38 @@ def test_existing_identity_not_overwritten(store: Store):
     r = s.write("预置身份", "# 预置身份\n内容\n")
     author = _git(store.root, "log", "--format=%an", "--", r["path"]).strip()
     assert author == "预置用户"
+
+
+def test_env_backfills_missing_home(monkeypatch):
+    """systemd services run without HOME; git then misses the global config
+    (safe.directory exemptions) and fails on dubious ownership. _env must
+    backfill HOME from the password database."""
+    import os
+    import pwd
+
+    from yacmemo.git_snapshots import GitSnapshots
+
+    monkeypatch.delenv("HOME", raising=False)
+    env = GitSnapshots._env()
+    assert env["HOME"] == pwd.getpwuid(os.getuid()).pw_dir
+
+
+def test_status_line_surfaces_runtime_failure(store: Store, monkeypatch):
+    """A silently degraded snapshot layer must be visible in the audit line."""
+    orig = store.snapshots._run
+
+    class _Broken:
+        returncode = 128
+        stdout = ""
+        stderr = "fatal: detected dubious ownership"
+
+    monkeypatch.setattr(store.snapshots, "_run",
+                        lambda *a, check=True, **kw: _Broken())
+    store.write("失败可见性测试", "# 失败可见性测试\n内容\n")  # write still succeeds
+    assert (store.root / "失败可见性测试.md").is_file()
+    assert "失败" in store.snapshots.status_line()
+    assert "dubious ownership" in store.snapshots.status_line()
+
+    monkeypatch.setattr(store.snapshots, "_run", orig)
+    store.delete_note("失败可见性测试")  # cleanup; snapshot path works again
+    assert "启用" in store.snapshots.status_line()
