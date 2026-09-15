@@ -1,6 +1,6 @@
 """Shared MCP tool registrations for both transports (stdio and HTTP).
 
-`register_tools` binds the 8 memory tools to one user's store/searcher via
+`register_tools` binds the memory tools to one user's store/searcher via
 closures. Every call is logged to the server-level UsageDB (client UA/IP via
 the FastMCP Context; StoreError refusals count as normal business outcomes,
 unexpected exceptions as errors). The tool set, docstrings, and error
@@ -203,6 +203,24 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 return f"移动失败: {e}"
 
     @mcp.tool()
+    def memory_delete(path: str, ctx: Context = None) -> str:
+        """删除笔记。仅在用户明确要求时调用（如"删掉 X"/"X 不用记了"）；git 历史可恢复。
+
+        Args:
+            path: 笔记路径或标题
+        """
+        out = {"ok": True, "error": ""}
+        with _logged("memory_delete", ctx, summarize_args("memory_delete", locals()), out):
+            try:
+                r = store.delete_note(path)
+                return f"已删除: {r['path']}（git 历史可恢复）"
+            except StoreError as e:
+                return f"{e}"
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"删除失败: {e}"
+
+    @mcp.tool()
     def memory_audit(ctx: Context = None) -> str:
         """全量一致性审计：外部变更自愈、标题重复、语义撞车、悬空链接、守卫统计。"""
         out = {"ok": True, "error": ""}
@@ -244,6 +262,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 lines.append(f"- {d['path']}: [[{d['link']}]]")
             g = r["guard_stats"]
             lines.append(f"== 守卫统计 == 拒绝 {g['refused']} 次，force 越过 {g['forced']} 次")
+            lines.append(f"== git == {r.get('git', '')}")
             return "\n".join(lines)
 
     @mcp.tool()
@@ -330,7 +349,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             return (f"已注销主题「{r['title']}」：注册表已移除，笔记文件未动。"
                     f"原主题卡: {r['card'] or '（未记录）'}。"
                     f"相关笔记现为游离文件（审计会点名），请与用户确认后用 "
-                    f"memory_move 归位 archive/，或明确确认后删除。")
+                    f"memory_move 归位 archive/，或明确确认后用 memory_delete 删除。")
 
     @mcp.tool()
     def memory_context(ctx: Context = None) -> str:

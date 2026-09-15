@@ -1,4 +1,15 @@
-# MCP 工具规格（12 个）
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: 'bedddb39-70cc-4817-b845-23da65644f1d'
+  PropagateID: 'bedddb39-70cc-4817-b845-23da65644f1d'
+  ReservedCode1: '087e6e8c-fa6c-4225-8c5f-50420f79bd76'
+  ReservedCode2: '087e6e8c-fa6c-4225-8c5f-50420f79bd76'
+---
+
+# MCP 工具规格（13 个）
 
 > 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。
 > 所有工具返回人类可读文本；错误以中文消息直接返回（不抛协议错误），agent 可读可自纠。
@@ -7,6 +18,7 @@
 
 - **路径语义**：所有 `path` 参数接受相对 memory_root 的路径或笔记标题（标题精确匹配，见 `memory_read` 的解析顺序）。
 - **同步索引**：所有写工具在返回成功前完成文件写入 → hash → embedding → FTS/向量/冲突表更新，单次典型开销 < 300ms。返回成功即索引可用。
+- **git 快照**：所有写/删除/主题操作在成功后自动产生一个 git commit（`{tool}: {path}` 格式），记忆仓库永远 git-clean；首次写入自动 `git init`（含 `.index/` 忽略与 repo-local 身份）；git 不可用时降级为只写不快照，绝不阻塞记忆功能。外部直接改文件（Obsidian/vim）的改动由 `memory_audit` 自愈时统一快照（`external:` 前缀）。
 - **失败语义**：文件永远是第一位。embedding 失败时内容照常写入、FTS 照常更新，仅向量/D2 缺失（下次写入或 `memory_audit` 自愈补齐）。
 - **守卫拒绝是正常返回**（不是错误）：agent 应读拒绝消息并改用建议的工具。
 
@@ -126,7 +138,7 @@ memory_audit() -> str
 5. D3 悬空 `[[链接]]`；
 6. 守卫统计（refused / forced 次数）。
 
-修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。
+修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行）。
 
 ## 8. memory_list
 
@@ -187,12 +199,25 @@ memory_context() -> str
 
 **每次会话开始先调用**。返回核心记忆上下文 = `TOPICS.md` 注册表全文 + 各主题卡摘要头（前 12 行）。解决冷启动失忆：agent 不必"想到去搜什么"，主题体系直接在场。
 
+## 13. memory_delete
+
+```
+memory_delete(path: str) -> str
+```
+
+删除笔记（移除文件 + 全部索引行 + 相关 collisions/向量），删除动作自动产生 `delete:` git 快照，历史可恢复。
+
+- **调用门槛**：仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）——与 topic_register 同级的人工确认语义；
+- 未知路径/标题拒绝；
+- 系统（store）自身永远不会主动删除——这是 v1"自动失效错杀"教训的边界：删除永远是被指令的。
+
 ## Agent 决策树（更新）
 
 ```
 会话开始              → memory_context（回顾主题体系）
 用户要新增长期记忆主题 → topic_register（仅用户明示时）→ memory_write
 用户不再长期记录某主题 → topic_unregister（仅用户明示）→ 引导归位/清理
+用户要删某条记忆      → memory_delete（仅用户明示；git 可恢复）
 要记一个新主题？      → memory_search 查重 → memory_write（被拒转 edit）
 要更新已有事实？      → memory_edit / memory_edit_section
 要找"某件事记在哪"？  → memory_search（关键词式 query）

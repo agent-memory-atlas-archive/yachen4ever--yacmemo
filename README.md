@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '4a138b89-0dc8-44e7-99b7-01fbded774ca'
+  PropagateID: '4a138b89-0dc8-44e7-99b7-01fbded774ca'
+  ReservedCode1: 'f1a12493-6cd1-4833-a174-076e88678465'
+  ReservedCode2: 'f1a12493-6cd1-4833-a174-076e88678465'
+---
+
 # yacmemo
 
 带 API 级一致性守卫的个人记忆层 —— markdown 为本、全本地、agent 无关。
@@ -13,6 +24,7 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
 - **curator 质量策展**——可配置的 LLM 定期审查记忆质量，产出**提案报告**：只提案、绝不自动执行，批准后才落地；
 - **WebUI 控制台**——浏览器打开 `/ui/`：笔记浏览/编辑（markdown 渲染）、在线搜索、**审计双模式**（确定性规则 + curator LLM 深度审查提案）、调用留痕、健康总览、**config.toml 在线配置**；
 - **一致性是被强制的，不是被希望的**——`memory_write` 拒绝近似重复标题，`memory_edit` 强制锚点唯一，矛盾在检索结果里带 ⚠ 标注并存呈现，系统永不静默删除或隐藏任何记忆。
+- **记忆是被版本管理的**——每次写入/编辑/移动/删除自动产生一个 git commit（`write: x.md`），记忆仓库永远 git-clean；删错可恢复，历史可回溯，agent 无需文件系统权限。
 
 ## 架构
 
@@ -24,7 +36,7 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
 yacmemo-server（单进程，streamable HTTP，无状态会话）
    ├── /yachen/mcp → Store(root=.../yachen/memory)
    └── /user2/mcp   → Store(root=.../user2/memory)
-         store.py      CRUD + 写路径守卫 + 同步索引 + 主题注册表
+         store.py      CRUD + 写路径守卫 + 同步索引 + 主题注册表 + git 快照
          search.py     FTS5 trigram + 向量，RRF 融合
          detectors.py  确定性 D1/D3 检测
          index_db.py   SQLite：元数据/FTS/冲突/守卫事件
@@ -69,7 +81,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 **第一次用？**请先读 [用户使用手册](docs/00-user-guide.md)——上手、日常用法、常见问题都在里面。
 
-## MCP 工具（12 个）
+## MCP 工具（13 个）
 
 | 工具 | 用途 |
 |---|---|
@@ -79,6 +91,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `memory_edit` | 就地更新，文本锚点必须唯一 |
 | `memory_edit_section` | 按小节整段替换 |
 | `memory_move` | 移动文件，索引跟随 |
+| `memory_delete` | 删除笔记（**仅用户明确要求时**，git 历史可恢复） |
 | `memory_audit` | 自愈式一致性审计（外部改动/删除、D1/D2/D3、守卫统计） |
 | `memory_list` | 目录树 / 最近变更 |
 | `memory_context` | **会话开始先调**：返回主题注册表 + 各主题卡摘要头（冷启动回顾） |

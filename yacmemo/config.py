@@ -16,6 +16,9 @@ class MemoryConfig:
     root: str = "memory"
     # Timeline notes live here; exempt from the title guard
     journal_dir: str = "journal"
+    # Per-mutation git snapshots ("memory repo is always git-clean");
+    # auto-init on first write, degrade to no-op when git is unavailable
+    git_snapshots: bool = True
 
 
 @dataclass
@@ -141,6 +144,7 @@ def load_config(path: str | None = None) -> Config:
         memory=MemoryConfig(
             root=mem.get("root", MemoryConfig.root),
             journal_dir=mem.get("journal_dir", MemoryConfig.journal_dir),
+            git_snapshots=mem.get("git_snapshots", MemoryConfig.git_snapshots),
         ),
         embedding=EmbeddingConfig(
             base_url=emb.get("base_url", EmbeddingConfig.base_url),

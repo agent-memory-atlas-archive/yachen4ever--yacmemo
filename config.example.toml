@@ -8,6 +8,10 @@
 root = "memory"
 # Timeline notes live here; exempt from the near-duplicate title guard.
 journal_dir = "journal"
+# Per-mutation git snapshots: every write/edit/move/delete/topic change
+# auto-commits ("memory repo is always git-clean"). Auto-inits the repo on
+# first write; set false to disable (degrades to no-op, never blocks writes).
+git_snapshots = true
 
 [embedding]
 # OpenAI-compatible /v1/embeddings endpoint (omlx + Qwen3-Embedding).

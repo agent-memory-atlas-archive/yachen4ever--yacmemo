@@ -32,6 +32,7 @@ from .detectors import (
 )
 from .embedding import EmbeddingClient
 from .fs_utils import content_hash
+from .git_snapshots import GitSnapshots
 from .index_db import IndexDB
 from .vector import VectorStore
 
@@ -80,6 +81,8 @@ class Store:
         self.root = (Path(root).expanduser().resolve() if root
                      else config.root_abs)
         self.root.mkdir(parents=True, exist_ok=True)
+        self.snapshots = GitSnapshots(self.root,
+                                      enabled=config.memory.git_snapshots)
         self._lock = threading.RLock()
         for name in self._MUTATING:
             fn = getattr(self, name)
@@ -187,6 +190,7 @@ class Store:
         abs_path.write_text(content, encoding="utf-8")
 
         self._index_note(rel, name, content)
+        self.snapshots.commit(f"write: {rel}")
         return {"path": rel, "forced": bool(conflicts and force)}
 
     # ------------------------------------------------------------------ read
@@ -245,6 +249,7 @@ class Store:
         abs_path.write_text(new_content, encoding="utf-8")
         title = self._title_of(rel, new_content)
         self._index_note(rel, title, new_content)
+        self.snapshots.commit(f"edit: {rel}")
         return {"path": rel, "title": title}
 
     def edit_section(self, path: str, heading: str, new_content: str) -> dict:
@@ -297,6 +302,7 @@ class Store:
         abs_path.write_text(new_text, encoding="utf-8")
         title = self._title_of(rel, new_text)
         self._index_note(rel, title, new_text)
+        self.snapshots.commit(f"edit: {rel}")
         return {"path": rel, "heading": wanted}
 
     def save(self, path: str, content: str) -> dict:
@@ -313,12 +319,14 @@ class Store:
         abs_path.write_text(content, encoding="utf-8")
         title = self._title_from_content(rel, content) or old_title
         self._index_note(rel, title, content)
+        self.snapshots.commit(f"save: {rel}")
         return {"path": rel, "title": title}
 
     def delete_note(self, path: str) -> dict:
-        """User-initiated deletion (WebUI): remove the file and all index rows.
-        The store never deletes on its own initiative — this is an explicit
-        human/agent action, equivalent to deleting the file in Obsidian."""
+        """User-instructed deletion (WebUI / memory_delete tool): remove the
+        file and all index rows. The store never deletes on its own
+        initiative — this is an explicit human/agent action, equivalent to
+        deleting the file in Obsidian. Git history keeps it recoverable."""
         rel = self.resolve(path)
         abs_path = self.root / rel
         title = self._title_of(rel)
@@ -328,6 +336,7 @@ class Store:
         self.db.remove_collisions_involving(rel)
         if self.vectors:
             self.vectors.delete_by_path(rel)
+        self.snapshots.commit(f"delete: {rel}")
         return {"path": rel, "title": title, "deleted": True}
 
     # ------------------------------------------------------------------ move
@@ -359,6 +368,7 @@ class Store:
         # re-index under the new path; embeddings come from vec_cache (content
         # unchanged), so this makes no embedding API calls.
         self._index_note(new_rel, title, content)
+        self.snapshots.commit(f"move: {old_rel} -> {new_rel}")
         return {"old_path": old_rel, "new_path": new_rel, "title": title}
 
     # ------------------------------------------------------------------ list
@@ -451,6 +461,7 @@ class Store:
                          (self.root / card_path).read_text(encoding="utf-8"))
         self._index_note(TOPICS_FILE, "主题记忆注册表",
                          self.topics_file().read_text(encoding="utf-8"))
+        self.snapshots.commit(f"topic: register {title} ({card_path})")
         return {"title": title, "card": card_path, "registered": now}
 
     def topic_unregister(self, title: str) -> dict:
@@ -481,6 +492,7 @@ class Store:
         p.write_text("".join(lines), encoding="utf-8")
         self._index_note(TOPICS_FILE, "主题记忆注册表",
                          p.read_text(encoding="utf-8"))
+        self.snapshots.commit(f"topic: unregister {title}")
         return {"title": title, "card": removed_card}
 
     def memory_context(self, card_lines: int = 12) -> str:
@@ -549,6 +561,13 @@ class Store:
         topics = self.load_topics()
         stray = self._stray_files(topics)
 
+        # Out-of-band changes just healed (externally added/edited/deleted
+        # files): snapshot them so the repo stays git-clean.
+        healed = len(resynced) + len(missing) + len(added)
+        if healed:
+            self.snapshots.commit(
+                f"external: self-healed {healed} note(s) via audit")
+
         return {"title_duplicates": d1,
                 "collisions": collisions,
                 "dangling_links": dangling,
@@ -556,6 +575,7 @@ class Store:
                 "missing": missing,
                 "added": added,
                 "stray": stray,
+                "git": self.snapshots.status_line(),
                 "guard_stats": self.db.guard_stats()}
 
     def _sync_new_files(self) -> list[str]:
