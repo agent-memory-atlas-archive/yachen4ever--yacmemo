@@ -69,6 +69,10 @@
 - 客户端清单（UA + IP + 调用数 + 最近活跃）；
 - 近 14 天每日调用量与错误数。
 
+### 2.6 设置
+
+config.toml 在线编辑（用户 [[users]]、embedding 模型、curator LLM 全在这一个文件）：保存前自动做 TOML 语法 + 结构校验（非法配置直接拒绝）、备份原文件为 `config.toml.bak-<时间戳>`、保持 600 权限；可选"保存并重启服务"（systemd 重启，约 3 秒离线）。删除用户属危险操作，不提供按钮，请 SSH 手工处理。
+
 ## 三、API 参考
 
 所有响应为 JSON，业务失败返回 `{"ok": false, "error": "..."}`（HTTP 200），未知用户 404。
@@ -98,10 +102,6 @@
 curl -s http://debsvc.local:9721/api/yachen/search?q=端口 | python -m json.tool
 curl -s -X POST http://debsvc.local:9721/api/yachen/audit
 ```
-
-### 2.6 设置页
-
-config.toml 在线编辑（用户 [[users]]、embedding 模型、curator LLM 全在这一个文件）：保存前自动做 TOML 语法 + 结构校验（非法配置直接拒绝）、备份原文件为 `config.toml.bak-<时间戳>`、保持 600 权限；可选"保存并重启服务"（systemd 重启，约 3 秒离线）。删除用户属危险操作，不提供按钮，请 SSH 手工处理。
 
 ## 四、使用日志（usage.db）
 
