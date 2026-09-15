@@ -516,6 +516,8 @@ class Store:
             if p.is_file():
                 contents[row["path"]] = p.read_text(encoding="utf-8")
         dangling = d3_scan(contents, {r["title"] for r in titles})
+        topics = self.load_topics()
+        stray = self._stray_files(topics)
 
         return {"title_duplicates": d1,
                 "collisions": collisions,
@@ -523,6 +525,7 @@ class Store:
                 "resynced": resynced,
                 "missing": missing,
                 "added": added,
+                "stray": stray,
                 "guard_stats": self.db.guard_stats()}
 
     def _sync_new_files(self) -> list[str]:

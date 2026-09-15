@@ -58,3 +58,5 @@ def test_audit_stray_detection(tstore: Store):
     (tstore.root / "journal" / "2026-09-14-流水.md").write_text(
         "# 流水\n", encoding="utf-8")
     assert "journal/2026-09-14-流水.md" not in tstore._stray_files(tstore.load_topics())
+    # audit() must expose stray (regression: the field was once silently missing)
+    assert tstore.audit()["stray"] == ["散文件.md"]
