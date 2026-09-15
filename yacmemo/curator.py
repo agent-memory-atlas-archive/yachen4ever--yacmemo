@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 
 import httpx
 
@@ -159,7 +159,12 @@ def run_check(config: Config, user: UserEntry, dry_run: bool = False,
     report = render_report(proposal, user.id)
 
     if not dry_run:
-        store.save(f"curator/提案-{date.today().isoformat()}.md", report)
+        base = f"curator/提案-{date.today().isoformat()}"
+        path = base + ".md"
+        if (store.root / path).is_file():
+            # 同日重跑不覆盖（旧报告可能已带裁决记录）
+            path = f"{base}-{datetime.now().strftime('%H%M')}.md"
+        store.save(path, report)
     db.close()
     return report
 

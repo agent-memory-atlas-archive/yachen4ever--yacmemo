@@ -26,7 +26,12 @@
 
 ### 2.3 审计
 
-人工触发的全量审计（等价于 `memory_audit`，含自愈行为）。另提供"全量重建索引"按钮（等价 `POST /api/{user}/reindex`，清空并重建 FTS/向量/撞车记录，笔记文件不受影响）。输出六类：
+审计页提供**两种审计引擎**，按需选择：
+
+- **确定性审计**（默认按钮）：快速、零 LLM、含自愈——等价 `memory_audit`；另提供"全量重建索引"按钮（`POST /api/{user}/reindex`）；
+- **深度审查**（curator）：把注册表、主题卡与审计结果交给 `[curator]` 配置的 LLM，产出提案报告（约 1-2 分钟）；报告落盘 `curator/提案-<日期>.md`，**同日重跑自动加时间戳不覆盖**（旧报告可能已带裁决记录）。
+
+审计页下方是**质量提案区**：历史报告按日期 chips 切换、markdown 渲染，裁决后建议在报告末尾追加执行记录。输出六类：
 
 **语义撞车的裁决工作流**——撞车按"笔记对"分组（同一对笔记的多条匹配合并展示），每组提供「打开 A」「打开 B」跳转与两个裁决按钮：
 
@@ -82,6 +87,10 @@
 | GET | `/api/{user}/search` | `q` `limit` `kind` | 检索（含 ⚠ warnings） |
 | POST | `/api/{user}/audit` | — | 运行审计（含自愈，会改动索引） |
 | POST | `/api/{user}/collision` | `{id, status}` | 撞车裁决：`resolved` / `dismissed` |
+| POST | `/api/{user}/curator` | — | 触发深度审查（同步等待，约 1-2 分钟），返回报告 markdown |
+| GET | `/api/{user}/proposals` | — | 列出 curator 提案报告 |
+| GET | `/api/config` | — | 读取 config.toml 原文（含密钥，仅内网管理用途） |
+| POST | `/api/config` | `{content, restart?}` | 校验（TOML + load_config）→ 备份 → 保存；`restart=true` 时延迟重启服务 |
 
 `{user}` 为 config.toml 中的用户 id。脚本化示例：
 
@@ -89,6 +98,10 @@
 curl -s http://debsvc.local:9721/api/yachen/search?q=端口 | python -m json.tool
 curl -s -X POST http://debsvc.local:9721/api/yachen/audit
 ```
+
+### 2.6 设置页
+
+config.toml 在线编辑（用户 [[users]]、embedding 模型、curator LLM 全在这一个文件）：保存前自动做 TOML 语法 + 结构校验（非法配置直接拒绝）、备份原文件为 `config.toml.bak-<时间戳>`、保持 600 权限；可选"保存并重启服务"（systemd 重启，约 3 秒离线）。删除用户属危险操作，不提供按钮，请 SSH 手工处理。
 
 ## 四、使用日志（usage.db）
 
