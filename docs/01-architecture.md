@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'be875381-6fa3-4704-b402-61be5f4d1ef7'
-  PropagateID: 'be875381-6fa3-4704-b402-61be5f4d1ef7'
-  ReservedCode1: 'd9dda544-9ff5-42be-9eff-b8e1373b3ea3'
-  ReservedCode2: 'd9dda544-9ff5-42be-9eff-b8e1373b3ea3'
+  ProduceID: 'e2c9f194-0bbf-4a49-8908-3935f415a2ac'
+  PropagateID: 'e2c9f194-0bbf-4a49-8908-3935f415a2ac'
+  ReservedCode1: '309aaac2-8665-4c8d-9783-0f23ca560730'
+  ReservedCode2: '309aaac2-8665-4c8d-9783-0f23ca560730'
 ---
 
 # yacmemo 精简记忆层设计（v2 终形态）
@@ -125,7 +125,20 @@ yacmemo-curator（systemd timer，每周）——读注册表/主题卡/审计 �
 
 ## 四、存储设计
 
+### 4.1 目录约定
 
+```
+memory_root/
+├── TOPICS.md         主题注册表（人机共维，活跃/已归档）
+├── PROFILE.md        用户画像与偏好（记忆层功能文件：不注册、不游离检测、context 前置）
+├── topics/<主题>/     每个主题一个目录：abstract.md（agent 维护的现状手册）
+│                     + agent 可按模块自由增设的详细 md——目录即归属
+├── archive/<主题>/   已归档主题（免注册区，检索仍可用，context 不再注入）
+├── journal/          时间线流水（免注册区，豁免重名拦截）
+└── .index/           派生索引（SQLite + LanceDB，可随时删除重建，不进 git）
+```
+
+目录划分服务人类浏览与主题归属判定（目录即归属，见十三）；检索不依赖目录。OV 时代的分类目录（infra/knowledge/projects/work/preferences/people）已于 2026-09-16 restructure 全部并入主题目录后移除。
 
 ### 4.2 笔记格式
 

@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '7cd74e3c-0b1b-4b33-bc43-311509cc5950'
-  PropagateID: '7cd74e3c-0b1b-4b33-bc43-311509cc5950'
-  ReservedCode1: '8f444990-eb7e-46dd-967f-cbcc5ab2ad88'
-  ReservedCode2: '8f444990-eb7e-46dd-967f-cbcc5ab2ad88'
+  ProduceID: '2a7fbd7e-3eea-41a7-a974-ff46619346ce'
+  PropagateID: '2a7fbd7e-3eea-41a7-a974-ff46619346ce'
+  ReservedCode1: 'b2cba43e-e209-453c-a453-f15b610cf01b'
+  ReservedCode2: 'b2cba43e-e209-453c-a453-f15b610cf01b'
 ---
 
 # yacmemo
@@ -46,7 +46,12 @@ yacmemo-server（单进程，streamable HTTP，无状态会话）
    ▼
 yacmemo-curator（systemd timer，每周）→ 质量提案报告，只提案不执行
    ▼
-markdown 文件（source of truth，git 版本管理；TOPICS.md = 主题注册表）
+memory_root（git 仓库，每次变更自动 commit，永远 git-clean）
+  ├── TOPICS.md                  主题注册表（活跃/已归档）
+  ├── PROFILE.md                 画像与偏好（功能层，context 前置注入）
+  ├── topics/<主题>/              abstract.md + agent 增设的模块 md
+  ├── archive/ journal/ curator/  免注册区（归档主题 / 流水 / 提案）
+  └── .index/                    派生索引（可重建，不进 git）
 ```
 
 ## 快速开始

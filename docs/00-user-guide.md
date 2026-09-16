@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '11afbb7e-04f0-479a-922b-80946560a070'
-  PropagateID: '11afbb7e-04f0-479a-922b-80946560a070'
-  ReservedCode1: '518fff94-ba23-477e-bb99-aad08d19ed0c'
-  ReservedCode2: '518fff94-ba23-477e-bb99-aad08d19ed0c'
+  ProduceID: '24878fb0-1b63-41bd-9d43-7b7473b8798d'
+  PropagateID: '24878fb0-1b63-41bd-9d43-7b7473b8798d'
+  ReservedCode1: '37708a09-5601-45d9-a871-62216dc6fb13'
+  ReservedCode2: '37708a09-5601-45d9-a871-62216dc6fb13'
 ---
 
 # 用户使用手册
@@ -137,11 +137,20 @@ agent 用 `memory_edit` 就地修改（旧的值被替换，不会留下两条�
 
 > "把 notecalc 这个项目加入长期记忆"
 
-agent 会调 `topic_register` 注册（登记进 TOPICS.md 注册表 + 创建主题卡）。之后该主题的笔记都归入主题文件夹，现状变化**就地更新主题卡**。
+agent 会调 `topic_register` 注册：登记进 TOPICS.md 注册表 + 创建 `topics/<主题>/abstract.md`（主题目录）。之后该主题的详细笔记都写入主题目录（agent 可按模块增设），现状变化**就地更新 abstract**。
 
-- `topic_list` / WebUI 健康页可随时查看有哪些主题；
+- `topic_list` / WebUI 健康页可随时查看有哪些主题（活跃/已归档分组）；
+- **项目翻篇了**："notecalc-iced 归档吧"——agent 调 `archive_topic`：abstract 移入 `archive/`，**检索仍可用**，只是会话回顾不再注入；想彻底移除才用注销（笔记变游离文件，走审计裁决）；
 - 审计页会点名"游离文件"（不属于任何主题的散笔记）——让 agent 归位或删除；
-- 会话开始时 agent 会先调 `memory_context` 回顾全部主题——新 session 不再从零开始。
+- 会话开始时 agent 会先调 `memory_context` 回顾你的画像/偏好与全部活跃主题——新 session 不再从零开始。
+
+### 2.5.1 画像与偏好：记忆层的功能，不占主题
+
+你的画像与协作偏好（身份、沟通风格、材料格式等）存在根目录 `PROFILE.md`，**它不是主题**——是记忆层的功能文件。对 agent 说：
+
+> "记住：我的报告都要公文体。"
+
+agent 调 `update_user_preference` 按小节维护（如"材料与文档偏好"）。每次会话开始，`memory_context` 会把画像**前置注入**——任何 agent 第一步就"认识你"，不用翻主题。
 
 ### 2.6 curator 每周提案
 
