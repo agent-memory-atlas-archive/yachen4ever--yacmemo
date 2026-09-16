@@ -117,6 +117,7 @@ const renderedContent = computed(() => {
 })
 
 async function loadData() {
+  if (!props.user) return
   loading.value = true
   try {
     const [topicData, noteData] = await Promise.all([
@@ -190,8 +191,8 @@ function handleDelete() {
   })
 }
 
-watch(() => props.user, loadData)
-onMounted(loadData)
+watch(() => props.user, () => { if (props.user) loadData() })
+onMounted(() => { if (props.user) loadData() })
 </script>
 
 <style scoped>

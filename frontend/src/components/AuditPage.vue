@@ -170,10 +170,11 @@ async function resolveCollision(id, status) {
 }
 
 onMounted(async () => {
+  if (!props.user) return
   try {
     const overview = await api('/api/overview')
     const u = overview.users.find(x => x.id === props.user)
-    if (u) curatorReady.value = u.curator_proposals >= 0  // curator is configured if overview doesn't error
+    if (u) curatorReady.value = u.curator_proposals >= 0
   } catch (e) { /* */ }
   await loadProposals()
 })

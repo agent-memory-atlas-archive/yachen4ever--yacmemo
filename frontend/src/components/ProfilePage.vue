@@ -147,8 +147,8 @@ async function addSection() {
   }
 }
 
-watch(() => props.user, loadProfile)
-onMounted(loadProfile)
+watch(() => props.user, () => { if (props.user) loadProfile() })
+onMounted(() => { if (props.user) loadProfile() })
 </script>
 
 <style scoped>

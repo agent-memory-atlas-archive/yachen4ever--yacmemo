@@ -146,7 +146,7 @@ async function saveConfig() {
 onMounted(() => {
   loadOverview()
   loadUsage()
-  loadConfig()
+  if (props.user) loadConfig()
 })
 </script>
 
