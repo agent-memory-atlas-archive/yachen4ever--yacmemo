@@ -22,6 +22,8 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
+from rapidfuzz import fuzz
+
 from .config import Config
 from .detectors import (
     d1_scan,
@@ -46,6 +48,11 @@ PROFILE_FILE = "PROFILE.md"
 # 免注册区：不参与主题注册与游离检测的目录
 FREE_ZONES = ("journal/", "archive/", "curator/")
 _TOPIC_FIELD_RE = re.compile(r"^-\s*(卡|相关|现状|注册|状态):\s*(.*)$")
+
+# memory_read 返回值里的附加信息标记：agent 把它们当文件内容抄进 old_string
+# 时，拒绝消息要能直接点破（2026-09-16 TeleAgent 连续 4 次 edit 失败的根因）
+_READ_DECOR_MARKERS = ("[正文开始", "[正文结束", "相关笔记", "(path: ",
+                       "(vector)", "(via: ")
 
 
 def _d1_id(c: dict) -> str:
@@ -256,7 +263,7 @@ class Store:
         n = content.count(old_string)
         if n == 0:
             raise AnchorError(
-                f"old_string 在 {rel} 中未找到。请先用 memory_read 确认内容。")
+                f"old_string 在 {rel} 中未找到。{self._edit_miss_hint(content, old_string)}")
         if n > 1:
             raise AnchorError(
                 f"old_string 在 {rel} 中命中 {n} 处（约行 {positions[:5]}），需要唯一。"
@@ -268,6 +275,66 @@ class Store:
         self._index_note(rel, title, new_content)
         self.snapshots.commit(f"edit: {rel}")
         return {"path": rel, "title": title}
+
+    def _edit_miss_hint(self, content: str, old: str) -> str:
+        """未命中锚点的确定性诊断：拒绝消息必须是可执行的下一步指令
+        （04-consistency §一），点破原因并交还可复制的逐字原文。"""
+        deco = sorted({m for m in _READ_DECOR_MARKERS if m in old})
+        if deco:
+            return ("old_string 里混有 memory_read 返回值的附加信息（"
+                    + "、".join(deco) + "）——相关笔记/path 等标注不是文件内容，"
+                    "锚点请只用 [正文开始]/[正文结束] 块内的文字。")
+
+        def _norm(text: str) -> list[tuple[str, int]]:
+            """每行 rstrip + 连续空行折叠为一行；返回 (行文本, 原始行号)。"""
+            out, blanks = [], 0
+            for idx, ln in enumerate(text.splitlines()):
+                s = ln.rstrip()
+                if not s:
+                    blanks += 1
+                    if blanks >= 2:
+                        continue
+                else:
+                    blanks = 0
+                out.append((s, idx))
+            return out
+
+        orig = content.splitlines()
+        hay, needle = _norm(content), _norm(old)
+        if not any(s for s, _ in needle):
+            return "old_string 为空白，无法定位。"
+        span = len(needle)
+        hits = [i for i in range(len(hay) - span + 1)
+                if [t for t, _ in hay[i:i + span]] == [t for t, _ in needle]]
+        if len(hits) == 1:
+            region = orig[hay[hits[0]][1]:hay[hits[0] + span - 1][1] + 1]
+            for ln in region:  # 首选唯一单行锚点（实测单行逐字复制成功率最高）
+                if ln.strip():
+                    if content.count(ln) == 1 and len(ln.strip()) >= 12:
+                        return ("old_string 与文件内容仅空白不一致（空行数量/行尾空格）。"
+                                "可改用下面这行文件原文作锚点：\n" + ln)
+                    break
+            verbatim = "\n".join(region)
+            if len(verbatim) > 600:
+                verbatim = verbatim[:600] + "…（截断，请用 memory_read 核对全段）"
+            return ("old_string 与文件内容仅空白不一致（空行数量/行尾空格）。"
+                    "该位置逐字原文如下，请整段复制：\n" + verbatim)
+        if len(hits) > 1:
+            return (f"old_string 归一化空白后仍命中 {len(hits)} 处"
+                    "——请扩展上下文使锚点唯一。")
+        best_score, best_line = 0, ""
+        for s, _ in hay:
+            if not s:
+                continue
+            for nl, _ in needle:
+                if nl:
+                    r = fuzz.ratio(s, nl)
+                    if r > best_score:
+                        best_score, best_line = r, s
+        if best_score >= 75:
+            return ("old_string 与文件内容有实质差异。最接近的原文行（相似度 "
+                    f"{best_score}%）：\n{best_line}\n请先 memory_read 核对实际内容再重试。")
+        return "文件中无相似内容——该段可能尚不存在，请 memory_read 核对后决定改法。"
 
     def edit_section(self, path: str, heading: str, new_content: str) -> dict:
         """Replace the body of one `##`-level (or deeper) section, keeping the heading."""

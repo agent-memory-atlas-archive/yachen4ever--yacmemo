@@ -61,6 +61,16 @@ async def _roundtrip(port: int):
             assert isinstance(text, str) and "8080" in text
             assert "1234" not in text
 
+            # read 输出正文边界：正文块与附加信息不混淆（edit 锚点防呆）
+            assert "[正文开始 |" in text and "[正文结束" in text
+            assert "非文件内容" in text
+
+            # edit 未命中时拒绝消息必须可自纠（诊断出幽灵标记）
+            res = await s.call_tool("memory_edit", {
+                "path": "端口配置", "old_string": "## 相关笔记\n- [[x]] (vector)",
+                "new_string": "y"})
+            assert "不是文件内容" in res.content[0].text
+
 
 def test_http_multi_user_roundtrip(http_server):
     asyncio.run(_roundtrip(http_server))

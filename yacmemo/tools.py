@@ -92,6 +92,9 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
     def memory_read(path_or_title: str, ctx: Context = None) -> str:
         """读取笔记全文，附相关笔记（wiki-links + 语义近邻）。
 
+        正文夹在 [正文开始]/[正文结束] 标记之间（逐字原文）；
+        标记之后的"相关笔记"是工具附加信息，不是文件内容。
+
         Args:
             path_or_title: 相对路径或笔记标题
         """
@@ -105,9 +108,14 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"读取失败: {e}"
 
-            lines = [f"# {r['title']}", f"(path: {r['path']})", "", r["content"]]
+            # 正文与装饰必须边界清晰：附加段的语法不得模仿笔记自身结构
+            #（曾经的 "## 相关笔记" 附加段被 agent 当成文件小节拿去当 edit 锚点，
+            # 连续撞"未找到"后引发一整轮基础设施排查——2026-09-16 TeleAgent 实例）
+            lines = [f"[正文开始 | {r['path']} | memory_edit 的 old_string 须从本块逐字复制]",
+                     r["content"],
+                     "[正文结束 | 以下相关笔记为工具附加信息，非文件内容]"]
             if r["related"]:
-                lines += ["", "## 相关笔记"]
+                lines.append("相关笔记：")
                 for rel in r["related"]:
                     if rel.get("missing"):
                         lines.append(f"- [[{rel['title']}]]（目标不存在，可考虑创建或清理该链接）")

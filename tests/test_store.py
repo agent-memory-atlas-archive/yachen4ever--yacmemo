@@ -155,3 +155,42 @@ def test_reindex_rebuilds_from_files(store: Store):
     assert r["indexed"] == 2 and r["failed"] == []
     assert store.db.get_note_by_title("yacmemo部署配置") is not None
     assert store.db.fts_search("restic")[0]["path"] == "备份策略.md"
+
+
+def test_edit_miss_diagnoses_read_decoration(store: Store):
+    """agent 把 memory_read 的附加信息当文件内容抄进锚点时，拒绝消息直接点破
+    （2026-09-16 TeleAgent 连续撞墙的根因形态一）。"""
+    store.write("ESXi宿主机与核显直通", "# ESXi宿主机与核显直通\n\n## 宿主机事实\n\n- 内容\n")
+    with pytest.raises(AnchorError) as e:
+        store.edit("ESXi宿主机与核显直通", "## 相关笔记\n- [[hardware]] (vector)", "x")
+    msg = str(e.value)
+    assert "不是文件内容" in msg and "相关笔记" in msg
+
+
+def test_edit_miss_whitespace_suggests_verbatim_anchor(store: Store):
+    """凭记忆重打导致空行数不对时（形态二），把逐字原文行还给 agent。"""
+    content = ("# ESXi宿主机与核显直通\n\n## 宿主机事实\n\n"
+               "- **ESXi 8.0.3 build-25205845（8.0 U3）**，全 VM 为 vmx-21\n\n"
+               "## 相关文件\n\n- vmx 备份见 datastore1\n")
+    store.write("ESXi宿主机与核显直通", content)
+    bad = ("- **ESXi 8.0.3 build-25205845（8.0 U3）**，全 VM 为 vmx-21\n\n\n"
+           "## 相关文件")  # 行序列相同，仅空行数不同
+    with pytest.raises(AnchorError) as e:
+        store.edit("ESXi宿主机与核显直通", bad, "x")
+    msg = str(e.value)
+    assert "仅空白不一致" in msg
+    suggested = "- **ESXi 8.0.3 build-25205845（8.0 U3）**，全 VM 为 vmx-21"
+    assert suggested in msg
+    # 建议的锚点直接可用（一轮恢复，不用反复试错）
+    r = store.edit("ESXi宿主机与核显直通", suggested, "- **已替换**\n\n## 相关文件")
+    assert r["path"] == "ESXi宿主机与核显直通.md"
+
+
+def test_edit_miss_fuzzy_shows_closest_line(store: Store):
+    """实质差异（如记错数字）时给出最接近的原文行，避免盲目重试。"""
+    content = "# ESXi宿主机与核显直通\n\n- [配置] 管理网络 vmk0 192.168.5.10\n"
+    store.write("ESXi宿主机与核显直通", content)
+    with pytest.raises(AnchorError) as e:
+        store.edit("ESXi宿主机与核显直通", "- [配置] 管理网络 vmk0 192.168.5.11", "x")
+    msg = str(e.value)
+    assert "实质差异" in msg and "192.168.5.10" in msg
