@@ -134,7 +134,7 @@ def test_env_backfills_missing_home(monkeypatch):
     (safe.directory exemptions) and fails on dubious ownership. _env must
     backfill HOME from the password database."""
     import os
-    import pwd
+    pwd = pytest.importorskip("pwd")  # POSIX-only: Windows has no pwd module
 
     from yacmemo.git_snapshots import GitSnapshots
 

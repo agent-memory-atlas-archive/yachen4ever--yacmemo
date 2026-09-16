@@ -18,7 +18,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import pwd  # POSIX only — yacmemo targets Linux/macOS servers
+
+try:
+    import pwd  # POSIX only — yacmemo targets Linux/macOS servers
+except ImportError:  # Windows dev boxes; git resolves HOME from USERPROFILE
+    pwd = None
 import shutil
 import subprocess
 import threading
@@ -57,7 +61,7 @@ class GitSnapshots:
         Resolve the home from the password database instead (2026-09-16
         incident: silent dubious-ownership failures in yacmemo.service)."""
         env = dict(os.environ)
-        if not env.get("HOME"):
+        if not env.get("HOME") and pwd is not None:
             with contextlib.suppress(KeyError):
                 env["HOME"] = pwd.getpwuid(os.getuid()).pw_dir
         return env
@@ -70,8 +74,10 @@ class GitSnapshots:
     def _ensure_repo(self) -> bool:
         """Auto-init a fresh memory root on first snapshot, and make sure a
         commit identity exists (configured value, else yacmemo local defaults).
-        Repo-local config is only written when neither local nor global
-        identity is set — an existing identity is never overwritten."""
+        Only repo-local config counts as "existing identity": a machine-global
+        gitconfig must not silently outrank the yacmemo-configured identity
+        (resolve_git_identity chain), so we read with --local and never
+        overwrite a locally-set value."""
         r = self._run("rev-parse", "--is-inside-work-tree", check=False)
         if r.returncode != 0 or r.stdout.strip() != "true":
             init = self._run("init", "-q", check=False)
@@ -84,9 +90,9 @@ class GitSnapshots:
                 ignore.write_text(_GITIGNORE, encoding="utf-8")
         for key, fallback in (("user.name", self._user_name or "yacmemo"),
                               ("user.email", self._user_email or "yacmemo@local")):
-            cur = self._run("config", key, check=False)
+            cur = self._run("config", "--local", key, check=False)
             if cur.returncode != 0 or not cur.stdout.strip():
-                self._run("config", key, fallback, check=False)
+                self._run("config", "--local", key, fallback, check=False)
         return True
 
     def commit(self, message: str) -> str | None:
