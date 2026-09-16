@@ -406,6 +406,8 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         Route("/ui", ui_index, methods=["GET"]),
         Route("/ui/", ui_index, methods=["GET"]),
         Mount("/ui/static", app=StaticFiles(directory=STATIC_DIR), name="static"),
+        *((Mount("/ui/assets", app=StaticFiles(directory=STATIC_DIR / "assets"),
+                 name="assets"),) if (STATIC_DIR / "assets").is_dir() else ()),
         Route("/api/overview", overview, methods=["GET"]),
         Route("/api/usage", usage_recent, methods=["GET"]),
         Route("/api/usage/clients", usage_clients, methods=["GET"]),
