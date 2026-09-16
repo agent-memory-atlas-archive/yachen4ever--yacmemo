@@ -432,7 +432,7 @@ obs_topk = 5
 - `yacmemo-curator` CLI + systemd timer（默认每周六 04:00）；LLM 用主模型端点（`[curator]` 配置节）；
 - 流程：读注册表 + 主题卡 + 审计结果 → LLM 审查 → **提案报告笔记**（`curator/提案-<日期>.md`，状态"待裁决"）；同日重跑不新建文件，结果以"复审（HH:MM）"小节追加进当天报告（标题保持每日唯一，不触发 D1）；
 - 审查维度：duplicate / outdated / stray / stale-card / merge / forget；
-- **铁律：只提案，绝不执行**——这是 v1"自动失效不问人"教训的最终形态：维护者 LLM 回来了，但被剥夺了一切写权力；
+- **铁律：只提案，绝不执行**——这是 v1"自动失效不问人"教训的最终形态：维护者 LLM 回来了，但被剥夺了一切写权力（唯一例外：顺手按 `audit_retention_days`（默认 7 天）清理过期的 journal/audit/ 审计快照——处置在 audit_actions 表、完整历史在 git，快照文件只是近期工作集视图）；
 - 批准的提案由 agent 或人工执行，执行后在报告笔记中留痕。
 
 ### 工具面（累计 16 个）

@@ -174,3 +174,24 @@ def test_audit_flags_dangling_registry_card(store: Store):
                               r["dangling_cards"][0], "resolved", "悬空卡主题")
     r2 = store.audit()
     assert all("悬空卡主题" not in c for c in r2["dangling_cards"])
+
+
+def test_audit_snapshot_same_day_merge(store: Store):
+    """同日多次审计合并进当天一份快照（复审小节追加），处置记录仍聚在末尾。"""
+    from datetime import datetime
+
+    store.write("yacmemo部署配置", "# yacmemo部署配置\n内容")
+    f1 = store.audit()["audit_file"]
+    f2 = store.audit()["audit_file"]
+    assert f1 == f2  # 同日同文件，不再每次落新快照
+    assert f1 == f"journal/audit/{datetime.now().strftime('%Y%m%d')}.md"
+    files = list((store.root / "journal/audit").glob("*.md"))
+    assert len(files) == 1
+    content = (store.root / f1).read_text(encoding="utf-8")
+    assert content.count("## 复审（") == 1
+    assert content.count("## 处置记录") == 1
+    # 处置仍正确追加（复审小节插入不破坏处置段）
+    store.record_audit_action(f1, "D4:x.md", "resolved", "测试处置")
+    content2 = (store.root / f1).read_text(encoding="utf-8")
+    assert "已处理 测试处置" in content2
+    assert content2.index("## 复审（") < content2.index("## 处置记录")

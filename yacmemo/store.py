@@ -808,26 +808,50 @@ class Store:
 
     def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
                               dangling, stray, dangling_cards=()) -> str:
-        ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-        git_line = self.snapshots.status_line()
+        """每日一份审计快照（journal/audit/<YYYYMMDD>.md），同日重跑以"复审"
+        小节追加进当天文件——对齐 curator 的同日合并，标题天然唯一不撞 D1，
+        且 journal/audit/ 不会随审计频率无界膨胀（过期文件由 curator 清理）。"""
+        body = self._audit_body(resynced, missing, added, d1, collisions,
+                                dangling, stray, dangling_cards)
+        day = datetime.now().strftime("%Y%m%d")
+        rel = f"{self._audit_dir}{day}.md"
+        abs_path = self.root / rel
+        if abs_path.is_file():
+            old = abs_path.read_text(encoding="utf-8")
+            stripped = body.strip("\n")
+            review = (f"---\n\n## 复审（{datetime.now().strftime('%Y-%m-%d %H:%M')}）"
+                      f"\n\n{stripped}\n")
+            marker = "## 处置记录"
+            if marker in old:  # 复审插在处置记录之前，处置行保持聚在文件末尾
+                head, _, tail = old.partition(marker)
+                content = f"{head.rstrip(chr(10))}\n\n{review}\n{marker}{tail}"
+            else:
+                content = f"{old.rstrip(chr(10))}\n\n{review}"
+        else:
+            head = (f"# 审计快照 {day}\n\n"
+                    f"> 确定性审计 · {datetime.now(UTC).isoformat(timespec='seconds')} "
+                    f"· git 快照: {self.snapshots.status_line()}\n")
+            content = f"{head}{body}\n## 处置记录\n\n（暂无记录）\n"
+        self.save(rel, content)
+        return rel
+
+    def _audit_body(self, resynced, missing, added, d1, collisions,
+                    dangling, stray, dangling_cards) -> str:
         guard = self.db.guard_stats()
 
         def _sec(title, items):
-            return ["", f"## {title}", ""] + [f"- {i}" for i in items] + [""]
+            return "\n".join(["", f"## {title}", ""] + [f"- {i}" for i in items] + [""])
 
-        lines = [f"# 审计快照 {ts}", "",
-                 f"> 确定性审计 · {datetime.now(UTC).isoformat(timespec='seconds')} "
-                 f"· git 快照: {git_line}", ""]
-        lines += ["## 概览", ""]
-        lines += [f"- 新增文件（已入索引）：{len(added)}",
-                  f"- 外部修改（已重建索引）：{len(resynced)}",
-                  f"- 外部删除（已清理索引）：{len(missing)}",
-                  f"- 标题重复（D1）：{len(d1)}",
-                  f"- 语义撞车（D2）：{len(collisions)}",
-                  f"- 悬空链接（D3）：{len(dangling)}",
-                  f"- 游离文件（D4）：{len(stray)}",
-                  f"- 悬空主题卡（D5）：{len(dangling_cards)}",
-                  f"- 守卫：拒绝 {guard['refused']} / force {guard['forced']}", ""]
+        lines = ["## 概览", "",
+                 f"- 新增文件（已入索引）：{len(added)}",
+                 f"- 外部修改（已重建索引）：{len(resynced)}",
+                 f"- 外部删除（已清理索引）：{len(missing)}",
+                 f"- 标题重复（D1）：{len(d1)}",
+                 f"- 语义撞车（D2）：{len(collisions)}",
+                 f"- 悬空链接（D3）：{len(dangling)}",
+                 f"- 游离文件（D4）：{len(stray)}",
+                 f"- 悬空主题卡（D5）：{len(dangling_cards)}",
+                 f"- 守卫：拒绝 {guard['refused']} / force {guard['forced']}", ""]
         if added:
             lines += _sec("新增文件", added)
         if resynced:
@@ -850,10 +874,7 @@ class Store:
         if dangling_cards:
             lines += _sec("悬空主题卡（D5）",
                           [f"`{cid}` — 注册表指向的 abstract 不存在" for cid in dangling_cards])
-        lines += ["## 处置记录", "", "（暂无记录）", ""]
-        rel = f"{self._audit_dir}{ts}.md"
-        self.save(rel, "\n".join(lines))
-        return rel
+        return "\n".join(lines) + "\n"
 
     def record_audit_action(self, audit_file: str, issue_id: str, action: str,
                             label: str, note: str = "") -> dict:

@@ -76,3 +76,27 @@ def test_run_check_same_day_rerun_appends_review(tstore: Store):
     assert text.count("# 记忆质量提案") == 1, "标题必须保持唯一"
     assert "## 复审" in text and "未发现新问题" in text
     assert "待裁决" in report  # 返回值仍是本次复审的完整报告文本
+
+
+def test_cleanup_audit_snapshots_retention(tstore: Store):
+    """curator 顺手清理过期审计快照（文件名日期判旧；处置在 DB、历史在 git）。"""
+    from datetime import date
+
+    from yacmemo.curator import cleanup_audit_snapshots
+
+    audit_dir = tstore.root / "journal" / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "20200101-000000.md").write_text("# 审计快照 20200101\n", encoding="utf-8")
+    (audit_dir / "20200102.md").write_text("# 审计快照 20200102\n", encoding="utf-8")
+    (audit_dir / "说明文档.md").write_text("# 无日期命名的文件不清理\n", encoding="utf-8")
+    today = date.today().strftime("%Y%m%d")
+    (audit_dir / f"{today}.md").write_text(f"# 审计快照 {today}\n", encoding="utf-8")
+
+    n = cleanup_audit_snapshots(tstore, 7)
+    assert n == 2
+    assert not (audit_dir / "20200101-000000.md").exists()
+    assert not (audit_dir / "20200102.md").exists()
+    assert (audit_dir / f"{today}.md").exists()
+    assert (audit_dir / "说明文档.md").exists()  # 无法判日期的文件不动
+
+    assert cleanup_audit_snapshots(tstore, 0) == 0  # 0 = 永不清理

@@ -136,7 +136,7 @@ memory_audit() -> str
 7. D4 游离文件（免注册区之外、不属于任何注册主题的散文件——agent 据此提示用户归位）；
 8. 守卫统计（refused / forced 次数）。
 
-修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行与当次审计快照路径 `journal/audit/<时间戳>.md`）。
+修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行与当次审计快照路径 `journal/audit/<日期>.md`——每日一份、同日复审追加；过期快照由 curator 按 `audit_retention_days` 清理）。
 
 ## 8. memory_list
 

@@ -14,7 +14,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from datetime import date, datetime
+import re
+from datetime import date, datetime, timedelta
 
 import httpx
 
@@ -176,11 +177,18 @@ def run_check(config: Config, user: UserEntry, dry_run: bool = False,
     store = Store(config, db, emb, vectors, root=root,
                   git_user=git_name, git_email=git_email)
 
+    cleaned = cleanup_audit_snapshots(store, config.curator.audit_retention_days,
+                                      dry_run=dry_run)
+
     material = build_material(store)
     call = llm_call or default_llm_call(config)
     raw = call(_SYSTEM_PROMPT, material)
     proposal = parse_proposal(raw)
     report = render_report(proposal, user.id)
+    if cleaned:
+        report += (f"\n\n---\n\n> 维护：{'（dry-run 未执行）' if dry_run else '已'}清理 "
+                   f"{cleaned} 份过期审计快照"
+                   f"（audit_retention_days={config.curator.audit_retention_days}）\n")
 
     if not dry_run:
         path = f"curator/提案-{date.today().isoformat()}.md"
@@ -194,6 +202,42 @@ def run_check(config: Config, user: UserEntry, dry_run: bool = False,
             store.save(path, report)
     db.close()
     return report
+
+
+def cleanup_audit_snapshots(store, retention_days: int,
+                            dry_run: bool = False) -> int:
+    """Delete journal/audit/ snapshots older than retention_days (0 = never).
+
+    Day of a snapshot comes from its filename stem (both the current day-keyed
+    `<YYYYMMDD>.md` and the legacy `<YYYYMMDD>-<HHMMSS>.md` parse). The files
+    are a recent-working-set view only: dispositions persist in the
+    audit_actions table and git keeps the full history, so nothing is lost.
+    Deletion goes through the store so every removal is git-snapshotted and
+    the git-clean invariant holds.
+    """
+    if retention_days <= 0:
+        return 0
+    audit_dir = store.root / store.config.memory.journal_dir / "audit"
+    if not audit_dir.is_dir():
+        return 0
+    cutoff = date.today() - timedelta(days=retention_days)
+    cleaned = 0
+    for f in sorted(audit_dir.glob("*.md")):
+        m = re.match(r"^(\d{8})", f.stem)
+        if not m:
+            continue
+        try:
+            file_day = datetime.strptime(m.group(1), "%Y%m%d").date()
+        except ValueError:
+            continue
+        if file_day < cutoff:
+            if not dry_run:
+                store.delete_note(f.relative_to(store.root).as_posix())
+            cleaned += 1
+    if cleaned and not dry_run:
+        logger.info("cleaned %d audit snapshot(s) older than %dd",
+                    cleaned, retention_days)
+    return cleaned
 
 
 def main():

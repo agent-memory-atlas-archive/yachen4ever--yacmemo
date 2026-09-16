@@ -49,6 +49,8 @@ api_key = "sk-your-key"
 model = "your-main-model"
 max_tokens = 4096
 timeout = 300
+# journal/audit/ 审计快照保留天数（每周 timer 顺手清理过期文件；0 = 永不清理）
+audit_retention_days = 7
 
 # ---- Users (HTTP server) ----
 # Each user mounts at /{id}/mcp on the server port; the root directory IS the

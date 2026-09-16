@@ -61,6 +61,9 @@ class CuratorConfig:
     model: str = ""
     max_tokens: int = 4096
     timeout: int = 180
+    # journal/audit/ 快照保留天数（0 = 永不清理）；处置记录持久化在
+    # audit_actions 表、git 承载完整历史，快照文件只是近期工作集视图
+    audit_retention_days: int = 7
 
 
 @dataclass
@@ -194,6 +197,8 @@ def load_config(path: str | None = None) -> Config:
             model=cur.get("model", CuratorConfig.model),
             max_tokens=cur.get("max_tokens", CuratorConfig.max_tokens),
             timeout=cur.get("timeout", CuratorConfig.timeout),
+            audit_retention_days=int(cur.get("audit_retention_days",
+                                             CuratorConfig.audit_retention_days)),
         ),
         users=users,
     )
