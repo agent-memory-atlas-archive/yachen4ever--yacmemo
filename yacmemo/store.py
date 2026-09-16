@@ -840,7 +840,9 @@ class Store:
         guard = self.db.guard_stats()
 
         def _sec(title, items):
-            return "\n".join(["", f"## {title}", ""] + [f"- {i}" for i in items] + [""])
+            # 必须返回行列表：调用处是 lines += _sec(...)，返回字符串会被
+            # 逐字符拆进列表（2026-09-17 生产实爆：D5 段一字一行）
+            return ["", f"## {title}", ""] + [f"- {i}" for i in items] + [""]
 
         lines = ["## 概览", "",
                  f"- 新增文件（已入索引）：{len(added)}",

@@ -195,3 +195,15 @@ def test_audit_snapshot_same_day_merge(store: Store):
     content2 = (store.root / f1).read_text(encoding="utf-8")
     assert "已处理 测试处置" in content2
     assert content2.index("## 复审（") < content2.index("## 处置记录")
+
+
+def test_audit_snapshot_sections_are_intact_lines(store: Store):
+    """有发现时快照各问题段必须逐行完整——_sec 曾被改成返回字符串，
+    被 lines += 逐字符拆行（2026-09-17 生产实爆：D5 段一字一行）。"""
+    store.write("孤儿笔记", "# 孤儿笔记\n内容\n")  # 不注册主题 → D4 游离
+    r = store.audit()
+    content = (store.root / r["audit_file"]).read_text(encoding="utf-8")
+    assert "## 游离文件（D4）" in content.splitlines()
+    assert "- `D4:孤儿笔记.md` — `孤儿笔记.md`" in content.splitlines()
+    # 爆炸特征：存在单字符行（合法 markdown 快照没有）
+    assert not [ln for ln in content.splitlines() if len(ln) == 1 and ln != " "]
