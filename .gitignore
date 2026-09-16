@@ -24,3 +24,6 @@ Thumbs.db
 legacy/frontend/node_modules/
 legacy/frontend/dist/
 memory/
+frontend/node_modules/
+webui/dist/
+frontend/dist/

@@ -27,7 +27,10 @@ from ..config import Config
 
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = Path(__file__).parent / "dist"
+# Fallback to legacy static/ if dist/ doesn't exist (dev without build)
+if not STATIC_DIR.is_dir():
+    STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _ok(payload: dict) -> JSONResponse:
@@ -67,6 +70,8 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             users = []
             for uid, c in contexts.items():
                 topics = c["store"].load_topics()
+                active = [t for t in topics if not t.get("archived")]
+                archived = [t for t in topics if t.get("archived")]
                 curator_dir = c["store"].root / "curator"
                 proposals = (
                     len(list(curator_dir.glob("提案-*.md")))
@@ -77,8 +82,11 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                     "open_collisions": len(c["db"].list_collisions(status="open")),
                     "guard": c["db"].guard_stats(),
                     "topics": [{"title": t["title"], "card": t["card"],
-                                "status": t["status"]} for t in topics],
+                                "status": t["status"]} for t in active],
+                    "archived_topics": [{"title": t["title"], "card": t["card"]}
+                                        for t in archived],
                     "curator_proposals": proposals,
+                    "git_status": c["store"].snapshots.status_line(),
                 })
             return users
 
@@ -287,6 +295,63 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             {"file": f.name, "path": f"curator/{f.name}",
              "mtime": int(f.stat().st_mtime)} for f in files]})
 
+    # ---- 主题 ----
+
+    async def topics_list(request: Request):
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        topics = await run_in_threadpool(c["store"].load_topics)
+        active = [{"title": t["title"], "card": t["card"],
+                   "status": t["status"], "related": t["related"]}
+                  for t in topics if not t.get("archived")]
+        archived = [{"title": t["title"], "card": t["card"],
+                     "status": t["status"]}
+                    for t in topics if t.get("archived")]
+        return _ok({"active": active, "archived": archived})
+
+    async def topic_archive(request: Request):
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        body = await _body(request)
+        try:
+            r = await run_in_threadpool(c["store"].archive_topic,
+                                        body.get("title", ""))
+        except Exception as e:
+            return _err(str(e))
+        return _ok(r)
+
+    # ---- 画像/偏好 ----
+
+    async def profile_get(request: Request):
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        section = request.query_params.get("section", "")
+        try:
+            text = await run_in_threadpool(c["store"].get_preference, section)
+        except Exception as e:
+            return _err(str(e))
+        return _ok({"content": text})
+
+    async def profile_save(request: Request):
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        body = await _body(request)
+        try:
+            r = await run_in_threadpool(c["store"].update_preference,
+                                        body.get("section", ""),
+                                        body.get("content", ""))
+        except Exception as e:
+            return _err(str(e))
+        return _ok(r)
+
     # ---- 配置管理（config.toml 在线编辑：用户 / embedding / curator）----
 
     async def config_get(request: Request):
@@ -356,6 +421,10 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         Route("/api/{user}/collision", collision_resolve, methods=["POST"]),
         Route("/api/{user}/curator", curator_run, methods=["POST"]),
         Route("/api/{user}/proposals", proposals_list, methods=["GET"]),
+        Route("/api/{user}/topics", topics_list, methods=["GET"]),
+        Route("/api/{user}/topics/archive", topic_archive, methods=["POST"]),
+        Route("/api/{user}/profile", profile_get, methods=["GET"]),
+        Route("/api/{user}/profile", profile_save, methods=["PUT"]),
         Route("/api/config", config_get, methods=["GET"]),
         Route("/api/config", config_save, methods=["POST"]),
     ]
