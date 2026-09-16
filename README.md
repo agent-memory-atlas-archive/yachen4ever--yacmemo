@@ -86,7 +86,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `memory_edit_section` | 按小节整段替换 |
 | `memory_move` | 移动文件，索引跟随 |
 | `memory_delete` | 删除笔记（**仅用户明确要求时**，git 历史可恢复） |
-| `memory_audit` | 自愈式一致性审计（外部改动/删除、D1/D2/D3、守卫统计） |
+| `memory_audit` | 自愈式一致性审计（外部改动/删除自愈、D1–D5 一致性问题、守卫统计、审计快照路径） |
 | `memory_list` | 目录树 / 最近变更 |
 | `memory_context` | **会话开始先调**：返回主题注册表 + 各主题卡摘要头（冷启动回顾） |
 | `topic_list` | 列出长期记忆主题（活跃/已归档分组） |
