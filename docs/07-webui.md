@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '97f158e2-c8fe-4c97-a7eb-3d8045247814'
-  PropagateID: '97f158e2-c8fe-4c97-a7eb-3d8045247814'
-  ReservedCode1: 'a5c0e6bb-9ebe-49f3-b2ef-65f6b195c666'
-  ReservedCode2: 'a5c0e6bb-9ebe-49f3-b2ef-65f6b195c666'
+  ProduceID: 'b3bc1025-3171-430c-b5fc-e71794a56d5d'
+  PropagateID: 'b3bc1025-3171-430c-b5fc-e71794a56d5d'
+  ReservedCode1: '6ed09f6a-6ba2-48b4-935e-13a41391e1da'
+  ReservedCode2: '6ed09f6a-6ba2-48b4-935e-13a41391e1da'
 ---
 
 # WebUI 控制台
@@ -60,11 +60,16 @@ AIGC:
 | 新发现文件 | 磁盘上有、从未入索引的 .md，已自动建索引 | 无需操作 |
 | 外部修改 | 你在 Obsidian/vim 改过的，已自动重建索引 | 无需操作 |
 | 外部删除 | 你直接删掉的，索引已清理 | 无需操作 |
-| 标题重复 | 归一化后近似标题的两篇 | 建议合并：点标题进编辑器手工合并 |
-| 语义撞车 | 跨笔记的相似 observation 对（含双方文本与分数） | **人工裁决**：合并后点"已合并"，或点"忽略" |
-| 悬空链接 | `[[目标]]` 不存在 | 创建目标或让 agent 清理链接 |
+| 标题重复 | 归一化后近似标题的两篇 | 人工合并后点「已处理」，或「忽略」 |
+| 语义撞车 | 跨笔记的相似 observation 对（含双方文本与分数） | **人工裁决**：合并后点「已处理」或「忽略」（同步撞车状态） |
+| 悬空链接 | `[[目标]]` 不存在 | 补齐/删除后「已处理」，非笔记引用则「忽略」 |
+| 游离文件 | 未归入任何注册主题的散笔记 | 归位后点「已处理」，或「忽略」 |
 
-另有**游离文件清单**（未归入任何注册主题的散笔记，免注册区 journal/archive/curator 豁免）。底部为守卫统计（refused / forced 次数）。
+> 免注册区（journal/archive/curator）不判游离。底部为守卫统计（refused / forced 次数）。
+
+**历史审计快照**——每次点「确定性审计」自动落一份 markdown 快照到 `journal/audit/<时间戳>.md`（免注册区，自动 git 快照、可 Obsidian 打开）：记入概览计数、问题清单（每条带稳定 id）与处置记录。页面上方「历史审计快照」目录按时间倒序列出，点击任一条回看当时的问题与处理情况。
+
+**处置记录**——对每条待处理问题（D1/D2/D3/D4）可点「已处理」或「忽略」：处置行（时间 + 动作 + 备注）自动追加进当次快照的《处置记录》节，随文件留存可追溯；已处置项不再出现在后续审计（D2 同步 index 撞车状态，其余写入持久化处置表），避免反复打扰。处置只记状态、绝不删除内容——合并/归位等实际操作仍需在笔记页/Obsidian 完成。
 
 ### 2.4 画像与偏好
 
@@ -94,7 +99,9 @@ PROFILE.md 的可视化编辑：左侧列出全部小节（身份 / 沟通风格
 | PUT | `/api/{user}/note` | `{path, content}` | 整篇保存（标题随首行标题） |
 | DELETE | `/api/{user}/note` | `path` | 删除（文件 + 全部索引） |
 | GET | `/api/{user}/search` | `q` `limit` `kind` | 检索（含 ⚠ warnings） |
-| POST | `/api/{user}/audit` | — | 运行审计（含自愈，会改动索引） |
+| POST | `/api/{user}/audit` | — | 运行审计（含自愈，会改动索引）；返回 `audit_file`（本次快照路径） |
+| GET | `/api/{user}/audit/runs` | — | 历史审计快照列表（journal/audit/*.md，时间倒序） |
+| POST | `/api/{user}/audit/action` | `{file, id, action, label, note?}` | 记录处置（追加快照处置记录；D2 同步撞车状态） |
 | POST | `/api/{user}/collision` | `{id, status}` | 撞车裁决：`resolved` / `dismissed` |
 | POST | `/api/{user}/curator` | — | 触发深度审查（同步等待，约 1-2 分钟），返回报告 markdown |
 | GET | `/api/{user}/proposals` | — | 列出 curator 提案报告 |

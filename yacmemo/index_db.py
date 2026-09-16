@@ -49,6 +49,15 @@ CREATE TABLE IF NOT EXISTS guard_events (
     attempted_title TEXT NOT NULL,
     matched_path    TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS audit_actions (
+    id       TEXT PRIMARY KEY,  -- D1:{a}|{b} / D2:{collision_id} / D3:{path}|{link} / D4:{path}
+    kind     TEXT NOT NULL,                -- D1 / D2 / D3 / D4
+    a_path   TEXT NOT NULL DEFAULT '',
+    b_path   TEXT NOT NULL DEFAULT '',
+    action   TEXT NOT NULL,                -- resolved / dismissed
+    note     TEXT NOT NULL DEFAULT '',
+    acted_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS vec_cache (
     content_hash TEXT PRIMARY KEY,
     vector       BLOB NOT NULL
@@ -63,6 +72,7 @@ _LOCKED_METHODS = (
     "add_guard_event", "guard_stats", "count_forced_since",
     "add_collision", "collisions_for", "list_collisions",
     "remove_collisions_involving", "prune_stale_collisions",
+    "record_audit_action", "list_audit_actions",
     "get_cached_vector", "put_cached_vector", "close",
 )
 
@@ -271,6 +281,23 @@ class IndexDB:
             self.conn.execute("DELETE FROM collisions WHERE id=?", (r["id"],))
         self.conn.commit()
         return len(rows)
+
+    # ---- audit dispositions (human decisions, kept like guard_events) ----
+
+    def record_audit_action(self, issue_id: str, kind: str, a_path: str,
+                            b_path: str, action: str, note: str = "") -> None:
+        """Idempotent human disposition for an audit issue (re-click updates)."""
+        self.conn.execute(
+            "INSERT OR REPLACE INTO audit_actions "
+            "(id, kind, a_path, b_path, action, note, acted_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (issue_id, kind, a_path, b_path, action, note, _now()))
+        self.conn.commit()
+
+    def list_audit_actions(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM audit_actions ORDER BY acted_at DESC").fetchall()
+        return [dict(r) for r in rows]
 
     # ---- vector cache ----
 

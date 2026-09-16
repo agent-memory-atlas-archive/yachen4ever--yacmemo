@@ -28,3 +28,6 @@ frontend/node_modules/
 webui/dist/
 frontend/dist/
 yacmemo/webui/dist/
+
+# Agent background registry (temp)
+.temp/

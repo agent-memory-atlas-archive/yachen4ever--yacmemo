@@ -191,3 +191,53 @@ def test_proposals_list_empty(http_server):
 def test_curator_run_requires_config(http_server):
     r = httpx.post(f"http://127.0.0.1:{http_server}/api/alice/curator", timeout=5).json()
     assert r["ok"] is False and "未配置" in r["error"]
+
+
+def test_audit_snapshot_written_and_listed(http_server):
+    """确定性审计落盘 journal/audit/ 快照，且历史目录可见。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    r = httpx.post(f"{base}/notes", json={
+        "title": "审计快照测试", "content": "# 审计快照测试\n内容\n"})
+    assert r.json()["ok"] is True
+
+    r = httpx.post(f"{base}/audit", timeout=5).json()
+    assert r["ok"] is True
+    af = r["audit"]["audit_file"]
+    assert af.startswith("journal/audit/") and af.endswith(".md")
+
+    runs = httpx.get(f"{base}/audit/runs", timeout=5).json()["runs"]
+    assert any(x["path"] == af for x in runs)
+    note = httpx.get(f"{base}/note", params={"path": af}, timeout=5).json()
+    assert "## 处置记录" in note["content"]
+
+
+def test_audit_disposition_appends_and_syncs_d2(http_server, tmp_path):
+    """处置记录追加进快照；D2 处置同步 index 状态，重跑不再 open。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    for t in ("甲记录", "乙记录"):
+        r = httpx.post(f"{base}/notes", json={"title": t, "content": f"# {t}\n内容\n"})
+        assert r.json()["ok"] is True
+    db_path = tmp_path / "alice" / ".index" / "index.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO collisions (id, kind, a_path, b_path, a_text, b_text, score, "
+        "detected_at, status) VALUES ('d2-1','obs','甲记录.md','乙记录.md','A','B',"
+        "0.9,'2026-09-14T00:00:00+00:00','open')")
+    conn.commit()
+    conn.close()
+
+    r = httpx.post(f"{base}/audit", timeout=5).json()
+    af = r["audit"]["audit_file"]
+    assert any(c["id"] == "d2-1" for c in r["audit"]["collisions"])
+
+    # 处置：已处理 → 快照追加处置行 + D2 状态同步
+    r = httpx.post(f"{base}/audit/action", timeout=5, json={
+        "file": af, "id": "D2:d2-1", "action": "resolved",
+        "label": "合并内容", "note": "测试备注"})
+    body = r.json()
+    assert body["ok"] is True
+    assert "合并内容" in body["content"] and "测试备注" in body["content"]
+
+    # 重跑审计 → D2 不再出现在 open 撞车
+    r = httpx.post(f"{base}/audit", timeout=5).json()
+    assert all(c["id"] != "d2-1" for c in r["audit"]["collisions"])

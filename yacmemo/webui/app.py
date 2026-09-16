@@ -248,6 +248,41 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err(str(e))
         return _ok({"audit": r})
 
+    async def audit_runs(request: Request):
+        """历史审计快照目录（journal/audit/*.md，按时间倒序）。"""
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        d = c["store"].root / "journal" / "audit"
+        files = sorted(d.glob("*.md"), reverse=True) if d.is_dir() else []
+        return _ok({"runs": [
+            {"file": f.name, "path": f"journal/audit/{f.name}",
+             "mtime": int(f.stat().st_mtime), "size": f.stat().st_size}
+            for f in files]})
+
+    async def audit_action(request: Request):
+        """记录人类对审计问题的处置（追加进快照 + 持久化，D2 同步撞车状态）。"""
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        body = await _body(request)
+        try:
+            path = await run_in_threadpool(
+                c["store"].record_audit_action,
+                body.get("file", ""), body.get("id", ""),
+                body.get("action", ""), body.get("label", ""),
+                body.get("note", ""),
+            )
+        except Exception as e:
+            return _err(str(e))
+        try:
+            r = await run_in_threadpool(c["store"].read, path)
+        except Exception:
+            return _ok({"path": path})
+        return _ok({"path": path, "content": r["content"]})
+
     async def reindex(request: Request):
         """Full rebuild: wipe derived state, re-walk all files, re-detect D2."""
         try:
@@ -427,6 +462,8 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         Route("/api/{user}/note", note_delete, methods=["DELETE"]),
         Route("/api/{user}/search", search, methods=["GET"]),
         Route("/api/{user}/audit", audit, methods=["POST"]),
+        Route("/api/{user}/audit/runs", audit_runs, methods=["GET"]),
+        Route("/api/{user}/audit/action", audit_action, methods=["POST"]),
         Route("/api/{user}/reindex", reindex, methods=["POST"]),
         Route("/api/{user}/collision", collision_resolve, methods=["POST"]),
         Route("/api/{user}/curator", curator_run, methods=["POST"]),

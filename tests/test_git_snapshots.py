@@ -61,7 +61,9 @@ def test_audit_commits_external_changes(store: Store):
     r = store.audit()
     assert r["resynced"] == ["测试笔记.md"]
     subjects = _git(store.root, "log", "--format=%s").strip().splitlines()
-    assert subjects[0].startswith("external: self-healed 1 note(s)")
+    # 审计自愈先提交 external，随后落盘审计快照（save 为最新一条）
+    assert subjects[0].startswith("save: journal/audit/")
+    assert any(s.startswith("external: self-healed 1 note(s)") for s in subjects)
     status = _git(store.root, "status", "--porcelain")
     assert status.strip() == ""
 

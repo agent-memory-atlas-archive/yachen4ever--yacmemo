@@ -48,6 +48,19 @@ FREE_ZONES = ("journal/", "archive/", "curator/")
 _TOPIC_FIELD_RE = re.compile(r"^-\s*(卡|相关|现状|注册|状态):\s*(.*)$")
 
 
+def _d1_id(c: dict) -> str:
+    """Stable issue id for a D1 title-duplicate pair (order-independent)."""
+    return "D1:" + "|".join(sorted((c["a_title"], c["b_title"])))
+
+
+def _d3_id(c: dict) -> str:
+    return f"D3:{c['path']}|{c['link']}"
+
+
+def _d4_id(path: str) -> str:
+    return f"D4:{path}"
+
+
 class StoreError(Exception):
     """Tool-facing error; the message is meant to be shown to the agent."""
 
@@ -668,12 +681,27 @@ class Store:
         topics = self.load_topics()
         stray = self._stray_files(topics)
 
+        # 机器生成的审计快照不参与 D1（快照标题互相近似，会产生假阳性）
+        d1 = [c for c in d1
+              if not (c["a_path"].startswith(self._audit_dir)
+                      or c["b_path"].startswith(self._audit_dir))]
+
+        # 人类已处置过的问题不再重放（D2 以 collisions.status 天然只列 open）
+        disposed = {a["id"] for a in self.db.list_audit_actions()}
+        d1 = [c for c in d1 if _d1_id(c) not in disposed]
+        dangling = [c for c in dangling if _d3_id(c) not in disposed]
+        stray = [p for p in stray if _d4_id(p) not in disposed]
+
         # Out-of-band changes just healed (externally added/edited/deleted
         # files): snapshot them so the repo stays git-clean.
         healed = len(resynced) + len(missing) + len(added)
         if healed:
             self.snapshots.commit(
                 f"external: self-healed {healed} note(s) via audit")
+
+        # 审计快照落盘（journal/audit/ 免注册区，markdown 审计轨迹 + git 快照）
+        audit_file = self._write_audit_snapshot(
+            resynced, missing, added, d1, collisions, dangling, stray)
 
         return {"title_duplicates": d1,
                 "collisions": collisions,
@@ -683,7 +711,98 @@ class Store:
                 "added": added,
                 "stray": stray,
                 "git": self.snapshots.status_line(),
-                "guard_stats": self.db.guard_stats()}
+                "guard_stats": self.db.guard_stats(),
+                "audit_file": audit_file}
+
+    # ---- audit snapshots & dispositions ----
+
+    @property
+    def _audit_dir(self) -> str:
+        return f"{self.config.journal_prefix}audit/"
+
+    def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
+                              dangling, stray) -> str:
+        ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        git_line = self.snapshots.status_line()
+        guard = self.db.guard_stats()
+
+        def _sec(title, items):
+            return ["", f"## {title}", ""] + [f"- {i}" for i in items] + [""]
+
+        lines = [f"# 审计快照 {ts}", "",
+                 f"> 确定性审计 · {datetime.now(UTC).isoformat(timespec='seconds')} "
+                 f"· git 快照: {git_line}", ""]
+        lines += ["## 概览", ""]
+        lines += [f"- 新增文件（已入索引）：{len(added)}",
+                  f"- 外部修改（已重建索引）：{len(resynced)}",
+                  f"- 外部删除（已清理索引）：{len(missing)}",
+                  f"- 标题重复（D1）：{len(d1)}",
+                  f"- 语义撞车（D2）：{len(collisions)}",
+                  f"- 悬空链接（D3）：{len(dangling)}",
+                  f"- 游离文件（D4）：{len(stray)}",
+                  f"- 守卫：拒绝 {guard['refused']} / force {guard['forced']}", ""]
+        if added:
+            lines += _sec("新增文件", added)
+        if resynced:
+            lines += _sec("外部修改", resynced)
+        if missing:
+            lines += _sec("外部删除", missing)
+        if d1:
+            lines += _sec("标题重复（D1）", [
+                f"`{_d1_id(c)}` — `{c['a_title']}` ↔ `{c['b_title']}`"
+                f"（score {c['score']}）" for c in d1])
+        if collisions:
+            lines += _sec("语义撞车（D2）", [
+                f"`D2:{c['id']}` — `{c['a_path']}` ↔ `{c['b_path']}`"
+                f"（score {c['score']}）" for c in collisions])
+        if dangling:
+            lines += _sec("悬空链接（D3）", [
+                f"`{_d3_id(c)}` — `{c['path']}`: [[{c['link']}]]" for c in dangling])
+        if stray:
+            lines += _sec("游离文件（D4）", [f"`{_d4_id(p)}` — `{p}`" for p in stray])
+        lines += ["## 处置记录", "", "（暂无记录）", ""]
+        rel = f"{self._audit_dir}{ts}.md"
+        self.save(rel, "\n".join(lines))
+        return rel
+
+    def record_audit_action(self, audit_file: str, issue_id: str, action: str,
+                            label: str, note: str = "") -> dict:
+        """记录人类对某审计问题的处置（写入快照文件的处置记录 + 持久化）。
+
+        - D2 撞车：同步 index 状态（open → resolved / dismissed），重跑不重放；
+        - D1/D3/D4：写 audit_actions，重跑审计时不再列为待处理；
+        - 处置行追加进当次快照文件（markdown 轨迹，git 自动快照）。
+        """
+        kind = issue_id.split(":", 1)[0]
+        if kind == "D2":
+            cid = issue_id.split(":", 1)[1]
+            rows = self.db.list_collisions(status=None)
+            row = next((c for c in rows if c["id"] == cid), None)
+            if row is not None:
+                self.db.resolve_collision(
+                    cid, "resolved" if action == "resolved" else "dismissed")
+        self.db.record_audit_action(issue_id, kind, "", "", action, note)
+
+        rel = audit_file.replace("\\", "/").strip("/")
+        content = ""
+        abs_path = self.root / rel
+        if abs_path.is_file():
+            content = abs_path.read_text(encoding="utf-8")
+        ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
+        verb = "已处理" if action == "resolved" else "已忽略"
+        line = f"- [{ts}] {verb} {label}（`{issue_id}`）"
+        if note:
+            line += f" 备注：{note}"
+        marker = "## 处置记录"
+        if marker in content:
+            head, _, tail = content.partition(marker)
+            if "（暂无记录）" in tail:
+                tail = tail.replace("（暂无记录）", "", 1)
+            content = f"{head}{marker}{tail.rstrip()}\n{line}\n"
+        else:
+            content = content.rstrip() + f"\n\n{marker}\n{line}\n"
+        self.save(rel, content)
+        return rel
 
     def _sync_new_files(self) -> list[str]:
         """Index .md files that exist on disk but were never ingested
