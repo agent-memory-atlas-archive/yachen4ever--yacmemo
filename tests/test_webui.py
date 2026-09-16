@@ -241,3 +241,62 @@ def test_audit_disposition_appends_and_syncs_d2(http_server, tmp_path):
     # 重跑审计 → D2 不再出现在 open 撞车
     r = httpx.post(f"{base}/audit", timeout=5).json()
     assert all(c["id"] != "d2-1" for c in r["audit"]["collisions"])
+
+
+def test_audit_last_and_actions(http_server):
+    """audit/last 缓存最近一次结果；audit/actions 读处置历史（表是权威源）。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    httpx.post(f"{base}/notes", json={
+        "title": "快照测试甲", "content": "# 快照测试甲\n内容\n"})
+
+    r = httpx.get(f"{base}/audit/last", timeout=5).json()
+    assert r["ok"] is True and r["audit"] is None  # 未审计时为空
+
+    httpx.post(f"{base}/audit", timeout=5)
+    r = httpx.get(f"{base}/audit/last", timeout=5).json()
+    assert r["ok"] is True and r["audit"] is not None
+    assert r["audit"]["audit_file"].startswith("journal/audit/")
+    assert r["ts"] > 0
+
+    # 处置一条 → actions 表可读
+    r = httpx.post(f"{base}/audit/action", timeout=5, json={
+        "file": r["audit"]["audit_file"], "id": "D4:孤儿.md",
+        "action": "resolved", "label": "测试归位"})
+    assert r.json()["ok"] is True
+    r = httpx.get(f"{base}/audit/actions", timeout=5).json()
+    kinds = [(a["kind"], a["action"]) for a in r["actions"]]
+    assert ("D4", "resolved") in kinds
+
+
+def test_proposal_action_adjudication(http_server, tmp_path):
+    """提案裁决：audit_actions 记 P 类 + 提案笔记追加裁决留痕。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    r = httpx.post(f"{base}/notes", json={
+        "title": "curator/提案-测试",
+        "content": ("# 记忆质量提案（alice，2026-09-17）\n\n## 总评\n测试\n\n"
+                    "## 提案（1 条）\n\n"
+                    "1. **[high] duplicate** — 两篇疑似重复\n"
+                    "   - 涉及: a.md、b.md\n"
+                    "   - 建议: 合并两篇\n\n"
+                    "> 裁决后在本行下追加执行记录。\n")})
+    assert r.json()["ok"] is True
+
+    r = httpx.post(f"{base}/proposal/action", timeout=5, json={
+        "file": "curator/提案-测试.md", "index": 1, "action": "adopted",
+        "type": "duplicate", "reason": "两篇疑似重复"})
+    body = r.json()
+    assert body["ok"] is True
+    assert "## 裁决记录" in body["content"] and "已采纳 第1条 [duplicate]" in body["content"]
+
+    r = httpx.get(f"{base}/audit/actions", timeout=5).json()
+    assert any(a["kind"] == "P" and a["action"] == "adopted" for a in r["actions"])
+
+    # 重裁决（幂等 upsert）：改为忽略
+    r = httpx.post(f"{base}/proposal/action", timeout=5, json={
+        "file": "curator/提案-测试.md", "index": 1, "action": "dismissed",
+        "type": "duplicate", "reason": "误报"})
+    body = r.json()
+    assert "已忽略 第1条" in body["content"]
+    r = httpx.get(f"{base}/audit/actions", timeout=5).json()
+    p_rows = [a for a in r["actions"] if a["kind"] == "P"]
+    assert len(p_rows) == 1 and p_rows[0]["action"] == "dismissed"

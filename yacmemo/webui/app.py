@@ -53,6 +53,8 @@ async def _body(request: Request) -> dict:
 
 
 def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route]:
+    # 最近一次审计结果（内存缓存，按用户）：服务重启即失效，页面加载用
+    last_audit: dict[str, dict] = {}
     """Build the WebUI routes. contexts: {user_id: {store, searcher, db, usage}}."""
 
     def _ctx(user_id: str) -> dict:
@@ -239,14 +241,56 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
 
     async def audit(request: Request):
         try:
-            c = _ctx(request.path_params["user"])
+            uid = request.path_params["user"]
+            c = _ctx(uid)
         except KeyError:
             return _err("未知用户", 404)
         try:
             r = await run_in_threadpool(c["store"].audit)
         except Exception as e:
             return _err(str(e))
+        last_audit[uid] = {"audit": r, "ts": int(time.time())}
         return _ok({"audit": r})
+
+    async def audit_last(request: Request):
+        """最近一次审计结果（内存缓存）：页面加载即显示待处置，不必重跑。"""
+        try:
+            uid = request.path_params["user"]
+            _ctx(uid)
+        except KeyError:
+            return _err("未知用户", 404)
+        return _ok(last_audit.get(uid) or {"audit": None})
+
+    async def audit_actions_list(request: Request):
+        """处置历史全量（audit_actions 表——处置的持久化权威，快照内嵌节只是轨迹）。"""
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        return _ok({"actions": c["db"].list_audit_actions()})
+
+    async def proposal_action(request: Request):
+        """裁决 curator 提案条目：持久化 + 提案笔记留痕；执行仍由 agent 按留痕进行。"""
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        body = await _body(request)
+        try:
+            r = await run_in_threadpool(
+                c["store"].record_proposal_action,
+                body.get("file", ""), int(body.get("index", 0)),
+                body.get("action", ""), body.get("type", ""),
+                body.get("reason", ""), body.get("note", ""),
+            )
+        except Exception as e:
+            return _err(str(e))
+        try:
+            note = await run_in_threadpool(c["store"].read, r["path"])
+            r["content"] = note["content"]
+        except Exception:
+            pass
+        return _ok(r)
 
     async def audit_runs(request: Request):
         """历史审计快照目录（journal/audit/*.md，按时间倒序）。"""
@@ -462,8 +506,11 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         Route("/api/{user}/note", note_delete, methods=["DELETE"]),
         Route("/api/{user}/search", search, methods=["GET"]),
         Route("/api/{user}/audit", audit, methods=["POST"]),
+        Route("/api/{user}/audit/last", audit_last, methods=["GET"]),
         Route("/api/{user}/audit/runs", audit_runs, methods=["GET"]),
+        Route("/api/{user}/audit/actions", audit_actions_list, methods=["GET"]),
         Route("/api/{user}/audit/action", audit_action, methods=["POST"]),
+        Route("/api/{user}/proposal/action", proposal_action, methods=["POST"]),
         Route("/api/{user}/reindex", reindex, methods=["POST"]),
         Route("/api/{user}/collision", collision_resolve, methods=["POST"]),
         Route("/api/{user}/curator", curator_run, methods=["POST"]),

@@ -917,6 +917,40 @@ class Store:
         self.save(rel, content)
         return rel
 
+    def record_proposal_action(self, file: str, index: int, action: str,
+                               type_: str = "", reason: str = "",
+                               note: str = "") -> dict:
+        """裁决 curator 提案条目（WebUI 人类裁决）：持久化 + 提案笔记留痕。
+
+        - audit_actions 表记 P 类条目（id = P:<file>:<index>），前端据此
+          展示裁决状态、重进页面不丢失；
+        - 提案笔记追加「裁决记录」一节（git 自动快照）；执行仍由 agent
+          按留痕进行——curator 铁律的延伸：系统与 WebUI 都只记录裁决，
+          不直接改动任何笔记内容。
+        """
+        rel = file.replace("\\", "/").strip("/")
+        abs_path = self.root / rel
+        if not abs_path.is_file():
+            raise StoreError(f"提案文件不存在: {file}")
+        if index < 1:
+            raise StoreError("提案条目序号非法。")
+        issue_id = f"P:{file}:{index}"
+        verb = "已采纳" if action == "adopted" else "已忽略"
+        ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
+        line = f"- [{ts}] {verb} 第{index}条 [{type_}] {reason}"
+        if note:
+            line += f" 备注：{note}"
+        content = abs_path.read_text(encoding="utf-8")
+        marker = "## 裁决记录"
+        if marker in content:
+            head, _, tail = content.partition(marker)
+            content = f"{head}{marker}{tail.rstrip()}\n{line}\n"
+        else:
+            content = content.rstrip() + f"\n\n{marker}\n\n{line}\n"
+        self.db.record_audit_action(issue_id, "P", "", "", action, note or reason)
+        self.save(rel, content)
+        return {"path": rel, "issue_id": issue_id, "action": action}
+
     def _sync_new_files(self) -> list[str]:
         """Index .md files that exist on disk but were never ingested
         (created out-of-band before the server saw them)."""

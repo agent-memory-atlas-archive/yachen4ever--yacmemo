@@ -34,6 +34,20 @@
               </n-tag>
             </n-space>
           </n-card>
+
+          <n-card size="small" title="维护">
+            <n-space align="center" justify="space-between">
+              <n-text depth="3">
+                全量重建派生索引（SQLite/LanceDB，从 markdown 重建）：索引异常或大规模外部改动后使用，日常无需执行。
+              </n-text>
+              <n-popconfirm @positive-click="runReindex">
+                <template #trigger>
+                  <n-button type="warning" ghost size="small">全量重建索引</n-button>
+                </template>
+                确认对用户「{{ user || '—' }}」执行全量重建？运行指标（守卫统计等）会一并清零。
+              </n-popconfirm>
+            </n-space>
+          </n-card>
         </template>
       </n-tab-pane>
 
@@ -75,7 +89,7 @@ import { ref, onMounted, h } from 'vue'
 import {
   NTabs, NTabPane, NCard, NSpin, NDescriptions, NDescriptionsItem, NTag,
   NGrid, NGi, NStatistic, NDivider, NSpace, NSelect, NButton, NDataTable,
-  NInput, NCheckbox, NText, useMessage,
+  NInput, NCheckbox, NText, NPopconfirm, useMessage,
 } from 'naive-ui'
 import { api, params } from '../composables/api.js'
 
@@ -140,6 +154,16 @@ async function saveConfig() {
     message.error('保存失败: ' + e.message)
   } finally {
     configSaving.value = false
+  }
+}
+
+async function runReindex() {
+  try {
+    await api(`/api/${props.user}/reindex`, { method: 'POST' })
+    message.success('索引已全量重建')
+    await loadOverview()
+  } catch (e) {
+    message.error('重建失败: ' + e.message)
   }
 }
 
