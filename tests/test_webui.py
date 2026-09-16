@@ -9,13 +9,16 @@ import httpx
 
 
 def test_webui_index_served(http_server):
+    """已构建 → /ui/ 200；未构建 → 503 带构建指引（服务本身不崩）。"""
+    from yacmemo.webui.app import STATIC_DIR
+
     r = httpx.get(f"http://127.0.0.1:{http_server}/ui/", timeout=5)
-    assert r.status_code == 200
-    assert "yacmemo" in r.text
-    r = httpx.get(f"http://127.0.0.1:{http_server}/ui/static/app.js", timeout=5)
-    assert r.status_code == 200
-    r = httpx.get(f"http://127.0.0.1:{http_server}/ui/static/marked.min.js", timeout=5)
-    assert r.status_code == 200
+    if (STATIC_DIR / "index.html").is_file():
+        assert r.status_code == 200
+        assert "yacmemo" in r.text
+    else:
+        assert r.status_code == 503
+        assert "build_webui" in r.text
 
 
 def test_webui_api_notes_crud(http_server):

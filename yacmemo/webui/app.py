@@ -1,10 +1,14 @@
-"""WebUI: JSON API + single-page static frontend for yacmemo-server.
+"""WebUI: JSON API + Vue 3 frontend build for yacmemo-server.
 
 Mounted under the same Starlette app as the MCP endpoints — one process, one
 port. The API reuses each user's Store/Searcher/IndexDB directly (no second
 data path). Route order matters: /api/* and /ui/* are registered BEFORE the
 per-user MCP mounts so user ids can never shadow them (config also reserves
 those ids).
+
+Frontend: Vue 3 + Naive UI, built by scripts/build_webui.sh (npm) into
+STATIC_DIR. Without a build the service still starts; /ui/ answers 503 with
+build instructions while MCP/API remain fully functional.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, RedirectResponse
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -27,10 +31,8 @@ from ..config import Config
 
 logger = logging.getLogger(__name__)
 
+# Vite 构建产物目录（scripts/build_webui.sh 生成；git 不跟踪，随部署同步）
 STATIC_DIR = Path(__file__).parent / "dist"
-# Fallback to legacy static/ if dist/ doesn't exist (dev without build)
-if not STATIC_DIR.is_dir():
-    STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _ok(payload: dict) -> JSONResponse:
@@ -63,7 +65,14 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         return RedirectResponse("/ui/", status_code=307)
 
     async def ui_index(request: Request):
-        return FileResponse(STATIC_DIR / "index.html")
+        index_file = STATIC_DIR / "index.html"
+        if not index_file.is_file():
+            return PlainTextResponse(
+                "WebUI 前端未构建：请运行 scripts/build_webui.sh"
+                "（或 cd frontend && npm run build）后重试",
+                status_code=503,
+            )
+        return FileResponse(index_file)
 
     async def overview(request: Request):
         def _collect():
@@ -405,7 +414,6 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         Route("/", index, methods=["GET"]),
         Route("/ui", ui_index, methods=["GET"]),
         Route("/ui/", ui_index, methods=["GET"]),
-        Mount("/ui/static", app=StaticFiles(directory=STATIC_DIR), name="static"),
         *((Mount("/ui/assets", app=StaticFiles(directory=STATIC_DIR / "assets"),
                  name="assets"),) if (STATIC_DIR / "assets").is_dir() else ()),
         Route("/api/overview", overview, methods=["GET"]),

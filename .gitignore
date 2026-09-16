@@ -27,3 +27,4 @@ memory/
 frontend/node_modules/
 webui/dist/
 frontend/dist/
+yacmemo/webui/dist/

@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '8bc8fb81-6af5-4639-8dfe-1bb9d6d05b63'
-  PropagateID: '8bc8fb81-6af5-4639-8dfe-1bb9d6d05b63'
-  ReservedCode1: '28b8a115-bff3-4213-b635-1857e5fdc26c'
-  ReservedCode2: '28b8a115-bff3-4213-b635-1857e5fdc26c'
+  ProduceID: 'd55142ab-b5ce-411a-9b82-1ef7ba383b21'
+  PropagateID: 'd55142ab-b5ce-411a-9b82-1ef7ba383b21'
+  ReservedCode1: 'a68e7417-1425-420d-ba76-7feaaad5c5e6'
+  ReservedCode2: 'a68e7417-1425-420d-ba76-7feaaad5c5e6'
 ---
 
 # 部署指南
@@ -164,14 +164,21 @@ uv run yacmemo-mcp --root /srv/yacmemo/yachen/memory
 
 ### 2.2 WebUI 控制台
 
-服务端自带，浏览器打开 `http://debsvc.local:9721/ui/` 即用（`/` 自动跳转）：
+前端为 Vue 3 + Naive UI 工程，**需构建**（服务器通常无 npm，在开发机做）：
 
-- **笔记**：markdown 渲染浏览、在线编辑/新建/删除（守卫与索引同步生效）；
-- **搜索**：手动验证三通道检索，⚠ 撞车标注可见，点击跳转；
-- **审计**：双模式——确定性审计（自愈+规则）与 curator 深度审查（LLM 提案），撞车裁决带"已合并/忽略"按钮；
-- **使用记录**：全部 MCP 工具调用的留痕（时间/用户/工具/摘要/客户端 UA/IP/耗时），落盘在 `[server].data_dir/usage.db`（默认保留最近 2 万条，自动滚动）；
-- **健康**：embedding 状态、各用户笔记数/撞车数/守卫统计、**主题一览**、提案计数、客户端清单、近 14 天调用量；
-- **设置**：config.toml 在线编辑（校验 + 备份 + 可选重启），用户 / embedding / curator 均在此文件。
+```bash
+# 开发机
+scripts/build_webui.sh          # → 产物落 yacmemo/webui/dist/
+scp -r yacmemo/webui/dist debsvc:/srv/yacmemo/yacmemo/webui/   # dist 不进 git
+```
+
+未构建时服务照常运行，`/ui/` 返回 503 构建指引，MCP/API 不受影响。构建完成后浏览器打开 `http://debsvc.local:9721/ui/`（`/` 自动跳转），五页：
+
+- **主题**：主题树（注册主题 → 主题内笔记），右侧 markdown 渲染、在线编辑（整篇保存，索引同步）/删除（confirm），abstract 不可从 UI 删；
+- **搜索**：手动验证三通道检索，⚠ 撞车标注可见；
+- **审计**：双模式——确定性审计（自愈+规则）与 curator 深度审查（LLM 提案），撞车裁决带"已处理/忽略"按钮；
+- **画像**：PROFILE.md 各小节的查看/编辑/新建；
+- **设置**：使用记录（工具过滤、近 14 天概览）+ 健康总览 + config.toml 在线编辑（校验 + 备份 + 可选重启）。
 
 页面与 API 的完整说明见 [07-webui.md](07-webui.md)。WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。
 

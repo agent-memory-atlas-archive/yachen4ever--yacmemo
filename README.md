@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '2a7fbd7e-3eea-41a7-a974-ff46619346ce'
-  PropagateID: '2a7fbd7e-3eea-41a7-a974-ff46619346ce'
-  ReservedCode1: 'b2cba43e-e209-453c-a453-f15b610cf01b'
-  ReservedCode2: 'b2cba43e-e209-453c-a453-f15b610cf01b'
+  ProduceID: '79373b17-3921-4f7c-a59c-08859071ca08'
+  PropagateID: '79373b17-3921-4f7c-a59c-08859071ca08'
+  ReservedCode1: '8e2b556c-7def-4d68-b4ad-82e42d1b2c66'
+  ReservedCode2: '8e2b556c-7def-4d68-b4ad-82e42d1b2c66'
 ---
 
 # yacmemo
@@ -22,7 +22,7 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
 - **记忆子系统里没有生成式 LLM**——唯一的模型调用是 0.6B 的 embedding（~50ms）。结构靠约定产生，一致性靠确定性 API 守卫强制，模糊判断交给你的主模型在读取时完成。
 - **主题注册制**——长期记忆的主题由你显式声明（"把 X 加入长期记忆"），注册表 + 主题卡让主次分明；agent 会话开始先回顾记忆体系，冷启动不再失忆；
 - **curator 质量策展**——可配置的 LLM 定期审查记忆质量，产出**提案报告**：只提案、绝不自动执行，批准后才落地；
-- **WebUI 控制台**——浏览器打开 `/ui/`：笔记浏览/编辑（markdown 渲染）、在线搜索、**审计双模式**（确定性规则 + curator LLM 深度审查提案）、调用留痕、健康总览、**config.toml 在线配置**；
+- **WebUI 控制台**——浏览器打开 `/ui/`（Vue 3 + Naive UI，`scripts/build_webui.sh` 构建）：主题树内浏览/编辑笔记、在线搜索、**审计双模式**（确定性规则 + curator LLM 深度审查提案）、画像/偏好编辑、使用留痕与健康总览、**config.toml 在线配置**；
 - **一致性是被强制的，不是被希望的**——`memory_write` 拒绝近似重复标题，`memory_edit` 强制锚点唯一，矛盾在检索结果里带 ⚠ 标注并存呈现，系统永不静默删除或隐藏任何记忆。
 - **记忆是被版本管理的**——每次写入/编辑/移动/删除自动产生一个 git commit（`write: x.md`），记忆仓库永远 git-clean；删错可恢复，历史可回溯，agent 无需文件系统权限。
 
@@ -42,7 +42,7 @@ yacmemo-server（单进程，streamable HTTP，无状态会话）
          index_db.py   SQLite：元数据/FTS/冲突/守卫事件
          vector.py     LanceDB：笔记 + observation 向量
          embedding.py  embedding 调用（0.6B，~50ms）
-   ├── /ui/ → WebUI 控制台（笔记/搜索/审计/使用记录/健康/设置）
+    ├── /ui/ → WebUI 控制台（Vue 3 构建：主题/搜索/审计/画像/设置）
    ▼
 yacmemo-curator（systemd timer，每周）→ 质量提案报告，只提案不执行
    ▼
@@ -66,7 +66,7 @@ uv run yacmemo-server --config config.toml
 curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["user2","yachen"]}
 ```
 
-浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（笔记 / 搜索 / 审计 / 使用记录 / 健康 / 设置），详见 [docs/07-webui.md](docs/07-webui.md)。
+浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（主题 / 搜索 / 审计 / 画像 / 设置），详见 [docs/07-webui.md](docs/07-webui.md)。前端需先构建：`scripts/build_webui.sh`（需 Node 18+；服务器无 npm 时在开发机构建后 scp dist，见部署文档）。
 
 ### 客户端（你的每台电脑、每个 agent）
 
@@ -126,7 +126,7 @@ v1（三层提取架构）冻结在 [`legacy/`](legacy/)，仅作决策记录。
 
 ## 技术栈
 
-Python 3.11+ · mcp SDK（FastMCP）· SQLite（FTS5 trigram，WAL）· LanceDB · Qwen3-Embedding-0.6B（任意 OpenAI 兼容端点）· rapidfuzz。服务端单进程；无队列、无图数据库；写入路径零生成式 LLM（curator 提案审查为唯一例外，且只提案不执行）。
+Python 3.11+ · mcp SDK（FastMCP）· SQLite（FTS5 trigram，WAL）· LanceDB · Qwen3-Embedding-0.6B（任意 OpenAI 兼容端点）· rapidfuzz；WebUI 前端 Vue 3 + Naive UI + Vite。服务端单进程；无队列、无图数据库；写入路径零生成式 LLM（curator 提案审查为唯一例外，且只提案不执行）。
 
 ## License
 
