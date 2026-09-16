@@ -44,7 +44,8 @@
 
 - 增量式：只比新写的行，不跑全量；旧值经 vec_cache 零成本复用；
 - **刻意不裁决**：不判断"是否矛盾"、不决定"谁有效"——只标记"疑似在说同一件事"；
-- 自愈联动：涉及笔记被编辑/外部修改/删除时，collisions 行删除并重算（`remove_collisions_involving` + audit 的 hash 级 resync）。
+- 自愈联动：涉及笔记被编辑/外部修改/删除时，collisions 行删除并重算（`remove_collisions_involving` + audit 的 hash 级 resync）；
+- **机器产物区不进 obs 空间**：journal/audit/ 审计快照与 curator/ 提案报告是系统派生输出，不是记忆——其处置行 `- [时间] 已处理 ...` 会被 `parse_observations` 当作伪 observation（类别=时间戳）且跨快照高度相似，故 `_index_note` 对机器产物区（`store._machine_zones`）跳过 obs 索引与 D2，D1 候选同样排除（快照标题同构、提案报告归一化剥日期后互相撞）。审计快照仍可被 FTS/note 级向量检索到。
 
 **D3 悬空链接**：`[[目标]]` 不匹配任何既有标题 → audit 列出（多为手误或待创建）。引用目标不含文字的标记（如文献引注 `[[1,28,28]]`）不算链接，已过滤。
 

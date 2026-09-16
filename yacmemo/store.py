@@ -681,10 +681,11 @@ class Store:
         topics = self.load_topics()
         stray = self._stray_files(topics)
 
-        # 机器生成的审计快照不参与 D1（快照标题互相近似，会产生假阳性）
+        # 机器产物不参与 D1（归一化剥日期后标题互相近似，必然假阳性：
+        # 快照标题同构、提案-0916 与 提案-0917 都归一为"提案"）
         d1 = [c for c in d1
-              if not (c["a_path"].startswith(self._audit_dir)
-                      or c["b_path"].startswith(self._audit_dir))]
+              if not (c["a_path"].startswith(self._machine_zones)
+                      or c["b_path"].startswith(self._machine_zones))]
 
         # 人类已处置过的问题不再重放（D2 以 collisions.status 天然只列 open）
         disposed = {a["id"] for a in self.db.list_audit_actions()}
@@ -719,6 +720,13 @@ class Store:
     @property
     def _audit_dir(self) -> str:
         return f"{self.config.journal_prefix}audit/"
+
+    @property
+    def _machine_zones(self) -> tuple[str, ...]:
+        """机器产物区（系统派生输出，不是记忆）：journal/audit/ 快照与 curator/
+        提案报告。不参与 obs 索引（见 _index_note），不参与 D1/D2 候选——
+        归一化剥日期后快照/报告标题互相近似，处置行则是伪 observation。"""
+        return (self._audit_dir, "curator/")
 
     def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
                               dangling, stray) -> str:
@@ -910,8 +918,7 @@ class Store:
         self.db.put_cached_vector(chash, vec)
         return vec
 
-    def _index_note(self, rel: str, title: str, content: str,
-                    collect_d2: bool = True):
+    def _index_note(self, rel: str, title: str, content: str):
         """Synchronously sync every index for one note. File must be written already."""
         chash = content_hash(content)
         self.db.upsert_note(rel, title, chash)
@@ -929,6 +936,10 @@ class Store:
             note_vec = self._embed_cached(f"{title}\n{content}")
             self.vectors.upsert_note_vector(rel, f"{title}", note_vec)
 
+            if rel.startswith(self._machine_zones):
+                # 机器产物不是记忆：处置行 "- [时间] 已处理 ..." 会被解析为
+                # 伪 observation 且跨快照高度相似，入 obs 空间必然产生 D2 假阳性
+                return
             obs_list = parse_observations(content)
             if not obs_list:
                 return
@@ -937,8 +948,7 @@ class Store:
                 vec = self._embed_cached(obs["text"])
                 obs_vecs.append(vec)
                 self.vectors.upsert_obs_vector(rel, obs["text"], vec)
-            if collect_d2:
-                self._d2_check(rel, obs_list, obs_vecs)
+            self._d2_check(rel, obs_list, obs_vecs)
         except Exception as e:
             logger.warning("Vector indexing failed for %s: %s", rel, e)
 

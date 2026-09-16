@@ -122,3 +122,40 @@ def test_audit_clean_when_no_external_changes(store: Store):
     store.write("yacmemo部署配置", "# yacmemo部署配置\n内容")
     r = store.audit()
     assert r["resynced"] == [] and r["missing"] == []
+
+
+def test_machine_zones_do_not_embed_observations(store: Store):
+    """journal/audit/ 与 curator/ 是机器产物区：'- [时间] 处置行'会被
+    parse_observations 当作伪 observation（类别=时间戳），但不得入 obs 空间。"""
+    store.save("journal/audit/20260916-120000.md",
+               "# 审计快照 20260916-120000\n\n- [2026-09-16 12:00] 已处理 D1:a|b\n")
+    assert store.emb.calls == 1  # 仅 note 级一条；处置行未产生 embedding
+
+    r = store.audit()
+    assert r["collisions"] == []  # 审计自身落盘的快照不产生任何撞车
+
+
+def test_machine_zone_pseudo_observations_never_d2(store: Store):
+    """同 bucket 伪 observation 若入 obs 空间必撞（FakeEmbedding cosine=1.0，
+    真 embedding 下处置行跨快照同理）；普通笔记的对照撞车照常检出。"""
+    store.save("journal/audit/20260916-120000.md",
+               "# 审计快照 A\n\n- [2026-09-16 12:00] 已处理 端口 相关 issue\n")
+    store.save("journal/audit/20260916-130000.md",
+               "# 审计快照 B\n\n- [2026-09-16 13:00] 已处理 端口 相关 issue\n")
+    store.save("curator/提案-2026-09-16.md",
+               "# 记忆质量提案\n\n- [2026-09-16 14:00] 已采纳 端口 相关提案\n")
+    assert store.db.list_collisions(status="open") == []
+
+    # 对照：正常笔记的同 bucket observation 照常检出
+    store.write("yacmemo部署配置", "# yacmemo部署配置\n\n- [配置] 服务端口为 9721\n")
+    store.write("端口配置说明", "# 端口配置说明\n\n- [配置] 端口为 8080\n")
+    assert len(store.db.list_collisions(status="open")) == 1
+
+
+def test_machine_zone_titles_never_d1(store: Store):
+    """curator 报告归一化剥日期后标题同构（"提案-0916"与"提案-0917"都归一为
+    "提案"），机器产物区不得进入 D1 候选。"""
+    store.save("curator/提案-2026-09-16.md", "# 记忆质量提案（yachen，2026-09-16）\n\n提案内容\n")
+    store.save("curator/提案-2026-09-17.md", "# 记忆质量提案（yachen，2026-09-17）\n\n提案内容二\n")
+    r = store.audit()
+    assert r["title_duplicates"] == []

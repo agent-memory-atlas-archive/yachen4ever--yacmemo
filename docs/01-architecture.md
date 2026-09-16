@@ -285,6 +285,7 @@ memory_write / memory_edit 完成 embedding 后：
 
 - 阈值可配（`collision_cosine_threshold`，默认 0.86）；
 - **刻意不判断是否矛盾、不裁决谁有效**——只标记"疑似在说同一件事"；
+- **机器产物区不进 obs 空间**：journal/audit/ 审计快照与 curator/ 提案报告是系统派生输出（处置行 `- [时间] ...` 是伪 observation，标题剥日期后同构），不参与 obs 索引、D1/D2 候选——系统自己的产物不制造一致性噪声（详见 04-consistency.md）；
 - **stale 清理与自愈**：`memory_audit` 比对磁盘文件 hash 与 `notes.content_hash`——外部修改的笔记自动重建索引（embedding 走 vec_cache，未变行零调用），其涉及 collisions 随之重算；外部删除的笔记清理全部索引并列入 `missing` 报告。审计即自愈，无后台进程；
 - 局限（接受）：措辞距离远但逻辑矛盾的不会命中——残余风险由第 3 层（主模型在检索到可疑对时判断）覆盖，不做基建。
 
