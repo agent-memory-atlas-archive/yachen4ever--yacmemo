@@ -110,6 +110,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | [05-deployment.md](docs/05-deployment.md) | systemd、客户端配置、备份、安全 |
 | [06-evaluation.md](docs/06-evaluation.md) | 检索基线与复测方法 |
 | [07-webui.md](docs/07-webui.md) | WebUI 控制台：页面与 API 参考 |
+| [08-agent-config.md](docs/08-agent-config.md) | **各 agent 记忆接入与本地 USER.md/MEMORY.md 配置维护** |
 
 v1（三层提取架构）冻结在 [`legacy/`](legacy/)，仅作决策记录。
 
