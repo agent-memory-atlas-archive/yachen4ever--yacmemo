@@ -194,6 +194,8 @@ systemctl enable --now yacmemo-curator.timer
 写入前：
 1. 先查后写。写任何记忆前，先用 memory_search 查是否已有同主题笔记。
 2. 已有同主题笔记 → memory_edit / memory_edit_section 增量修改，绝不新建重复笔记。
+   old_string 从 memory_read 返回的 [正文开始]/[正文结束] 块内逐字复制（勿凭记忆重打）；
+   "相关笔记"等标记之后的内容是工具附加信息，不是文件内容，不可作锚点。
 3. 新建时标题 = 主题名（如"yacmemo部署配置"），禁止日期后缀和"-2"/"新"等尾巴
    （时间线流水放 journal/ 目录）。
 写入时：

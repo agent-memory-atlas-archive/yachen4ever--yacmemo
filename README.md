@@ -80,9 +80,9 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | 工具 | 用途 |
 |---|---|
 | `memory_search` | 混合检索（FTS trigram + 向量，RRF 融合）；疑似重复/矛盾内联 ⚠ 标注 |
-| `memory_read` | 笔记全文 + 相关笔记（wiki-links + 语义近邻） |
+| `memory_read` | 笔记全文（[正文开始/结束] 块内逐字原文）+ 相关笔记（工具附加信息，wiki-links + 语义近邻） |
 | `memory_write` | 新建笔记；**近似重复标题直接拒绝**（force 需两级确认） |
-| `memory_edit` | 就地更新，文本锚点必须唯一 |
+| `memory_edit` | 就地更新，文本锚点必须唯一；未命中时附可自纠诊断（点破锚点混入附加信息/空白差异还原文/最接近行） |
 | `memory_edit_section` | 按小节整段替换 |
 | `memory_move` | 移动文件，索引跟随 |
 | `memory_delete` | 删除笔记（**仅用户明确要求时**，git 历史可恢复） |
