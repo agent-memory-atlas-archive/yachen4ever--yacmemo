@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '35f45d3d-f751-41a0-a58c-4beefcc8bf4a'
-  PropagateID: '35f45d3d-f751-41a0-a58c-4beefcc8bf4a'
-  ReservedCode1: '4c18b8b4-dbd8-4434-8afc-ecc5685cb828'
-  ReservedCode2: '4c18b8b4-dbd8-4434-8afc-ecc5685cb828'
----
-
 # 一致性机制
 
 > 核心立场：**失效语义优于检测语义**。系统从不删除、从不隐藏任何记忆；违约可见、可逆、可数。

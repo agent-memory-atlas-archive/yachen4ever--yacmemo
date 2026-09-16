@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'b3bc1025-3171-430c-b5fc-e71794a56d5d'
-  PropagateID: 'b3bc1025-3171-430c-b5fc-e71794a56d5d'
-  ReservedCode1: '6ed09f6a-6ba2-48b4-935e-13a41391e1da'
-  ReservedCode2: '6ed09f6a-6ba2-48b4-935e-13a41391e1da'
----
-
 # WebUI 控制台
 
 > 服务端自带，浏览器打开 `http://<host>:9721/ui/` 即用。与 MCP 同进程同端口，无独立部署。

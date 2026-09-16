@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'b1ee98d5-530b-4114-9ad5-75a378b979e6'
-  PropagateID: 'b1ee98d5-530b-4114-9ad5-75a378b979e6'
-  ReservedCode1: '8ad44a99-2e96-4f6a-8660-b5b3cdf1898a'
-  ReservedCode2: '8ad44a99-2e96-4f6a-8660-b5b3cdf1898a'
----
-
 # yacmemo 存储层设计
 
 ## 1. 概述

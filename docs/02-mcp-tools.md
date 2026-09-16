@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '9e6278c1-1f6c-47f9-b5e6-b2e95568fa7f'
-  PropagateID: '9e6278c1-1f6c-47f9-b5e6-b2e95568fa7f'
-  ReservedCode1: '3a08a2e0-f11b-42f0-bc5d-0e7263932dfe'
-  ReservedCode2: '3a08a2e0-f11b-42f0-bc5d-0e7263932dfe'
----
-
 # MCP 工具规格（16 个）
 
 > 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。

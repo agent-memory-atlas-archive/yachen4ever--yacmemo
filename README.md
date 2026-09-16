@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '79373b17-3921-4f7c-a59c-08859071ca08'
-  PropagateID: '79373b17-3921-4f7c-a59c-08859071ca08'
-  ReservedCode1: '8e2b556c-7def-4d68-b4ad-82e42d1b2c66'
-  ReservedCode2: '8e2b556c-7def-4d68-b4ad-82e42d1b2c66'
----
-
 # yacmemo
 
 带 API 级一致性守卫的个人记忆层 —— markdown 为本、全本地、agent 无关。
@@ -22,7 +11,7 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
 - **记忆子系统里没有生成式 LLM**——唯一的模型调用是 0.6B 的 embedding（~50ms）。结构靠约定产生，一致性靠确定性 API 守卫强制，模糊判断交给你的主模型在读取时完成。
 - **主题注册制**——长期记忆的主题由你显式声明（"把 X 加入长期记忆"），注册表 + 主题卡让主次分明；agent 会话开始先回顾记忆体系，冷启动不再失忆；
 - **curator 质量策展**——可配置的 LLM 定期审查记忆质量，产出**提案报告**：只提案、绝不自动执行，批准后才落地；
-- **WebUI 控制台**——浏览器打开 `/ui/`（Vue 3 + Naive UI，`scripts/build_webui.sh` 构建）：主题树内浏览/编辑笔记、在线搜索、**审计双模式**（确定性规则 + curator LLM 深度审查提案）、画像/偏好编辑、使用留痕与健康总览、**config.toml 在线配置**；
+- **WebUI 控制台**——浏览器打开 `/ui/`（Vue 3 + Naive UI，`scripts/build_webui.sh` 构建）：主题树内浏览/编辑笔记、在线搜索、**审计双模式**（确定性规则 + curator LLM 深度审查提案）、**审计历史快照与问题处置记录**（journal/audit/，可回看、可追溯）、画像/偏好编辑、使用留痕与健康总览、**config.toml 在线配置**；
 - **一致性是被强制的，不是被希望的**——`memory_write` 拒绝近似重复标题，`memory_edit` 强制锚点唯一，矛盾在检索结果里带 ⚠ 标注并存呈现，系统永不静默删除或隐藏任何记忆。
 - **记忆是被版本管理的**——每次写入/编辑/移动/删除自动产生一个 git commit（`write: x.md`），记忆仓库永远 git-clean；删错可恢复，历史可回溯，agent 无需文件系统权限。
 

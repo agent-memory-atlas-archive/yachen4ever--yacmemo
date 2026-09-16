@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'c9ef7a77-45cb-4c2f-b0cd-d0e5e391eca2'
-  PropagateID: 'c9ef7a77-45cb-4c2f-b0cd-d0e5e391eca2'
-  ReservedCode1: 'd6afc94a-8cc1-4ba7-ba40-8944812fcbf9'
-  ReservedCode2: 'd6afc94a-8cc1-4ba7-ba40-8944812fcbf9'
----
-
 # 存储与检索
 
 > 代码位置：`store.py`（CRUD/守卫/索引）、`index_db.py`（SQLite）、`vector.py`（LanceDB）、`search.py`（融合检索）、`embedding.py`（embedding 客户端）。

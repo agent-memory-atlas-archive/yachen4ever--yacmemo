@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'a6e4df6b-3fb0-44fa-81ac-83038ebdc26e'
-  PropagateID: 'a6e4df6b-3fb0-44fa-81ac-83038ebdc26e'
-  ReservedCode1: '1015ddd2-2224-4248-9238-e97a9fbad257'
-  ReservedCode2: '1015ddd2-2224-4248-9238-e97a9fbad257'
----
-
 # yacmemo 三层架构总览
 
 > 2026-09-13

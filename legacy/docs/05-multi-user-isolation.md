@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'ce39fb9d-6914-409c-b4e5-d43b80f4e03a'
-  PropagateID: 'ce39fb9d-6914-409c-b4e5-d43b80f4e03a'
-  ReservedCode1: 'a618bb9b-2731-487d-bfd7-e3105467a5be'
-  ReservedCode2: 'a618bb9b-2731-487d-bfd7-e3105467a5be'
----
-
 # 多用户隔离设计文档
 
 > 2026-09-13

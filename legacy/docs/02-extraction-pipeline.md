@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '5da0b856-e2d2-4e5b-adca-26f73acad767'
-  PropagateID: '5da0b856-e2d2-4e5b-adca-26f73acad767'
-  ReservedCode1: '9b379a15-bff3-4c06-b2d8-ba6cd8bc5c9f'
-  ReservedCode2: '9b379a15-bff3-4c06-b2d8-ba6cd8bc5c9f'
----
-
 # Layer 2 提取管道设计文档
 
 > 2026-09-13

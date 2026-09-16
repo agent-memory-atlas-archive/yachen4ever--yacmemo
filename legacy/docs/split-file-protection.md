@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '6145bccb-f482-4006-922e-8e84f84b701c'
-  PropagateID: '6145bccb-f482-4006-922e-8e84f84b701c'
-  ReservedCode1: '0fa3724d-0ccb-49b8-aa27-50723e27c06d'
-  ReservedCode2: '0fa3724d-0ccb-49b8-aa27-50723e27c06d'
----
-
 # 拆分文件保护设计文档
 
 > 2026-09-13

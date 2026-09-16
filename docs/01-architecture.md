@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'e2c9f194-0bbf-4a49-8908-3935f415a2ac'
-  PropagateID: 'e2c9f194-0bbf-4a49-8908-3935f415a2ac'
-  ReservedCode1: '309aaac2-8665-4c8d-9783-0f23ca560730'
-  ReservedCode2: '309aaac2-8665-4c8d-9783-0f23ca560730'
----
-
 # yacmemo 精简记忆层设计（v2 终形态）
 
 > 2026-09-13 设计定稿；2026-09-14 更新（HTTP 多机部署模型，P0–P2 已实现）

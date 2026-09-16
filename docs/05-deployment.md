@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'd55142ab-b5ce-411a-9b82-1ef7ba383b21'
-  PropagateID: 'd55142ab-b5ce-411a-9b82-1ef7ba383b21'
-  ReservedCode1: 'a68e7417-1425-420d-ba76-7feaaad5c5e6'
-  ReservedCode2: 'a68e7417-1425-420d-ba76-7feaaad5c5e6'
----
-
 # 部署指南
 
 > 目标形态：**一个服务（debsvc），所有电脑，所有 agent**。记忆数据单点存放，各端零安装。
