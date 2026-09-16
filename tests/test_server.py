@@ -71,6 +71,12 @@ async def _roundtrip(port: int):
                 "new_string": "y"})
             assert "不是文件内容" in res.content[0].text
 
+            # audit 输出必须包含游离文件与快照路径（agent 侧唯一发现渠道）
+            res = await s.call_tool("memory_audit", {})
+            text = res.content[0].text
+            assert "游离文件" in text and "审计快照" in text
+            assert "悬空主题卡" in text
+
 
 def test_http_multi_user_roundtrip(http_server):
     asyncio.run(_roundtrip(http_server))

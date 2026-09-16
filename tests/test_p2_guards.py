@@ -159,3 +159,18 @@ def test_machine_zone_titles_never_d1(store: Store):
     store.save("curator/提案-2026-09-17.md", "# 记忆质量提案（yachen，2026-09-17）\n\n提案内容二\n")
     r = store.audit()
     assert r["title_duplicates"] == []
+
+
+def test_audit_flags_dangling_registry_card(store: Store):
+    """注册表指向不存在的 abstract 必须被点名（D5）——restructure/手工编辑
+    TOPICS.md 的遗留，此前无任何检测（2026-09-16 notecalc-iced 实例）。"""
+    store.topic_register("悬空卡主题")
+    (store.root / "topics/悬空卡主题/abstract.md").unlink()
+    store.db.remove_collisions_involving("topics/悬空卡主题/abstract.md")
+    r = store.audit()
+    assert any("悬空卡主题" in c for c in r["dangling_cards"])
+    # 处置后重跑不再重放
+    store.record_audit_action(r["audit_file"],
+                              r["dangling_cards"][0], "resolved", "悬空卡主题")
+    r2 = store.audit()
+    assert all("悬空卡主题" not in c for c in r2["dangling_cards"])

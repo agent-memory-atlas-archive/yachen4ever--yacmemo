@@ -68,6 +68,10 @@ def _d4_id(path: str) -> str:
     return f"D4:{path}"
 
 
+def _d5_id(title: str, card: str) -> str:
+    return f"D5:{title}|{card}"
+
+
 class StoreError(Exception):
     """Tool-facing error; the message is meant to be shown to the agent."""
 
@@ -759,6 +763,11 @@ class Store:
         d1 = [c for c in d1 if _d1_id(c) not in disposed]
         dangling = [c for c in dangling if _d3_id(c) not in disposed]
         stray = [p for p in stray if _d4_id(p) not in disposed]
+        # D5：注册表指向不存在的 abstract（restructure/手工编辑 TOPICS.md 的遗留，
+        # 2026-09-16 实例：notecalc-iced 的卡仍指向已移除的 projects/ 目录）
+        dangling_cards = [_d5_id(t["title"], t["card"]) for t in topics
+                          if t["card"] and not (self.root / t["card"]).is_file()
+                          and _d5_id(t["title"], t["card"]) not in disposed]
 
         # Out-of-band changes just healed (externally added/edited/deleted
         # files): snapshot them so the repo stays git-clean.
@@ -769,11 +778,13 @@ class Store:
 
         # 审计快照落盘（journal/audit/ 免注册区，markdown 审计轨迹 + git 快照）
         audit_file = self._write_audit_snapshot(
-            resynced, missing, added, d1, collisions, dangling, stray)
+            resynced, missing, added, d1, collisions, dangling, stray,
+            dangling_cards)
 
         return {"title_duplicates": d1,
                 "collisions": collisions,
                 "dangling_links": dangling,
+                "dangling_cards": dangling_cards,
                 "resynced": resynced,
                 "missing": missing,
                 "added": added,
@@ -796,7 +807,7 @@ class Store:
         return (self._audit_dir, "curator/")
 
     def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
-                              dangling, stray) -> str:
+                              dangling, stray, dangling_cards=()) -> str:
         ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         git_line = self.snapshots.status_line()
         guard = self.db.guard_stats()
@@ -815,6 +826,7 @@ class Store:
                   f"- 语义撞车（D2）：{len(collisions)}",
                   f"- 悬空链接（D3）：{len(dangling)}",
                   f"- 游离文件（D4）：{len(stray)}",
+                  f"- 悬空主题卡（D5）：{len(dangling_cards)}",
                   f"- 守卫：拒绝 {guard['refused']} / force {guard['forced']}", ""]
         if added:
             lines += _sec("新增文件", added)
@@ -835,6 +847,9 @@ class Store:
                 f"`{_d3_id(c)}` — `{c['path']}`: [[{c['link']}]]" for c in dangling])
         if stray:
             lines += _sec("游离文件（D4）", [f"`{_d4_id(p)}` — `{p}`" for p in stray])
+        if dangling_cards:
+            lines += _sec("悬空主题卡（D5）",
+                          [f"`{cid}` — 注册表指向的 abstract 不存在" for cid in dangling_cards])
         lines += ["## 处置记录", "", "（暂无记录）", ""]
         rel = f"{self._audit_dir}{ts}.md"
         self.save(rel, "\n".join(lines))

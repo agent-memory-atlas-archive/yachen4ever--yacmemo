@@ -194,3 +194,15 @@ def test_edit_miss_fuzzy_shows_closest_line(store: Store):
         store.edit("ESXi宿主机与核显直通", "- [配置] 管理网络 vmk0 192.168.5.11", "x")
     msg = str(e.value)
     assert "实质差异" in msg and "192.168.5.10" in msg
+
+
+def test_title_guard_blocks_compact_date_suffix(store: Store):
+    """紧凑日期尾巴（无分隔符）也必须拦截——2026-09-16 生产实测漏拦。"""
+    store.write("女儿音乐启蒙", "# 女儿音乐启蒙\n内容\n")
+    with pytest.raises(TitleConflict):
+        store.write("女儿音乐启蒙0916", "# 女儿音乐启蒙0916\n内容\n")
+    with pytest.raises(TitleConflict):
+        store.write("女儿音乐启蒙20260916", "# 女儿音乐启蒙20260916\n内容\n")
+    # 型号/年份类数字结尾不是日期，不误拦
+    r = store.write("女儿音乐启蒙模型1972", "# 女儿音乐启蒙模型1972\n内容\n")
+    assert r["forced"] is False

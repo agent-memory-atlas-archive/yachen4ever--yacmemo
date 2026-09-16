@@ -13,8 +13,10 @@ from rapidfuzz import fuzz
 # Suffixes the title guard ignores: "-2", "(新)", "更新", dates, timestamps, "v1"
 _SUFFIX_PATTERNS = [
     re.compile(r"[-–—]?\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?$"),
-    re.compile(r"[-–—]\d{6,}$"),
-    re.compile(r"[-–—]\d+$"),  # "-2" style dedup counters
+    re.compile(r"\d{8}$"),  # 紧凑 YYYYMMDD（2026-09-16 实测漏拦："笔记0916"绕过守卫）
+    # 紧凑 MMDD：仅剥合法月日（01-12 月），"1972" 这类型号/年份结尾不受影响
+    re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$"),
+    re.compile(r"[-–—]\d+$"),  # "-2" style dedup counters（含 "-0916" 等带分隔符数字）
     re.compile(r"[-–—]?v\d+$", re.IGNORECASE),
     re.compile(r"[-–—]?更新$"),
     re.compile(r"[-–—]?新$"),

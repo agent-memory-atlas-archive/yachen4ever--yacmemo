@@ -132,9 +132,11 @@ memory_audit() -> str
 3. D1 标题重复全量两两扫描；
 4. open 状态的 D2 语义撞车清单（含双方文本与分数）；
 5. D3 悬空 `[[链接]]`；
-6. 守卫统计（refused / forced 次数）。
+6. D5 悬空主题卡（注册表 `卡:` 指向不存在的 abstract，restructure/手工编辑 TOPICS.md 的遗留）；
+7. D4 游离文件（免注册区之外、不属于任何注册主题的散文件——agent 据此提示用户归位）；
+8. 守卫统计（refused / forced 次数）。
 
-修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行）。
+修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行与当次审计快照路径 `journal/audit/<时间戳>.md`）。
 
 ## 8. memory_list
 

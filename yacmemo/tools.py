@@ -230,7 +230,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
 
     @mcp.tool()
     def memory_audit(ctx: Context = None) -> str:
-        """全量一致性审计：外部变更自愈、标题重复、语义撞车、悬空链接、守卫统计。"""
+        """全量一致性审计：外部变更自愈、标题重复、语义撞车、悬空链接、
+        悬空主题卡、游离文件、守卫统计与 git 快照状态。"""
         out = {"ok": True, "error": ""}
         with _logged("memory_audit", ctx, "", out):
             try:
@@ -268,9 +269,19 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             lines.append(f"== 悬空链接（{len(dangling)}）==")
             for d in dangling[:10]:
                 lines.append(f"- {d['path']}: [[{d['link']}]]")
+            cards = r.get("dangling_cards", [])
+            lines.append(f"== 悬空主题卡（{len(cards)}）==")
+            for cid in cards[:10]:
+                lines.append(f"- {cid}")
+            stray = r.get("stray", [])
+            lines.append(f"== 游离文件（{len(stray)}）==")
+            for p in stray[:10]:
+                lines.append(f"- {p}")
             g = r["guard_stats"]
             lines.append(f"== 守卫统计 == 拒绝 {g['refused']} 次，force 越过 {g['forced']} 次")
             lines.append(f"== git == {r.get('git', '')}")
+            if r.get("audit_file"):
+                lines.append(f"== 审计快照 == {r['audit_file']}")
             return "\n".join(lines)
 
     @mcp.tool()

@@ -21,6 +21,20 @@ def test_normalize_strips_suffixes_dates_and_case():
     assert normalize_title("部署配置-v3") == normalize_title("部署配置")
 
 
+def test_normalize_strips_compact_dates():
+    """无分隔符紧凑日期尾巴（2026-09-16 生产实测漏拦："女儿音乐启蒙0916"）。"""
+    assert normalize_title("部署记录20260916") == normalize_title("部署记录")
+    assert normalize_title("部署记录0916") == normalize_title("部署记录")   # MMDD
+    assert normalize_title("部署记录1231") == normalize_title("部署记录")   # MMDD
+    assert normalize_title("部署记录-0916") == normalize_title("部署记录")  # 带分隔符
+
+
+def test_normalize_keeps_model_number_suffixes():
+    """型号/年份类数字尾巴不是日期，不得剥离（19 月不存在 → 不是 MMDD）。"""
+    assert normalize_title("设备型号1972") != normalize_title("设备型号")
+    assert normalize_title("端口8080") != normalize_title("端口")
+
+
 def test_normalize_keeps_distinct_topics():
     assert title_similarity("端口配置", "备份策略") < 0.5
 
