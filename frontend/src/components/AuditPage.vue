@@ -325,7 +325,7 @@ function parseFindings(markdown) {
 
 function fmtSize(n) { return n > 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B` }
 function fmtRunName(file) {
-  const m = file.match(/^(\d{4})(\d{2})(\d{2})(?:-(\d{2})(\d{2}))?\.md$/)
+  const m = file.match(/^(\d{4})(\d{2})(\d{2})(?:-(\d{2})(\d{2})(\d{2}))?\.md$/)
   if (!m) return file
   const base = `${m[2]}-${m[3]}`
   return m[4] ? `${base} ${m[4]}:${m[5]}` : base
