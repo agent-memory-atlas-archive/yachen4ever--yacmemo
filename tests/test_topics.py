@@ -130,3 +130,29 @@ def test_archive_topic_unknown_or_already_archived(tstore: Store):
     tstore.archive_topic("旧项目")
     with pytest.raises(StoreError, match="没有活跃主题"):
         tstore.archive_topic("旧项目")  # twice -> not active anymore
+
+
+def test_archive_moves_whole_dir_and_rewrites_card(store: Store):
+    """归档必须整个主题目录一起走（目录即归属），且注册表卡路径同步改写
+    ——2026-09-17 实爆：只移 abstract + 不改卡行 → D5 每次点名、其余模块
+    笔记在卡修正后变游离。"""
+    store.topic_register("归档测试", description="用于归档验证")
+    store.write("topics/归档测试/模块笔记", "# 归档测试/模块笔记\n- [事实] 模块内容\n")
+
+    r = store.archive_topic("归档测试")
+    assert r["card"] == "archive/归档测试/abstract.md"
+    assert (store.root / "archive/归档测试/abstract.md").is_file()
+    assert (store.root / "archive/归档测试/模块笔记.md").is_file()
+    assert not (store.root / "topics/归档测试").exists()
+
+    reg = (store.root / "TOPICS.md").read_text(encoding="utf-8")
+    assert "- 卡: archive/归档测试/abstract.md" in reg
+    assert "- 状态: archived" in reg
+
+    # 检索仍可用、无游离、无悬空卡
+    assert store.db.fts_search("模块内容")
+    a = store.audit()
+    assert a["stray"] == []
+    assert a["dangling_cards"] == []
+    # context 不再注入 abstract 摘要头（注册表条目本身仍全量可见）
+    assert "### 归档测试（" not in store.memory_context()

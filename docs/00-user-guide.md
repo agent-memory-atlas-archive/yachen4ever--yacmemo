@@ -129,7 +129,7 @@ agent 用 `memory_edit` 就地修改（旧的值被替换，不会留下两条�
 agent 会调 `topic_register` 注册：登记进 TOPICS.md 注册表 + 创建 `topics/<主题>/abstract.md`（主题目录）。之后该主题的详细笔记都写入主题目录（agent 可按模块增设），现状变化**就地更新 abstract**。
 
 - `topic_list` / WebUI 健康页可随时查看有哪些主题（活跃/已归档分组）；
-- **项目翻篇了**："notecalc-iced 归档吧"——agent 调 `archive_topic`：abstract 移入 `archive/`，**检索仍可用**，只是会话回顾不再注入；想彻底移除才用注销（笔记变游离文件，走审计裁决）；
+- **项目翻篇了**："notecalc-iced 归档吧"——agent 调 `archive_topic`：整个主题目录移入 `archive/`，**检索仍可用**，只是会话回顾不再注入；想彻底移除才用注销（笔记变游离文件，走审计裁决）；
 - 审计页会点名"游离文件"（不属于任何主题的散笔记）——让 agent 归位或删除；
 - 会话开始时 agent 会先调 `memory_context` 回顾你的画像/偏好与全部活跃主题——新 session 不再从零开始。
 

@@ -215,7 +215,7 @@ memory_delete(path: str) -> str
 archive_topic(title: str) -> str
 ```
 
-归档主题（生命周期：注册 → 活跃 → 归档 → 注销）：abstract 移入 `archive/<主题>/abstract.md`，注册表块内加 `- 状态: archived`。
+归档主题（生命周期：注册 → 活跃 → 归档 → 注销）：**整个主题目录**移入 `archive/<主题>/`（目录即归属——主题内全部模块笔记随 abstract 一起走，不留游离），注册表块内 `- 状态: archived` 且 `- 卡:` 路径同步改写。
 
 - **调用门槛**：仅在用户明确要求时调用（"X 归档吧"/"这个项目翻篇了"）；
 - 与注销的区别：**归档不丢检索**——主题笔记仍在索引里可搜，仅 memory_context 不再注入 abstract、topic_list 分入已归档组；archive/ 是免注册区，不计游离；

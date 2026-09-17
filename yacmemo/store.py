@@ -13,6 +13,7 @@ Design invariants (docs/06-lean-architecture.md):
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import logging
 import os
@@ -586,11 +587,13 @@ class Store:
         return {"title": title, "card": removed_card}
 
     def archive_topic(self, title: str) -> dict:
-        """Archive a topic (user-instructed): the abstract moves under
-        archive/<topic>/, the registry entry gets 状态: archived (kept for
-        lookup, out of active lists and memory_context). Notes stay
-        searchable; archived topics never count as stray (archive/ is a free
-        zone). Reversible by hand (git history + registry edit)."""
+        """Archive a topic (user-instructed): the WHOLE topic directory moves
+        under archive/<topic>/（目录即归属——只移 abstract 会把主题内其余模块
+        笔记留在 topics/ 成为游离文件），registry entry gets 状态: archived
+        and its 卡: path rewritten (2026-09-17 实爆：卡路径不改写 → D5 每次
+        必点名). Notes stay searchable; archived topics never count as stray
+        (archive/ is a free zone). Reversible by hand (git history +
+        registry edit)."""
         topics = self.load_topics()
         active = [t for t in topics if not t.get("archived")]
         t = next((x for x in active if x["title"] == title), None)
@@ -598,11 +601,30 @@ class Store:
             known = "、".join(x["title"] for x in active) or "（空）"
             raise StoreError(f"没有活跃主题: {title}。现有主题: {known}")
 
+        dest_dir = f"archive/{_ILLEGAL_FILENAME.sub('_', title).strip('. ')}"
         new_card = t["card"]
-        if t["card"] and (self.root / t["card"]).is_file():
-            new_card = (f"archive/{_ILLEGAL_FILENAME.sub('_', title).strip('. ')}"
-                        "/abstract.md")
-            self.move(t["card"], new_card)  # move() snapshots "move: ..."
+        if t["card"]:
+            old_dir = posixpath.dirname(t["card"])
+            moved = False
+            if old_dir and (self.root / old_dir).is_dir():
+                for f in sorted((self.root / old_dir).rglob("*.md")):
+                    rel = f.relative_to(self.root).as_posix()
+                    sub = f.relative_to(self.root / old_dir).as_posix()
+                    self.move(rel, f"{dest_dir}/{sub}")  # move() 逐个快照
+                    moved = True
+                # 清掉因移动而空掉的主题目录（目录即归属，不留空壳）
+                for d in sorted((self.root / old_dir).rglob("*"), reverse=True):
+                    if d.is_dir():
+                        with contextlib.suppress(OSError):
+                            d.rmdir()
+                with contextlib.suppress(OSError):
+                    (self.root / old_dir).rmdir()
+            elif (self.root / t["card"]).is_file():
+                # 卡不在主题目录内（注册表手工指定路径）：单移卡文件
+                self.move(t["card"], f"{dest_dir}/{posixpath.basename(t['card'])}")
+                moved = True
+            if moved:
+                new_card = f"{dest_dir}/{posixpath.basename(t['card'])}"
 
         p = self.topics_file()
         lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -617,11 +639,21 @@ class Store:
                 if lines[j].startswith("## "):
                     end = j
                     break
+            changed = False
+            if new_card != t["card"]:
+                old_line = f"- 卡: {t['card']}"
+                for i in range(start + 1, end):
+                    if lines[i].rstrip("\r\n") == old_line:
+                        lines[i] = f"- 卡: {new_card}\n"
+                        changed = True
+                        break
             if not any(ln.startswith("- 状态: ") for ln in lines[start:end]):
                 k = start
                 while k + 1 < end and lines[k + 1].startswith("- "):
                     k += 1
                 lines.insert(k + 1, "- 状态: archived\n")
+                changed = True
+            if changed:
                 p.write_text("".join(lines), encoding="utf-8")
                 self._index_note(TOPICS_FILE, "主题记忆注册表",
                                  p.read_text(encoding="utf-8"))

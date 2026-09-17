@@ -92,7 +92,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `topic_list` | 列出长期记忆主题（活跃/已归档分组） |
 | `topic_register` | 注册新主题（**仅在用户明确要求时调用**，如"把 X 加入长期记忆"），创建 topics/<主题>/abstract.md |
 | `topic_unregister` | 注销主题（**仅用户明示**，仅移出注册表，笔记不动，游离后裁决） |
-| `archive_topic` | 归档主题（**仅用户明示**）：abstract 移入 archive/，检索保留、context 退出 |
+| `archive_topic` | 归档主题（**仅用户明示**）：整个主题目录移入 archive/，检索保留、context 退出 |
 | `get_user_preference` | 读画像/偏好（PROFILE.md 功能层，全文或指定小节） |
 | `update_user_preference` | 创建/替换画像/偏好的一个小节（agent 维护） |
 

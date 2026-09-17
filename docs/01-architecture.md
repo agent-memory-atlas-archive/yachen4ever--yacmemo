@@ -230,7 +230,7 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 | `topic_list` | — | 列出活跃/已归档主题（分组） |
 | `topic_register` | `title, description, related` | 注册新主题（**仅用户明确要求**），创建 topics/<主题>/abstract.md |
 | `topic_unregister` | `title` | 注销主题（**仅用户明确要求**；仅移出注册表，笔记不动，游离后裁决） |
-| `archive_topic` | `title` | 归档主题（**仅用户明确要求**）：abstract 移入 archive/，检索可用、context 不注入 |
+| `archive_topic` | `title` | 归档主题（**仅用户明确要求**）：整个主题目录移入 archive/（卡路径同步改写），检索可用、context 不注入 |
 | `get_user_preference` | `section=""` | 读画像/偏好全文或指定小节（PROFILE.md 功能层） |
 | `update_user_preference` | `section, content` | 创建/替换画像/偏好的一个小节（agent 维护） |
 
@@ -422,7 +422,7 @@ obs_topk = 5
 
 - **主题由用户显式声明**（"把 X 加入长期记忆"），agent 调用 `topic_register` 注册——工具调用即用户授权的凭证；agent 平时只能提案，不能自行注册；
 - **每个主题一个目录**：`abstract.md`（现状手册，agent 维护、就地更新）+ 主题内详细记忆的模块 md（agent 可按需增设）——目录即归属，取代注册表手工维护路径列表；
-- TOPICS.md 为注册表与目录；**主题生命周期**：注册 → 活跃（context 注入摘要）→ **归档**（`archive_topic`，注册表加`状态: archived`，abstract 移入 archive/，检索仍可用、context 不再注入、不计游离）→ 注销（topic_unregister，仅移出注册表，笔记变游离走 D4 裁决）——全程无静默数据损失；
+- TOPICS.md 为注册表与目录；**主题生命周期**：注册 → 活跃（context 注入摘要）→ **归档**（`archive_topic`，注册表加`状态: archived` 并改写卡路径，整个主题目录移入 archive/，检索仍可用、context 不再注入、不计游离）→ 注销（topic_unregister，仅移出注册表，笔记变游离走 D4 裁决）——全程无静默数据损失；
 - **画像/偏好是记忆层功能，不是主题**：`PROFILE.md` 单文件分小节，agent 用 `get_user_preference` / `update_user_preference` 维护（元信息与领域知识分层：前者是"怎么和用户协作"，后者是"知道什么"）；`memory_context` 将 PROFILE 前置注入；
 - audit 新增**游离文件检测**：不属于任何注册主题的散文件被点名（免注册区：journal/、archive/、curator/；TOPICS.md/PROFILE.md 豁免）；
 - 设计立场：**主次是被声明的，不是被算出来的**——不做重要度打分/衰减函数/自动摘要。
