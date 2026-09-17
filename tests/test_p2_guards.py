@@ -23,10 +23,10 @@ SECTION_NOTE = """# 配置
 
 
 def test_edit_section_replaces_body_keeps_heading(store: Store):
-    store.write("配置", SECTION_NOTE)
+    store.write("notes/配置", SECTION_NOTE)
     store.edit_section("配置", "网络", "新网络内容")
 
-    text = (store.root / "配置.md").read_text(encoding="utf-8")
+    text = (store.root / "notes/配置.md").read_text(encoding="utf-8")
     assert "## 网络" in text
     assert "新网络内容" in text
     assert "旧网络内容A" not in text
@@ -37,70 +37,70 @@ def test_edit_section_replaces_body_keeps_heading(store: Store):
 
 
 def test_edit_section_last_section_until_eof(store: Store):
-    store.write("配置", SECTION_NOTE)
+    store.write("notes/配置", SECTION_NOTE)
     store.edit_section("配置", "磁盘", "全新磁盘内容")
-    text = (store.root / "配置.md").read_text(encoding="utf-8")
+    text = (store.root / "notes/配置.md").read_text(encoding="utf-8")
     assert "全新磁盘内容" in text and "磁盘内容\n" not in text.replace("全新磁盘内容\n", "")
     assert "## 网络" in text  # earlier section untouched
 
 
 def test_edit_section_heading_not_found_lists_available(store: Store):
-    store.write("配置", SECTION_NOTE)
+    store.write("notes/配置", SECTION_NOTE)
     with pytest.raises(StoreError) as e:
         store.edit_section("配置", "不存在的节", "x")
     assert "网络" in str(e.value) and "磁盘" in str(e.value)
 
 
 def test_edit_section_duplicate_heading_refused(store: Store):
-    store.write("配置", "# 配置\n\n## 网络\nA\n\n## 网络\nB\n")
+    store.write("notes/配置", "# 配置\n\n## 网络\nA\n\n## 网络\nB\n")
     with pytest.raises(StoreError, match="2 处"):
         store.edit_section("配置", "网络", "x")
 
 
 def test_edit_section_ignores_h1_title(store: Store):
-    store.write("配置", SECTION_NOTE)
+    store.write("notes/配置", SECTION_NOTE)
     with pytest.raises(StoreError, match="memory_edit"):
         store.edit_section("配置", "配置", "x")
 
 
 @pytest.fixture
-def tight_store(cfg, db, emb, vectors) -> Store:
-    """Store with force_confirm_threshold=2 to exercise the ladder quickly."""
-    cfg.guard = GuardConfig(force_confirm_threshold=2)
-    return Store(cfg, db, emb, vectors)
+def tight_store(store: Store) -> Store:
+    """种子已由 store 夹具就绪；仅调低 force_confirm_threshold 走阶梯。"""
+    store.config.guard = GuardConfig(force_confirm_threshold=2)
+    return store
 
 
 def test_force_confirmation_ladder(tight_store: Store):
-    tight_store.write("主题A", "# 主题A\n内容A")
+    tight_store.write("notes/主题A", "# 主题A\n内容A")
     # 1st and 2nd forced bypass: under threshold, plain force works
-    tight_store.write("主题A-2", "# 主题A-2\nx", force=True)
-    tight_store.write("主题A-3", "# 主题A-3\nx", force=True)
+    tight_store.write("notes/主题A-2", "# 主题A-2\nx", force=True)
+    tight_store.write("notes/主题A-3", "# 主题A-3\nx", force=True)
     # 3rd: threshold reached → bare force refused
     with pytest.raises(StoreError, match="人工确认"):
-        tight_store.write("主题A-4", "# 主题A-4\nx", force=True)
+        tight_store.write("notes/主题A-4", "# 主题A-4\nx", force=True)
     # with explicit confirmation → allowed
-    r = tight_store.write("主题A-4", "# 主题A-4\nx", force=True, force_confirm=True)
+    r = tight_store.write("notes/主题A-4", "# 主题A-4\nx", force=True, force_confirm=True)
     assert r["forced"] is True
     assert tight_store.db.guard_stats()["forced"] == 3
 
 
 def test_no_conflict_needs_no_force_or_confirm(store: Store):
-    r = store.write("独立主题", "# 独立主题\n内容")
+    r = store.write("notes/独立主题", "# 独立主题\n内容")
     assert r["forced"] is False
 
 
 def test_audit_resyncs_externally_edited_note(store: Store):
-    store.write("yacmemo部署配置", "# yacmemo部署配置\n\n- [配置] 服务端口为 9721\n")
-    store.write("端口配置说明", "# 端口配置说明\n\n- [配置] 端口为 8080\n")
+    store.write("notes/yacmemo部署配置", "# yacmemo部署配置\n\n- [配置] 服务端口为 9721\n")
+    store.write("notes/端口配置说明", "# 端口配置说明\n\n- [配置] 端口为 8080\n")
     # FakeEmbedding: both 端口 observations collide → one open collision
     assert len(store.db.list_collisions(status="open")) == 1
 
     # out-of-band edit: the 端口 observation is gone
-    p = store.root / "yacmemo部署配置.md"
+    p = store.root / "notes/yacmemo部署配置.md"
     p.write_text("# yacmemo部署配置\n\n- [运维] 改用每日备份\n", encoding="utf-8")
 
     r = store.audit()
-    assert r["resynced"] == ["yacmemo部署配置.md"]
+    assert r["resynced"] == ["notes/yacmemo部署配置.md"]
     # collision recomputed from the edited side and no longer fires
     assert store.db.list_collisions(status="open") == []
     # fts reflects the external content
@@ -109,17 +109,17 @@ def test_audit_resyncs_externally_edited_note(store: Store):
 
 
 def test_audit_reports_and_prunes_externally_deleted_note(store: Store):
-    store.write("yacmemo部署配置", "# yacmemo部署配置\n\n- [配置] 端口 9721\n")
-    (store.root / "yacmemo部署配置.md").unlink()
+    store.write("notes/yacmemo部署配置", "# yacmemo部署配置\n\n- [配置] 端口 9721\n")
+    (store.root / "notes/yacmemo部署配置.md").unlink()
 
     r = store.audit()
-    assert r["missing"] == ["yacmemo部署配置.md"]
+    assert r["missing"] == ["notes/yacmemo部署配置.md"]
     assert store.db.get_note("yacmemo部署配置.md") is None
     assert store.db.fts_search("端口 9721") == []
 
 
 def test_audit_clean_when_no_external_changes(store: Store):
-    store.write("yacmemo部署配置", "# yacmemo部署配置\n内容")
+    store.write("notes/yacmemo部署配置", "# yacmemo部署配置\n内容")
     r = store.audit()
     assert r["resynced"] == [] and r["missing"] == []
 
@@ -127,9 +127,10 @@ def test_audit_clean_when_no_external_changes(store: Store):
 def test_machine_zones_do_not_embed_observations(store: Store):
     """journal/audit/ 与 curator/ 是机器产物区：'- [时间] 处置行'会被
     parse_observations 当作伪 observation（类别=时间戳），但不得入 obs 空间。"""
+    before = store.emb.calls  # 夹具种子已消耗若干次嵌入
     store.save("journal/audit/20260916-120000.md",
                "# 审计快照 20260916-120000\n\n- [2026-09-16 12:00] 已处理 D1:a|b\n")
-    assert store.emb.calls == 1  # 仅 note 级一条；处置行未产生 embedding
+    assert store.emb.calls == before + 1  # 仅 note 级一条；处置行未产生 embedding
 
     r = store.audit()
     assert r["collisions"] == []  # 审计自身落盘的快照不产生任何撞车
@@ -147,8 +148,8 @@ def test_machine_zone_pseudo_observations_never_d2(store: Store):
     assert store.db.list_collisions(status="open") == []
 
     # 对照：正常笔记的同 bucket observation 照常检出
-    store.write("yacmemo部署配置", "# yacmemo部署配置\n\n- [配置] 服务端口为 9721\n")
-    store.write("端口配置说明", "# 端口配置说明\n\n- [配置] 端口为 8080\n")
+    store.write("notes/yacmemo部署配置", "# yacmemo部署配置\n\n- [配置] 服务端口为 9721\n")
+    store.write("notes/端口配置说明", "# 端口配置说明\n\n- [配置] 端口为 8080\n")
     assert len(store.db.list_collisions(status="open")) == 1
 
 
@@ -180,7 +181,7 @@ def test_audit_snapshot_same_day_merge(store: Store):
     """同日多次审计合并进当天一份快照（复审小节追加），处置记录仍聚在末尾。"""
     from datetime import datetime
 
-    store.write("yacmemo部署配置", "# yacmemo部署配置\n内容")
+    store.write("notes/yacmemo部署配置", "# yacmemo部署配置\n内容")
     f1 = store.audit()["audit_file"]
     f2 = store.audit()["audit_file"]
     assert f1 == f2  # 同日同文件，不再每次落新快照
@@ -200,7 +201,9 @@ def test_audit_snapshot_same_day_merge(store: Store):
 def test_audit_snapshot_sections_are_intact_lines(store: Store):
     """有发现时快照各问题段必须逐行完整——_sec 曾被改成返回字符串，
     被 lines += 逐字符拆行（2026-09-17 生产实爆：D5 段一字一行）。"""
-    store.write("孤儿笔记", "# 孤儿笔记\n内容\n")  # 不注册主题 → D4 游离
+    # 写入已被注册制拦截，改走外部直建文件：审计自愈入索引后 D4 依旧点名
+    (store.root / "孤儿笔记.md").write_text("# 孤儿笔记\n内容\n",
+                                            encoding="utf-8")
     r = store.audit()
     content = (store.root / r["audit_file"]).read_text(encoding="utf-8")
     assert "## 游离文件（D4）" in content.splitlines()

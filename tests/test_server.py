@@ -29,7 +29,7 @@ async def _roundtrip(port: int):
                     "memory_list"} <= names
 
             res = await s.call_tool("memory_write", {
-                "title": "端口配置", "content": "# 端口配置\n\n服务端口为 9721\n"})
+                "title": "notes/端口配置", "content": "# 端口配置\n\n服务端口为 9721\n"})
             assert "已写入并索引" in res.content[0].text
 
             res = await s.call_tool("memory_search", {"query": "服务端口"})
@@ -49,7 +49,7 @@ async def _roundtrip(port: int):
             assert "未找到相关笔记" in res.content[0].text  # isolation
 
             res = await s.call_tool("memory_write", {
-                "title": "端口配置", "content": "# 端口配置\n\nbob 的端口是 1234\n"})
+                "title": "notes/端口配置", "content": "# 端口配置\n\nbob 的端口是 1234\n"})
             assert "已写入并索引" in res.content[0].text  # same title, other user: fine
 
     # alice's content unchanged by bob's write

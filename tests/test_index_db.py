@@ -72,7 +72,7 @@ def test_guard_events_stats(db: IndexDB):
     db.add_guard_event("refused", "标题Y", "y.md", forced=False)
     db.add_guard_event("forced", "标题Z", "z.md", forced=True)
     stats = db.guard_stats()
-    assert stats == {"refused": 2, "forced": 1}
+    assert stats == {"refused": 2, "forced": 1, "uncovered": 0}
 
 
 def test_collisions_add_list_prune(db: IndexDB):

@@ -62,6 +62,19 @@ memory_write(title: str, content: str, force: bool = False,
 
 新建笔记。`title` 可含目录前缀（`"projects/foo"` → `projects/foo.md`），目录只是归档，**笔记的标题是去掉目录后的主题名**。文件名对非法字符（`\ / : * ? " < > |`）做替换清洗。
 
+**主题硬拦截**（2026-09-17 增补，force 不豁免）：写入路径必须被某个注册主题覆盖——注册主题卡/相关笔记所在目录之下（每主题一目录，目录即归属），否则拒绝：
+
+```
+写入被拦截: test/散记.md 不属于任何注册主题（主题注册制硬约束，force 不豁免）。
+- 新主题：先征得用户同意后 topic_register 注册（会在 topics/<主题>/abstract.md 建卡），
+  之后把笔记写入 topics/<主题>/ 目录下；
+- 已有主题：写入该主题目录下的模块笔记，如 topics/<主题>/笔记名.md；
+- journal/、archive/、curator/ 免注册区不受限。
+当前活跃主题: 《……》
+```
+
+系统文件（`TOPICS.md`/`PROFILE.md`）不允许经此工具创建/覆盖——分别走 `topic_register` / `update_user_preference`。拦截事件记入 `guard_events`（kind=`uncovered`），与 refused/forced 一样进守卫统计。
+
 **近重名守卫**：归一化（小写、去标点空白、剥离日期串/`-2`/`(新)`/`更新`/`v3` 等后缀）后与所有既有标题做模糊比对，相似度 ≥ `title_similarity_threshold`（默认 0.85）即拒绝：
 
 ```
@@ -76,7 +89,7 @@ memory_write(title: str, content: str, force: bool = False,
 - 确认确属新主题后，`force=true, force_confirm=true` 放行；
 - 全程记入 `guard_events`——refused / forced 次数即违约率指标。
 
-**journal 豁免**：`journal/` 目录下的写入不做重名拦截（时间线流水天然按日期命名）。
+**journal 豁免**：`journal/` 目录下的写入不做重名拦截（时间线流水天然按日期命名），免注册区同样不受主题硬拦截约束。
 
 ## 4. memory_edit
 
@@ -174,6 +187,7 @@ topic_register(title: str, description: str = "", related: str = "") -> str
 注册新的长期记忆主题：追加到 `TOPICS.md` 注册表，并创建 `topics/<主题>/abstract.md`（或用既有笔记充当 abstract）。
 
 - **调用门槛**：仅在用户明确要求时调用（"把 X 加入长期记忆"）——这条写进约定块，注册行为本身即用户授权的凭证；
+- **注册是写入的前置条件**：主题硬拦截（见 §3）下，未注册主题覆盖的路径一律拒写——`topic_register` 是新主题的唯一授权门；
 - 重复主题名拒绝（提示直接编辑既有 abstract）；
 - 注册后 abstract 与注册表立即入索引；主题目录内 agent 可按模块自由增设详细 md（目录即归属）。
 

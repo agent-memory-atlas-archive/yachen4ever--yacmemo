@@ -18,7 +18,7 @@ def _git(root, *args: str) -> str:
 
 def test_write_auto_inits_repo_and_commits(store: Store):
     """First write in a fresh root: repo auto-init + one commit, git-clean."""
-    r = store.write("测试笔记", "# 测试笔记\n- [配置] 端口 9721\n")
+    r = store.write("notes/测试笔记", "# 测试笔记\n- [配置] 端口 9721\n")
     assert (store.root / ".git").is_dir()
     log = _git(store.root, "log", "--format=%s")
     assert f"write: {r['path']}" in log
@@ -28,17 +28,18 @@ def test_write_auto_inits_repo_and_commits(store: Store):
 
 def test_each_mutation_leaves_one_commit(store: Store):
     """write/edit/move each leave exactly one commit; delete too."""
-    w = store.write("测试笔记", "# 测试笔记\nA\n")
+    w = store.write("notes/测试笔记", "# 测试笔记\nA\n")
     store.edit(w["path"], "A", "B")
-    store.move(w["path"], "notes/测试笔记.md")
-    store.delete_note("notes/测试笔记.md")
+    store.move(w["path"], "notes/sub/测试笔记.md")
+    store.delete_note("notes/sub/测试笔记.md")
 
     subjects = _git(store.root, "log", "--format=%s").strip().splitlines()
     assert subjects == [
-        "delete: notes/测试笔记.md",
-        "move: 测试笔记.md -> notes/测试笔记.md",
-        "edit: 测试笔记.md",
+        "delete: notes/sub/测试笔记.md",
+        "move: notes/测试笔记.md -> notes/sub/测试笔记.md",
+        "edit: notes/测试笔记.md",
         f"write: {w['path']}",
+        "seed: 测试注册表",  # 夹具种子入库
     ]
     status = _git(store.root, "status", "--porcelain")
     assert status.strip() == ""
@@ -46,20 +47,20 @@ def test_each_mutation_leaves_one_commit(store: Store):
 
 def test_refused_write_leaves_no_commit(store: Store):
     """Guard refusals must not snapshot (no file change happened)."""
-    store.write("主题一", "# 主题一\n内容\n")
+    store.write("notes/主题一", "# 主题一\n内容\n")
     before = _git(store.root, "rev-parse", "HEAD")
     with pytest.raises(TitleConflict):
-        store.write("主题一2", "# 主题一2\n内容\n")  # near-duplicate title
+        store.write("notes/主题一2", "# 主题一2\n内容\n")  # near-duplicate title
     assert _git(store.root, "rev-parse", "HEAD") == before
 
 
 def test_audit_commits_external_changes(store: Store):
     """Out-of-band edits ride along on the audit external commit."""
-    store.write("测试笔记", "# 测试笔记\nA\n")
-    p = store.root / "测试笔记.md"
+    store.write("notes/测试笔记", "# 测试笔记\nA\n")
+    p = store.root / "notes/测试笔记.md"
     p.write_text("# 测试笔记\nB（外部改动）\n", encoding="utf-8")
     r = store.audit()
-    assert r["resynced"] == ["测试笔记.md"]
+    assert r["resynced"] == ["notes/测试笔记.md"]
     subjects = _git(store.root, "log", "--format=%s").strip().splitlines()
     # 审计自愈先提交 external，随后落盘审计快照（save 为最新一条）
     assert subjects[0].startswith("save: journal/audit/")
@@ -79,7 +80,11 @@ def test_disabled_via_config(tmp_path):
     try:
         s = Store(cfg, db)
         assert not s.snapshots.active
-        r = s.write("测试笔记", "# 测试笔记\n内容\n")
+        (root / "notes").mkdir()
+        (root / "TOPICS.md").write_text(
+            "# 主题记忆注册表\n\n## 笔记主题\n- 卡: notes/a.md\n- 现状: x\n",
+            encoding="utf-8")
+        r = s.write("notes/测试笔记", "# 测试笔记\n内容\n")
         assert (root / r["path"]).is_file()
         assert not (root / ".git").exists()
         assert "停用" in s.snapshots.status_line()
@@ -106,15 +111,28 @@ def test_resolve_git_identity_priorities():
     assert resolve_git_identity(u2, cfg2) == ("王旭晨", "w@x.cn")  # user wins
 
 
-def test_configured_identity_lands_on_commits(store: Store):
-    """Store(git_user=..., git_email=...) -> commits carry that identity."""
-    s = Store(store.config, store.db, store.emb, store.vectors,
-              root=store.root, git_user="王旭晨",
-              git_email="wangxc4@chinatelecom.cn")
-    r = s.write("身份测试", "# 身份测试\n内容\n")
-    author = _git(store.root, "log", "--format=%an <%ae>",
-                  "--", r["path"]).strip()
-    assert author == "王旭晨 <wangxc4@chinatelecom.cn>"
+def test_configured_identity_lands_on_commits(tmp_path):
+    """Store(git_user=..., git_email=...) -> commits carry that identity.
+    独立根目录：store 夹具的种子提交会先把仓库本地身份占成默认值。"""
+    from yacmemo.config import Config, MemoryConfig
+    from yacmemo.index_db import IndexDB
+
+    root = tmp_path / "m"
+    cfg = Config(memory=MemoryConfig(root=str(root)))
+    db = IndexDB(cfg.sqlite_path)
+    try:
+        s = Store(cfg, db, git_user="王旭晨",
+                  git_email="wangxc4@chinatelecom.cn")
+        (root / "notes").mkdir()
+        (root / "TOPICS.md").write_text(
+            "# 主题记忆注册表\n\n## 笔记主题\n- 卡: notes/a.md\n- 现状: x\n",
+            encoding="utf-8")
+        r = s.write("notes/身份测试", "# 身份测试\n内容\n")
+        author = _git(root, "log", "--format=%an <%ae>",
+                      "--", r["path"]).strip()
+        assert author == "王旭晨 <wangxc4@chinatelecom.cn>"
+    finally:
+        db.close()
 
 
 def test_existing_identity_not_overwritten(store: Store):
@@ -124,7 +142,7 @@ def test_existing_identity_not_overwritten(store: Store):
     _git(store.root, "config", "user.email", "pre@set.dev")
     s = Store(store.config, store.db, store.emb, store.vectors,
               root=store.root, git_user="不应生效", git_email="no@pe.com")
-    r = s.write("预置身份", "# 预置身份\n内容\n")
+    r = s.write("notes/预置身份", "# 预置身份\n内容\n")
     author = _git(store.root, "log", "--format=%an", "--", r["path"]).strip()
     assert author == "预置用户"
 
@@ -154,8 +172,8 @@ def test_status_line_surfaces_runtime_failure(store: Store, monkeypatch):
 
     monkeypatch.setattr(store.snapshots, "_run",
                         lambda *a, check=True, **kw: _Broken())
-    store.write("失败可见性测试", "# 失败可见性测试\n内容\n")  # write still succeeds
-    assert (store.root / "失败可见性测试.md").is_file()
+    store.write("notes/失败可见性测试", "# 失败可见性测试\n内容\n")  # write still succeeds
+    assert (store.root / "notes/失败可见性测试.md").is_file()
     assert "失败" in store.snapshots.status_line()
     assert "dubious ownership" in store.snapshots.status_line()
 

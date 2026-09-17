@@ -219,10 +219,10 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 |---|---|---|
 | `memory_search` | `query, limit=10, kind="hybrid"\|"fts"\|"vector"` | 双路 RRF 融合 + 撞车标注内联 |
 | `memory_read` | `path_or_title` | 正文 + 1-hop 相关笔记 |
-| `memory_write` | `title, content, force=false, force_confirm=false` | **近重名拦截**（见 6.1，含两级 force 确认）；写入即同步索引 |
+| `memory_write` | `title, content, force=false, force_confirm=false` | **主题硬拦截**（未注册主题覆盖的路径拒写，force 不豁免，见 6.1）+ **近重名拦截**（含两级 force 确认）；写入即同步索引 |
 | `memory_edit` | `path, old_string, new_string` | **锚点唯一性强制**：找不到/命中多处 → 拒绝并列出候选位置 |
 | `memory_edit_section` | `path, heading, new_content` | 按 `##` 标题段替换 |
-| `memory_move` | `path, new_path` | 移动 + 全库索引随路径更新（[[链接]] 按标题解析，移动不改标题故无需改写链接） |
+| `memory_move` | `path, new_path` | 移动 + 全库索引随路径更新（[[链接]] 按标题解析，移动不改标题故无需改写链接）；**目标路径同样受主题硬拦截**（移入免注册区放行） |
 | `memory_delete` | `path` | **仅用户明确要求时调用**；删文件 + 全部索引行；git 快照保留历史 |
 | `memory_audit` | — | 自愈（外部改动/删除 hash 级重算与清理）+ D1 全量扫描 + collisions 报告 + D3/D4 + 守卫统计 + git 快照状态行 |
 | `memory_list` | `path="", sort="name"\|"mtime"` | 目录树 / 最近变更 |
@@ -240,6 +240,19 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 
 ```
 memory_write(title, content):
+    rel = title_to_path(title)
+    # 第一道：主题注册制硬拦截（2026-09-17 增补，force 不豁免）
+    if rel in {TOPICS.md, PROFILE.md}:
+        return 拒绝: "系统文件请用 topic_register / update_user_preference 专用工具。"
+    if rel 不在免注册区 且 不被任何注册主题覆盖
+            （不在注册主题卡/相关文件所在目录下）:
+        记 uncovered 守卫事件
+        return 拒绝:
+          "写入被拦截: {rel} 不属于任何注册主题。
+           新主题先 topic_register 注册（仅用户明确要求），
+           模块笔记写入 topics/<主题>/ 下；免注册区不受限。"
+
+    # 第二道：近似标题守卫
     normalized = normalize(title)          # 小写、去标点空白、
                                            # 剥离日期串、"-2"/"(新)"/"更新" 等后缀
     for existing in all_titles:
@@ -253,9 +266,11 @@ memory_write(title, content):
     return "已写入并索引"
 ```
 
-- 拒绝是**确定性行为**，不依赖模型自觉；`force=true` 是模型显式越过守卫的唯一通道；
+- 拒绝是**确定性行为**，不依赖模型自觉；`force=true` 是模型显式越过**标题守卫**的唯一通道；
+- **主题硬拦截不可越过**：`force` 只作用于近似标题冲突——"写入必须有对应主题"是注册制的结构约束，允许 force 绕过等于绕穿注册制（`_path_covered` 与 D4 游离检测共用同一覆盖判定，两套消费方永远同口径）；
+- **store.save（WebUI 编辑器/curator 报告/审计快照）只拦新建**：覆盖已有文件不受限，防止 save 成为绕过口；`memory_move` 目标路径同受约束（archive_topic 移入 archive/ 走免注册区豁免）；
 - **force 两级确认**：24 小时内 forced 事件达到 `force_confirm_threshold`（默认 3）后，光 `force=true` 会被拒绝，必须同时传 `force_confirm=true`（显式人工确认语义）；拒绝信息列出候选已有笔记，全过程可数；
-- **force 调用次数就是违约率的可数指标**（P4 核心度量），audit 汇总报告；
+- **force 调用次数就是违约率的可数指标**（P4 核心度量），audit 汇总报告；uncovered 拦截同样入守卫统计；
 - journal/ 目录不参与拦截；
 - 阈值 `title_similarity_threshold`（默认 0.85）可配，拒绝事件全量落日志用于调阈值。
 
@@ -326,7 +341,7 @@ memory_write / memory_edit 完成 embedding 后：
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
 主题：
 9. 主题的注册、注销与归档都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了" / "X 归档吧"）→ topic_register / topic_unregister / archive_topic；主题现状写入 abstract（topics/<主题>/abstract.md）并就地更新，目录内可按模块增设详细 md。
-10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
+10. 只在注册主题内写笔记（**已代码化为写路径硬拦截**，见 6.1）；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
 删除：
 11. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 ```
@@ -420,11 +435,11 @@ obs_topk = 5
 
 ### 主题注册制（2026-09-16 目录化改造）
 
-- **主题由用户显式声明**（"把 X 加入长期记忆"），agent 调用 `topic_register` 注册——工具调用即用户授权的凭证；agent 平时只能提案，不能自行注册；
+- **主题由用户显式声明**（"把 X 加入长期记忆"），agent 调用 `topic_register` 注册——工具调用即用户授权的凭证；agent 平时只能提案，不能自行注册；注册同时是**写入的前置条件**（6.1 主题硬拦截：未注册主题覆盖的路径一律拒写，force 不豁免）；
 - **每个主题一个目录**：`abstract.md`（现状手册，agent 维护、就地更新）+ 主题内详细记忆的模块 md（agent 可按需增设）——目录即归属，取代注册表手工维护路径列表；
 - TOPICS.md 为注册表与目录；**主题生命周期**：注册 → 活跃（context 注入摘要）→ **归档**（`archive_topic`，注册表加`状态: archived` 并改写卡路径，整个主题目录移入 archive/，检索仍可用、context 不再注入、不计游离）→ 注销（topic_unregister，仅移出注册表，笔记变游离走 D4 裁决）——全程无静默数据损失；
 - **画像/偏好是记忆层功能，不是主题**：`PROFILE.md` 单文件分小节，agent 用 `get_user_preference` / `update_user_preference` 维护（元信息与领域知识分层：前者是"怎么和用户协作"，后者是"知道什么"）；`memory_context` 将 PROFILE 前置注入；
-- audit 新增**游离文件检测**：不属于任何注册主题的散文件被点名（免注册区：journal/、archive/、curator/；TOPICS.md/PROFILE.md 豁免）；
+- **游离文件检测（D4）双保险**：写路径已硬拦截（工具面不可能制造游离），D4 转为兜底——管 Obsidian 手建、注销后遗等工具面之外的游离（免注册区：journal/、archive/、curator/；TOPICS.md/PROFILE.md 豁免）；
 - 设计立场：**主次是被声明的，不是被算出来的**——不做重要度打分/衰减函数/自动摘要。
 
 ### curator 质量策展

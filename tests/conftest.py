@@ -81,9 +81,30 @@ def vectors(cfg):
     return VectorStore(cfg.lancedb_path, dimensions=1024)
 
 
+def _seed_topic_files(root) -> None:
+    """注册制硬拦截（store.write 对未注册主题路径拒写）下的测试种子：
+    一个覆盖 notes/ 目录的注册主题（卡 notes/a.md + 相关 notes/b.md，
+    目录即归属）。存量用例统一把写路径放进 notes/。"""
+    (root / "notes").mkdir(parents=True, exist_ok=True)
+    (root / "notes" / "a.md").write_text("# a\n内容A\n", encoding="utf-8")
+    (root / "notes" / "b.md").write_text("# b\n内容B\n", encoding="utf-8")
+    (root / "TOPICS.md").write_text(
+        "# 主题记忆注册表\n\n## 笔记主题\n- 卡: notes/a.md\n"
+        "- 相关: notes/b.md\n- 现状: 测试主题\n- 注册: 2026-09-14\n",
+        encoding="utf-8",
+    )
+
+
 @pytest.fixture
 def store(cfg, db, emb, vectors) -> Store:
-    return Store(cfg, db, emb, vectors)
+    s = Store(cfg, db, emb, vectors)
+    _seed_topic_files(s.root)
+    s.reindex()
+    s._index_note("TOPICS.md", "主题记忆注册表",
+                  (s.root / "TOPICS.md").read_text(encoding="utf-8"))
+    # git-clean 不变量依赖种子入库（快照停用时 commit 自行 no-op）
+    s.snapshots.commit("seed: 测试注册表")
+    return s
 
 
 @pytest.fixture
@@ -93,18 +114,7 @@ def searcher(cfg, db, emb, vectors) -> Searcher:
 
 @pytest.fixture
 def tstore(store: Store) -> Store:
-    """Store with TOPICS.md pre-seeded (one topic covering notes/)."""
-    (store.root / "notes").mkdir(exist_ok=True)
-    (store.root / "notes" / "a.md").write_text("# a\n内容A\n", encoding="utf-8")
-    (store.root / "notes" / "b.md").write_text("# b\n内容B\n", encoding="utf-8")
-    store.reindex()
-    (store.root / "TOPICS.md").write_text(
-        "# 主题记忆注册表\n\n## 笔记主题\n- 卡: notes/a.md\n"
-        "- 相关: notes/b.md\n- 现状: 测试主题\n- 注册: 2026-09-14\n",
-        encoding="utf-8",
-    )
-    store._index_note("TOPICS.md", "主题记忆注册表",
-                      (store.root / "TOPICS.md").read_text(encoding="utf-8"))
+    """名字兼容保留：种子已上移到 store fixture，语义与原 tstore 一致。"""
     return store
 
 
@@ -143,6 +153,10 @@ root = "{(tmp_path / "bob").as_posix()}"
         encoding="utf-8",
     )
     from yacmemo.server import create_app
+
+    # 每个用户根目录预置注册主题种子（索引由首次审计自愈补齐）
+    for uid in ("alice", "bob"):
+        _seed_topic_files(tmp_path / uid)
 
     config = load_config(str(config_file))
     app = create_app(config)

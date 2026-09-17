@@ -176,6 +176,7 @@ class Store:
     def write(self, title: str, content: str, force: bool = False,
               force_confirm: bool = False) -> dict:
         rel = self.title_to_path(title)
+        self._require_covered(rel)
         _, name = self._split_title(title)
         is_journal = rel.startswith(self.config.journal_prefix)
 
@@ -403,6 +404,11 @@ class Store:
         if not rel.endswith(".md"):
             rel += ".md"
         abs_path = self.root / rel
+        if not abs_path.is_file():
+            # Overwriting an existing file is the editor/report fast path and
+            # stays unrestricted; only *creating* a file must respect the
+            # registry, otherwise save() becomes a write-gate bypass.
+            self._require_covered(rel)
         old_title = self._title_of(rel) if abs_path.is_file() else None
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(content, encoding="utf-8")
@@ -442,6 +448,9 @@ class Store:
         new_abs = self.root / new_rel
         if new_abs.exists():
             raise StoreError(f"目标已存在: {new_rel}")
+        # A move that lands outside every registered topic is stray creation
+        # by another name; archive_topic() lands in archive/ and is exempt.
+        self._require_covered(new_rel)
 
         old_abs = self.root / old_rel
         content = old_abs.read_text(encoding="utf-8")
@@ -737,8 +746,16 @@ class Store:
         self.snapshots.commit(f"profile: add '{wanted}'")
         return {"path": PROFILE_FILE, "section": wanted, "created": True}
 
-    def _stray_files(self, topics: list[dict]) -> list[str]:
-        """Markdown files outside any registered topic (and outside free zones)."""
+    # ------------------------------------------------- topic coverage (执法)
+
+    def _path_covered(self, rel: str, topics: list[dict]) -> bool:
+        """Registry coverage test shared by write-time gating and D4 stray
+        detection — one semantics, two consumers. System files and free
+        zones are always covered; anything else must be a registered
+        topic's card/related file or live under such a file's directory
+        (每主题一目录，目录即归属)."""
+        if rel in (TOPICS_FILE, PROFILE_FILE) or rel.startswith(FREE_ZONES):
+            return True
         covered_files, covered_dirs = set(), set()
         for t in topics:
             if t["card"]:
@@ -751,16 +768,45 @@ class Store:
                 d = posixpath.dirname(r)
                 if d:
                     covered_dirs.add(d)
+        if rel in covered_files:
+            return True
+        return any(rel.startswith(d + "/") for d in covered_dirs)
+
+    def _require_covered(self, rel: str, attempted_title: str = "") -> None:
+        """Write-time enforcement of the topic registry: tool-created notes
+        must belong to a registered topic. Non-bypassable — force only
+        covers title conflicts. D4 audit stays as the backstop for files
+        that enter the store without the tools (Obsidian hand-edits,
+        unregister leftovers)."""
+        if rel in (TOPICS_FILE, PROFILE_FILE):
+            raise StoreError(
+                f"系统文件不允许通过写入创建/覆盖: {rel}\n"
+                "主题注册请用 topic_register，画像/偏好请用 update_user_preference。")
+        if rel.startswith(self.config.journal_prefix):
+            return
+        topics = self.load_topics()
+        if self._path_covered(rel, topics):
+            return
+        self.db.add_guard_event("uncovered", attempted_title, rel, forced=False)
+        active = [t["title"] for t in topics if not t.get("archived")]
+        hint = "、".join(f"《{t}》" for t in active[:8]) or "（暂无）"
+        raise StoreError(
+            f"写入被拦截: {rel} 不属于任何注册主题（主题注册制硬约束，force 不豁免）。\n"
+            "- 新主题：先征得用户同意后 topic_register 注册"
+            "（会在 topics/<主题>/abstract.md 建卡），\n"
+            "  之后把笔记写入 topics/<主题>/ 目录下；\n"
+            "- 已有主题：写入该主题目录下的模块笔记，如 topics/<主题>/笔记名.md；\n"
+            "- journal/、archive/、curator/ 免注册区不受限。\n"
+            f"当前活跃主题: {hint}")
+
+    def _stray_files(self, topics: list[dict]) -> list[str]:
+        """Markdown files outside any registered topic (and outside free zones)."""
         strays = []
         for p in sorted(self.root.rglob("*.md")):
             rel = p.relative_to(self.root).as_posix()
-            if rel in (TOPICS_FILE, PROFILE_FILE) or rel.startswith(FREE_ZONES):
-                continue
             if "/.index/" in f"/{rel}" or ".git" in p.parts:
                 continue
-            if rel in covered_files:
-                continue
-            if any(rel.startswith(d + "/") for d in covered_dirs):
+            if self._path_covered(rel, topics):
                 continue
             strays.append(rel)
         return strays
@@ -885,7 +931,8 @@ class Store:
                  f"- 悬空链接（D3）：{len(dangling)}",
                  f"- 游离文件（D4）：{len(stray)}",
                  f"- 悬空主题卡（D5）：{len(dangling_cards)}",
-                 f"- 守卫：拒绝 {guard['refused']} / force {guard['forced']}", ""]
+                 f"- 守卫：拒绝 {guard['refused']} / force {guard['forced']}"
+                 f" / 未覆盖拦截 {guard['uncovered']}", ""]
         if added:
             lines += _sec("新增文件", added)
         if resynced:

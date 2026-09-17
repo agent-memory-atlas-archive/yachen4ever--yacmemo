@@ -200,12 +200,11 @@ class IndexDB:
     # ---- guard events ----
 
     def add_guard_event(self, kind: str, attempted_title: str, matched_path: str,
-                        forced: bool):
+                        forced: bool = False):
         self.conn.execute(
             "INSERT INTO guard_events (id, ts, kind, attempted_title, matched_path) "
             "VALUES (?,?,?,?,?)",
-            (_uuid(), _now(), "forced" if forced else "refused",
-             attempted_title, matched_path),
+            (_uuid(), _now(), kind, attempted_title, matched_path),
         )
         self.conn.commit()
 
@@ -215,7 +214,8 @@ class IndexDB:
         ).fetchall()
         stats = {r["kind"]: r["n"] for r in rows}
         return {"refused": stats.get("refused", 0),
-                "forced": stats.get("forced", 0)}
+                "forced": stats.get("forced", 0),
+                "uncovered": stats.get("uncovered", 0)}
 
     def count_forced_since(self, hours: int = 24) -> int:
         """Forced bypasses within a rolling window (force-confirmation ladder)."""

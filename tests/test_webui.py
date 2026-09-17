@@ -25,33 +25,33 @@ def test_webui_api_notes_crud(http_server):
     base = f"http://127.0.0.1:{http_server}/api/alice"
     # create (via REST, same guard path as MCP)
     r = httpx.post(f"{base}/notes", json={
-        "title": "端口配置", "content": "# 端口配置\n\n服务端口为 9721\n"})
+        "title": "notes/端口配置", "content": "# 端口配置\n\n服务端口为 9721\n"})
     assert r.json()["ok"] is True
 
     # near-duplicate refused
     r = httpx.post(f"{base}/notes", json={
-        "title": "端口配置-2", "content": "x", "force": False})
+        "title": "notes/端口配置-2", "content": "x", "force": False})
     body = r.json()
     assert body["ok"] is False and "近似标题" in body["error"]
 
     # force bypasses (human clicks in WebUI = human confirmation)
     r = httpx.post(f"{base}/notes", json={
-        "title": "端口配置-2", "content": "# 端口配置-2\nx", "force": True,
+        "title": "notes/端口配置-2", "content": "# 端口配置-2\nx", "force": True,
         "force_confirm": True})
     assert r.json()["ok"] is True
 
     # list
     r = httpx.get(f"{base}/notes")
     paths = [n["path"] for n in r.json()["notes"]]
-    assert "端口配置.md" in paths and "端口配置-2.md" in paths
+    assert "notes/端口配置.md" in paths and "notes/端口配置-2.md" in paths
 
     # read
     r = httpx.get(f"{base}/note", params={"path": "端口配置"})
     assert "9721" in r.json()["content"]
 
-    # save (full-content edit)
+    # save (full-content edit)——save 走确切路径，覆盖已有文件不受注册制拦截
     r = httpx.put(f"{base}/note", json={
-        "path": "端口配置", "content": "# 端口配置\n\n服务端口为 8080\n"})
+        "path": "notes/端口配置", "content": "# 端口配置\n\n服务端口为 8080\n"})
     assert r.json()["ok"] is True
     r = httpx.get(f"{base}/note", params={"path": "端口配置"})
     assert "8080" in r.json()["content"]
@@ -127,7 +127,7 @@ def test_usage_logged_for_mcp_calls(http_server, tmp_path):
                 ClientSession(r, w) as s):
             await s.initialize()
             await s.call_tool("memory_write", {
-                "title": "调用日志测试", "content": "# 调用日志测试\n内容\n"})
+                "title": "notes/调用日志测试", "content": "# 调用日志测试\n内容\n"})
             await s.call_tool("memory_search", {"query": "内容"})
 
     asyncio.run(call())
@@ -197,7 +197,7 @@ def test_audit_snapshot_written_and_listed(http_server):
     """确定性审计落盘 journal/audit/ 快照，且历史目录可见。"""
     base = f"http://127.0.0.1:{http_server}/api/alice"
     r = httpx.post(f"{base}/notes", json={
-        "title": "审计快照测试", "content": "# 审计快照测试\n内容\n"})
+        "title": "notes/审计快照测试", "content": "# 审计快照测试\n内容\n"})
     assert r.json()["ok"] is True
 
     r = httpx.post(f"{base}/audit", timeout=5).json()
@@ -215,13 +215,13 @@ def test_audit_disposition_appends_and_syncs_d2(http_server, tmp_path):
     """处置记录追加进快照；D2 处置同步 index 状态，重跑不再 open。"""
     base = f"http://127.0.0.1:{http_server}/api/alice"
     for t in ("甲记录", "乙记录"):
-        r = httpx.post(f"{base}/notes", json={"title": t, "content": f"# {t}\n内容\n"})
+        r = httpx.post(f"{base}/notes", json={"title": f"notes/{t}", "content": f"# {t}\n内容\n"})
         assert r.json()["ok"] is True
     db_path = tmp_path / "alice" / ".index" / "index.db"
     conn = sqlite3.connect(db_path)
     conn.execute(
         "INSERT INTO collisions (id, kind, a_path, b_path, a_text, b_text, score, "
-        "detected_at, status) VALUES ('d2-1','obs','甲记录.md','乙记录.md','A','B',"
+        "detected_at, status) VALUES ('d2-1','obs','notes/甲记录.md','notes/乙记录.md','A','B',"
         "0.9,'2026-09-14T00:00:00+00:00','open')")
     conn.commit()
     conn.close()
@@ -247,7 +247,7 @@ def test_audit_last_and_actions(http_server):
     """audit/last 缓存最近一次结果；audit/actions 读处置历史（表是权威源）。"""
     base = f"http://127.0.0.1:{http_server}/api/alice"
     httpx.post(f"{base}/notes", json={
-        "title": "快照测试甲", "content": "# 快照测试甲\n内容\n"})
+        "title": "notes/快照测试甲", "content": "# 快照测试甲\n内容\n"})
 
     r = httpx.get(f"{base}/audit/last", timeout=5).json()
     assert r["ok"] is True and r["audit"] is None  # 未审计时为空
@@ -300,3 +300,11 @@ def test_proposal_action_adjudication(http_server, tmp_path):
     r = httpx.get(f"{base}/audit/actions", timeout=5).json()
     p_rows = [a for a in r["actions"] if a["kind"] == "P"]
     assert len(p_rows) == 1 and p_rows[0]["action"] == "dismissed"
+
+
+def test_webui_create_outside_topics_refused(http_server):
+    """REST 建笔记与 MCP 同守卫：未覆盖路径在 HTTP 层也拒绝。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    r = httpx.post(f"{base}/notes", json={"title": "test/散记", "content": "x"})
+    body = r.json()
+    assert body["ok"] is False and "不属于任何注册主题" in body["error"]

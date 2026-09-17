@@ -18,9 +18,9 @@ NOTE_B = """# 备份策略
 
 
 def test_fts_channel_hits_keyword(store: Store, searcher: Searcher):
-    store.write("yacmemo部署配置", NOTE_A)
+    store.write("notes/yacmemo部署配置", NOTE_A)
     hits = searcher.fts_channel("服务端口", limit=10)
-    assert [h["path"] for h in hits] == ["yacmemo部署配置.md"]
+    assert [h["path"] for h in hits] == ["notes/yacmemo部署配置.md"]
 
 
 def test_rrf_fusion_prefers_multi_channel_hits(cfg, db, emb, vectors):
@@ -36,27 +36,27 @@ def test_rrf_fusion_prefers_multi_channel_hits(cfg, db, emb, vectors):
 
 
 def test_hybrid_top_hit(store: Store, searcher: Searcher):
-    store.write("yacmemo部署配置", NOTE_A)
-    store.write("备份策略", NOTE_B)
+    store.write("notes/yacmemo部署配置", NOTE_A)
+    store.write("notes/备份策略", NOTE_B)
     results = searcher.search("端口配置", limit=5)
     assert results, "hybrid should not be empty"
     assert results[0]["title"] == "yacmemo部署配置"
 
 
 def test_vector_only_channel(store: Store, searcher: Searcher):
-    store.write("备份策略", NOTE_B)
+    store.write("notes/备份策略", NOTE_B)
     results = searcher.search("restic 备份", limit=5, kind="vector")
     assert results[0]["title"] == "备份策略"
 
 
 def test_search_results_carry_collision_warnings(store: Store, searcher: Searcher):
     """FakeEmbedding puts all 端口 observations in the same direction → D2 fires."""
-    store.write("yacmemo部署配置", NOTE_A)
+    store.write("notes/yacmemo部署配置", NOTE_A)
     note_c = """# 端口配置说明
 
 - [配置] 端口为 8080
 """
-    store.write("端口配置说明", note_c)
+    store.write("notes/端口配置说明", note_c)
 
     results = searcher.search("端口配置", limit=5)
     warned = [r for r in results if r.get("warnings")]

@@ -49,7 +49,7 @@
 
 **D3 悬空链接**：`[[目标]]` 不匹配任何既有标题 → audit 列出（多为手误或待创建）。引用目标不含文字的标记（如文献引注 `[[1,28,28]]`）不算链接，已过滤。
 
-**D4 游离文件**：不属于任何注册主题的 markdown 被 audit 点名（免注册区 journal/、archive/、curator/ 豁免）。这是主题注册制的执法机制——主题之外不留藏身之处，注册制本身见 [01-architecture.md](01-architecture.md) §十三。
+**D4 游离文件**：不属于任何注册主题的 markdown 被 audit 点名（免注册区 journal/、archive/、curator/ 豁免）。这是主题注册制的执法机制——主题之外不留藏身之处，注册制本身见 [01-architecture.md](01-architecture.md) §十三。**写路径已硬拦截（2026-09-17 增补）**：工具面（memory_write / save 新建 / move 目标）不可能再制造游离，D4 转为兜底——管 Obsidian 手建、注销后遗等工具面之外的游离；写入拦截与 D4 共用同一覆盖判定（`_path_covered`），口径永远一致。
 
 **D5 悬空主题卡**：注册表 `卡:` 字段指向不存在的 abstract（restructure/手工编辑 TOPICS.md 的遗留）。D3 只扫笔记正文里的链接，注册表自身无校验——audit 补位点名，处置靠修注册表或重建卡。
 

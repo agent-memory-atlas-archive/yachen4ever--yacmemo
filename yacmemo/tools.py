@@ -129,6 +129,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                      force_confirm: bool = False, ctx: Context = None) -> str:
         """新建笔记（一篇一主题，标题即主题名）。近似标题会被拒绝；更新已有笔记请用 memory_edit。
 
+        主题注册制硬约束：笔记必须属于已注册主题——写入 topics/<主题>/ 目录，
+        或注册主题卡/相关路径覆盖的范围；journal/、archive/、curator/ 免注册区
+        不受限。新主题先用 topic_register 注册（仅用户明确要求时），force 不豁免。
+
         Args:
             title: 笔记标题，可含目录前缀（如 "projects/yacmemo部署配置"）
             content: markdown 正文（首行建议 "# 标题"；事实行用 "- [类别] 内容"）
@@ -194,6 +198,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
     @mcp.tool()
     def memory_move(path: str, new_path: str, ctx: Context = None) -> str:
         """移动笔记到新路径（标题不变，[[链接]] 按标题解析不受影响）。
+
+        目标路径同样受主题注册制约束：不能移到未注册主题覆盖的范围之外。
 
         Args:
             path: 现有路径或标题
@@ -278,7 +284,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             for p in stray[:10]:
                 lines.append(f"- {p}")
             g = r["guard_stats"]
-            lines.append(f"== 守卫统计 == 拒绝 {g['refused']} 次，force 越过 {g['forced']} 次")
+            lines.append(f"== 守卫统计 == 拒绝 {g['refused']} 次，force 越过 {g['forced']} 次，"
+                         f"未覆盖拦截 {g['uncovered']} 次")
             lines.append(f"== git == {r.get('git', '')}")
             if r.get("audit_file"):
                 lines.append(f"== 审计快照 == {r['audit_file']}")
