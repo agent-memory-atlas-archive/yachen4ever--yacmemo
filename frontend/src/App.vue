@@ -13,18 +13,25 @@
                   :width="220"
                   show-trigger
                 >
-                  <div class="sidebar-logo">
-                    <span v-if="!collapsed">yacmemo</span>
-                    <span v-else>ym</span>
+                  <div class="sidebar-flex">
+                    <div>
+                      <div class="sidebar-logo">
+                        <span v-if="!collapsed">yacmemo</span>
+                        <span v-else>ym</span>
+                      </div>
+                      <n-menu
+                        v-model:value="activePage"
+                        :collapsed="collapsed"
+                        :collapsed-width="64"
+                        :collapsed-icon-size="22"
+                        :options="menuOptions"
+                        @update:value="onMenuSelect"
+                      />
+                    </div>
+                    <div v-if="!collapsed" class="sidebar-version">
+                      v{{ build.version }} · {{ build.commit }}
+                    </div>
                   </div>
-                  <n-menu
-                    v-model:value="activePage"
-                    :collapsed="collapsed"
-                    :collapsed-width="64"
-                    :collapsed-icon-size="22"
-                    :options="menuOptions"
-                    @update:value="onMenuSelect"
-                  />
                 </n-layout-sider>
                 <n-layout>
                   <n-layout-header bordered class="app-header">
@@ -79,6 +86,8 @@ import ProfilePage from './components/ProfilePage.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import { api } from './composables/api.js'
 
+const build = __BUILD__
+
 const activePage = ref('topics')
 const collapsed = ref(false)
 const currentUser = ref('')
@@ -121,9 +130,15 @@ onMounted(async () => {
 <style>
 body { margin: 0; }
 .app-layout { height: 100vh; }
+.sidebar-flex { height: 100%; display: flex; flex-direction: column; }
+.sidebar-flex > div:first-child { flex: 1; }
 .sidebar-logo {
   height: 48px; display: flex; align-items: center; justify-content: center;
   font-size: 18px; font-weight: 700; border-bottom: 1px solid var(--n-border-color);
+}
+.sidebar-version {
+  padding: 10px 0; text-align: center; font-size: 11px; opacity: 0.6;
+  border-top: 1px solid var(--n-border-color);
 }
 .app-header {
   height: 48px; padding: 0 20px; display: flex; align-items: center;

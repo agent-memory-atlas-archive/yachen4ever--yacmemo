@@ -1,11 +1,28 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'url'
+
+// 构建期注入版本号与 commit（侧边栏底部展示）——以本文件所在仓库为准
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
+let commit = 'unknown'
+try {
+  commit = execSync('git rev-parse --short HEAD', { cwd: fileURLToPath(new URL('..', import.meta.url)) })
+    .toString().trim()
+} catch { /* 非 git 环境（如 CI 深拷贝）降级为 unknown */ }
 
 export default defineConfig({
   plugins: [vue()],
   root: 'src',
   base: '/ui/',
+  define: {
+    __BUILD__: JSON.stringify({
+      version: pkg.version,
+      commit,
+      builtAt: new Date().toISOString().slice(0, 10),
+    }),
+  },
   build: {
     // 注意：new URL 相对本文件（frontend/vite.config.js）解析——上一级即仓库根，
     // 产物必须落包内 yacmemo/webui/dist/，与 app.py 的 STATIC_DIR 保持一致

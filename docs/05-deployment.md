@@ -156,18 +156,23 @@ uv run yacmemo-mcp --root /srv/yacmemo/yachen/memory
 前端为 Vue 3 + Naive UI 工程，**需构建**（服务器通常无 npm，在开发机做）：
 
 ```bash
-# 开发机
+# 一条命令：本机构建 + scp 到 debsvc（推荐）
+scripts/deploy_webui.sh         # = npm ci + build + tar 管道同步 dist，末尾自检 /ui/
+
+# 或分步手动
 scripts/build_webui.sh          # → 产物落 yacmemo/webui/dist/
 scp -r yacmemo/webui/dist debsvc:/srv/yacmemo/yacmemo/webui/   # dist 不进 git
 ```
+
+纯前端更新无需重启服务（静态文件按请求读盘）；**后端代码更新** = `git pull && systemctl restart yacmemo`。版本号与 commit 号在侧边栏底部展示（构建期由 vite 从 package.json + git 注入）。
 
 未构建时服务照常运行，`/ui/` 返回 503 构建指引，MCP/API 不受影响。构建完成后浏览器打开 `http://debsvc.local:9721/ui/`（`/` 自动跳转），五页：
 
 - **主题**：主题树（注册主题 → 主题内笔记），右侧 markdown 渲染、在线编辑（整篇保存，索引同步）/删除（confirm），abstract 不可从 UI 删；
 - **搜索**：手动验证三通道检索，⚠ 撞车标注可见；
-- **审计**：双模式——确定性审计（自愈+规则）与 curator 深度审查（LLM 提案），撞车裁决带"已处理/忽略"按钮；
+- **审计**：双 Tab——「确定性审计」（D1–D5 分组处置卡片、处置历史、历史快照）与「质量提案」（curator 深度审查、条目结构化展示、人工采纳/忽略 + 复制执行指令交 agent 落实）；详见 [07-webui.md](07-webui.md) §2.3；
 - **画像**：PROFILE.md 各小节的查看/编辑/新建；
-- **设置**：使用记录（工具过滤、近 14 天概览）+ 健康总览 + config.toml 在线编辑（校验 + 备份 + 可选重启）。
+- **设置**：使用记录（工具过滤、近 14 天概览）+ 健康总览 + 全量重建索引（维护卡片）+ config.toml 在线编辑（校验 + 备份 + 可选重启）。
 
 页面与 API 的完整说明见 [07-webui.md](07-webui.md)。WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。
 

@@ -55,7 +55,7 @@ uv run yacmemo-server --config config.toml
 curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["user2","yachen"]}
 ```
 
-浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（主题 / 搜索 / 审计 / 画像 / 设置），详见 [docs/07-webui.md](docs/07-webui.md)。前端需先构建：`scripts/build_webui.sh`（需 Node 18+；服务器无 npm 时在开发机构建后 scp dist，见部署文档）。
+浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（主题 / 搜索 / 审计 / 画像 / 设置，侧边栏底部展示版本号与 commit），详见 [docs/07-webui.md](docs/07-webui.md)。前端需先构建：本机一条命令 `scripts/deploy_webui.sh`（构建 + scp 到 debsvc，需 Node 18+），或分步 `scripts/build_webui.sh` 后手动 scp（见部署文档）。
 
 ### 客户端（你的每台电脑、每个 agent）
 
