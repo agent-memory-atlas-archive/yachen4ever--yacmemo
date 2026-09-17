@@ -16,7 +16,15 @@
 
 ### 2.1 主题浏览
 
-左侧**主题树**：注册主题 → 主题内笔记（`abstract.md` 与 agent 增设的模块 md）逐层展开，已归档主题单独分组；右侧选中即看，合并了旧"笔记"页的全部能力：
+左侧**主题树**——存储里的任何 markdown 都可见、无重复展示：
+
+- **活跃主题**：每主题一个目录（`abstract.md` 与 agent 增设的模块 md）逐层展开；
+- **已归档**：展开 `archive/<主题>/` 目录下的全部文件；
+- **免注册区**：journal / curator 两个系统目录；
+- **游离文件**：与后端 D4 同口径点名（免注册区 + 系统文件 + 注册覆盖之外）——主题硬拦截下工具面不会产生新游离，这里出现的只会是 Obsidian 手建或注销后遗，让 agent 归位或删除；
+- **系统文件**：TOPICS.md（注册表）与 PROFILE.md（画像）。
+
+右侧选中即看，合并了旧"笔记"页的全部能力：
 
 - **查看**：正文默认 markdown 渲染，`编辑` 切到源码 textarea，`预览` 切回渲染；
 - **编辑**：`保存` 走 `store.save`——整篇覆盖，标题跟随首行 `# 标题`，索引同步重建（FTS/向量/冲突重算）；
@@ -119,7 +127,7 @@ curl -s -X POST http://debsvc.local:9721/api/yachen/audit
 ## 五、构建与实现说明
 
 - **前端工程**：Vue 3 + Naive UI + Vite（`frontend/`），源码 `src/App.vue` + `src/components/`（五页组件）+ `src/composables/api.js`（统一 fetch 封装）；
-- **构建**：`scripts/build_webui.sh`（npm ci + vite build）→ 产物落 `yacmemo/webui/dist/`，与 `app.py` 的 `STATIC_DIR` 一致；**注意** vite outDir 用 `new URL('../../yacmemo/webui/dist', import.meta.url)`，相对 vite.config.js 解析，别改成 `../webui/dist`（那是仓库根，服务读不到）；
+- **构建**：`scripts/build_webui.sh`（npm ci + vite build）→ 产物落 `yacmemo/webui/dist/`，与 `app.py` 的 `STATIC_DIR` 一致；vite outDir 用 `new URL('../yacmemo/webui/dist', import.meta.url)`，相对 `frontend/vite.config.js` 解析（上一级即仓库根），别改成 `../../yacmemo/webui/dist`（跑到仓库外面去了）；
 - **分包**：manualChunks 把 `vue` 与 `naive-ui` 各自成 chunk——业务代码迭代不会使大依赖缓存失效；
 - **开发模式**：`cd frontend && npm run dev`（Vite dev server 端口 5173，`/api` 代理到本机 9721）；
 - **未构建行为**：`dist/` 不存在时服务正常启动，`/ui/` 返回 503 + 构建指引（PlainTextResponse），MCP/API 全功能可用；

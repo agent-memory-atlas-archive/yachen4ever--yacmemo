@@ -67,47 +67,83 @@ const expandedKeys = ref([])
 
 const treeData = computed(() => {
   const result = []
-  // Active topics
+  const noteNode = n => ({
+    key: `note:${n.path}`,
+    label: n.title || n.path.split('/').pop().replace('.md', ''),
+    isLeaf: true,
+  })
+  const dirOf = p => p.split('/').slice(0, -1).join('/')
+  // 与后端 _path_covered 同款覆盖口径：注册主题的卡/相关文件及其所在目录
+  const coveredFiles = new Set()
+  const coveredDirs = new Set()
+  for (const t of topics.value) {
+    for (const p of [t.card, ...(t.related || [])]) {
+      if (!p) continue
+      coveredFiles.add(p)
+      const d = dirOf(p)
+      if (d) coveredDirs.add(d)
+    }
+  }
+  const isCovered = path => coveredFiles.has(path) ||
+    [...coveredDirs].some(d => path.startsWith(d + '/'))
+  // Active topics：每主题一目录，目录即归属（按卡所在目录取模块笔记）
   const activeChildren = []
   for (const t of topics.value.filter(t => !t.archived)) {
+    const dir = dirOf(t.card)
     const topicNotes = notes.value.filter(n =>
-      n.path.startsWith(`topics/${t.title}/`) && n.path !== t.card)
+      dir && n.path.startsWith(dir + '/') && n.path !== t.card)
     activeChildren.push({
       key: `topic:${t.title}`,
       label: t.title,
       children: [
         { key: `note:${t.card}`, label: 'abstract', isLeaf: true },
-        ...topicNotes.map(n => ({
-          key: `note:${n.path}`,
-          label: n.title || n.path.split('/').pop().replace('.md', ''),
-          isLeaf: true,
-        })),
+        ...topicNotes.map(noteNode),
       ],
     })
   }
   result.push({ key: 'active', label: `活跃主题 (${activeChildren.length})`, children: activeChildren })
-  // Archived topics
+  // Archived topics：卡已被后端改写到 archive/<主题>/，同样展开目录下全部文件
   const archived = topics.value.filter(t => t.archived)
   if (archived.length) {
     result.push({
       key: 'archived',
       label: `已归档 (${archived.length})`,
-      children: archived.map(t => ({
-        key: `topic:${t.title}`,
-        label: t.title,
-        children: [{ key: `note:${t.card}`, label: 'abstract', isLeaf: true }],
-      })),
+      children: archived.map(t => {
+        const dir = dirOf(t.card)
+        const files = notes.value.filter(n =>
+          dir && n.path.startsWith(dir + '/') && n.path !== t.card)
+        return {
+          key: `topic:${t.title}`,
+          label: t.title,
+          children: [
+            { key: `note:${t.card}`, label: 'abstract', isLeaf: true },
+            ...files.map(noteNode),
+          ],
+        }
+      }),
     })
   }
   // Free zones
   result.push({ key: 'free', label: '免注册区', children: [
     { key: 'zone:journal', label: 'journal', children: notes.value
       .filter(n => n.path.startsWith('journal/'))
-      .map(n => ({ key: `note:${n.path}`, label: n.title || n.path.split('/').pop().replace('.md',''), isLeaf: true })) },
+      .map(noteNode) },
     { key: 'zone:curator', label: 'curator', children: notes.value
       .filter(n => n.path.startsWith('curator/'))
-      .map(n => ({ key: `note:${n.path}`, label: n.title || n.path.split('/').pop().replace('.md',''), isLeaf: true })) },
+      .map(noteNode) },
   ]})
+  // 游离文件：与后端 D4 同口径（免注册区 + 系统文件 + 注册覆盖之外）
+  const strays = notes.value.filter(n =>
+    !n.path.startsWith('journal/') && !n.path.startsWith('archive/') &&
+    !n.path.startsWith('curator/') &&
+    n.path !== 'TOPICS.md' && n.path !== 'PROFILE.md' &&
+    !isCovered(n.path))
+  result.push({ key: 'stray', label: `游离文件 (${strays.length})`,
+    children: strays.map(noteNode) })
+  const system = notes.value.filter(n => n.path === 'TOPICS.md' || n.path === 'PROFILE.md')
+  if (system.length) {
+    result.push({ key: 'system', label: '系统文件', children: system.map(noteNode) })
+  }
   return result
 })
 

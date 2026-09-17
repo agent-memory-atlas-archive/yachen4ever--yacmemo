@@ -109,6 +109,7 @@
               <n-space>
                 <n-statistic label="拒绝" :value="auditData.guard_stats?.refused || 0" />
                 <n-statistic label="force 越过" :value="auditData.guard_stats?.forced || 0" />
+                <n-statistic label="未覆盖拦截" :value="auditData.guard_stats?.uncovered || 0" />
               </n-space>
             </n-card>
           </template>

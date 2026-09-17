@@ -29,6 +29,7 @@
             <n-space size="small">
               <n-tag size="tiny">拒绝 {{ u.guard.refused }}</n-tag>
               <n-tag size="tiny" type="warning">force {{ u.guard.forced }}</n-tag>
+              <n-tag size="tiny" type="error">未覆盖拦截 {{ u.guard.uncovered || 0 }}</n-tag>
               <n-tag size="tiny" :type="u.git_status?.includes('失败') ? 'error' : 'success'">
                 {{ u.git_status ? u.git_status.slice(0, 30) : 'git: —' }}
               </n-tag>
