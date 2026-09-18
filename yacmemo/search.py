@@ -28,10 +28,18 @@ class Searcher:
         self.db = db
         self.emb = emb
         self.vectors = vectors
+        # 最近一次 search() 的补充说明（向量通道降级 / 短查询提示），
+        # MCP memory_search 与 WebUI 搜索页读取展示
+        self.last_notice: str | None = None
 
     # ---------------------------------------------------------------- channels
 
     def fts_channel(self, query: str, limit: int) -> list[dict]:
+        if len(query.strip()) < 3:
+            # trigram 分词下 <3 字查询永不命中——LIKE 子串扫描兜底
+            rows = self.db.like_search(query, limit)
+            return [{"path": r["path"], "title": r["title"], "rank": i + 1,
+                     "channels": ["fts"]} for i, r in enumerate(rows)]
         rows = self.db.fts_search(query, limit)
         return [{"path": r["path"], "title": r["title"], "rank": r["rank"],
                  "channels": ["fts"]} for r in rows]
@@ -43,6 +51,7 @@ class Searcher:
             qv = self.emb.embed_one(query)
             hits = self.vectors.search_note_vectors(qv, limit)
         except Exception as e:
+            self.last_notice = f"向量通道不可用（{e}），本次结果仅 FTS"
             logger.warning("Vector channel unavailable: %s", e)
             return []
         out = []
@@ -58,6 +67,7 @@ class Searcher:
                kind: str = "hybrid") -> list[dict]:
         if kind not in ("hybrid", "fts", "vector"):
             raise ValueError(f"未知检索类型: {kind}")
+        self.last_notice = None
         channels = []
         if kind in ("hybrid", "fts"):
             channels.append(self.fts_channel(query, limit))
@@ -68,6 +78,10 @@ class Searcher:
             merged = self._rrf(channels, limit)
         else:
             merged = self._take_first(channels, limit)
+
+        if not merged and len(query.strip()) < 3 and not self.last_notice:
+            # 短查询空结果：LIKE 兜底也没命中，提示换更长的关键词
+            self.last_notice = "短于 3 字的查询无法被 FTS trigram 命中，请换更长的关键词"
 
         for r in merged:
             r["warnings"] = self._warnings_for(r["path"])

@@ -235,7 +235,9 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err(str(e))
         return _ok({"results": [
             {k: r.get(k) for k in ("path", "title", "score", "channels", "warnings")}
-            for r in results]})
+            for r in results],
+            # 向量通道降级 / 短查询提示（MCP/WebUI 同源，见 searcher.last_notice）
+            "notice": c["searcher"].last_notice})
 
     async def audit(request: Request):
         try:

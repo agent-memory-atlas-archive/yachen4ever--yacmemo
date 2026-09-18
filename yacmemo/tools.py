@@ -81,7 +81,12 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         with _logged("memory_search", ctx, summarize_args("memory_search", locals()), out):
             try:
                 results = searcher.search(query, limit=limit, kind=kind)
-                return _fmt_search(results)
+                text = _fmt_search(results)
+                # 降级/短查询提示：向量通道不可用等让 agent 知情，
+                # 避免"未找到相关笔记"被当成权威结论
+                if searcher.last_notice:
+                    text += f"\n⚠ {searcher.last_notice}"
+                return text
             except StoreError as e:
                 return f"{e}"
             except Exception as e:
@@ -282,6 +287,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             stray = r.get("stray", [])
             lines.append(f"== 游离文件（{len(stray)}）==")
             for p in stray[:10]:
+                lines.append(f"- {p}")
+            mv = r.get("missing_vectors", [])
+            lines.append(f"== 缺向量笔记（{len(mv)}，已重试自愈）==")
+            for p in mv[:10]:
                 lines.append(f"- {p}")
             g = r["guard_stats"]
             lines.append(f"== 守卫统计 == 拒绝 {g['refused']} 次，force 越过 {g['forced']} 次，"

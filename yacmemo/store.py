@@ -830,6 +830,24 @@ class Store:
             if p.is_file():
                 contents[row["path"]] = p.read_text(encoding="utf-8")
         dangling = d3_scan(contents, {r["title"] for r in titles})
+
+        # 缺向量笔记自愈：embedding 端点故障期间写入的笔记 vector_ok=0，
+        # hash 未变，外部变更自愈不会重试——审计补位重试 embedding，
+        # 端点仍不可用时保持点名（下次审计再试）
+        missing_vectors = []
+        if self.emb and self.vectors:
+            missing_vectors = self.db.notes_missing_vectors()
+            if missing_vectors:
+                for row in missing_vectors:
+                    content = contents.get(row["path"])
+                    if content is not None:
+                        self._index_note(row["path"], row["title"], content)
+                missing_vectors = [r["path"]
+                                   for r in self.db.notes_missing_vectors()]
+
+        # 空白处置行自清（body 解析失败等事故产物，处置表没有删除接口）
+        pruned_blank = self.db.prune_blank_audit_actions()
+
         topics = self.load_topics()
         stray = self._stray_files(topics)
 
@@ -865,7 +883,7 @@ class Store:
         # 审计快照落盘（journal/audit/ 免注册区，markdown 审计轨迹 + git 快照）
         audit_file = self._write_audit_snapshot(
             resynced, missing, added, d1, collisions, dangling, stray,
-            dangling_cards)
+            dangling_cards, missing_vectors, pruned_blank)
 
         res = {"title_duplicates": d1,
                "collisions": collisions,
@@ -875,6 +893,8 @@ class Store:
                "missing": missing,
                "added": added,
                "stray": stray,
+               "missing_vectors": missing_vectors,
+               "pruned_blank_actions": pruned_blank,
                "git": self.snapshots.status_line(),
                "guard_stats": self.db.guard_stats(),
                "audit_file": audit_file}
@@ -898,12 +918,14 @@ class Store:
         return (self._audit_dir, "curator/")
 
     def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
-                              dangling, stray, dangling_cards=()) -> str:
+                              dangling, stray, dangling_cards=(),
+                              missing_vectors=None, pruned_blank=0) -> str:
         """每日一份审计快照（journal/audit/<YYYYMMDD>.md），同日重跑以"复审"
         小节追加进当天文件——对齐 curator 的同日合并，标题天然唯一不撞 D1，
         且 journal/audit/ 不会随审计频率无界膨胀（过期文件由 curator 清理）。"""
         body = self._audit_body(resynced, missing, added, d1, collisions,
-                                dangling, stray, dangling_cards)
+                                dangling, stray, dangling_cards,
+                                missing_vectors, pruned_blank)
         day = datetime.now().strftime("%Y%m%d")
         rel = f"{self._audit_dir}{day}.md"
         abs_path = self.root / rel
@@ -927,7 +949,8 @@ class Store:
         return rel
 
     def _audit_body(self, resynced, missing, added, d1, collisions,
-                    dangling, stray, dangling_cards) -> str:
+                    dangling, stray, dangling_cards,
+                    missing_vectors=None, pruned_blank=0) -> str:
         guard = self.db.guard_stats()
 
         def _sec(title, items):
@@ -944,8 +967,12 @@ class Store:
                  f"- 悬空链接（D3）：{len(dangling)}",
                  f"- 游离文件（D4）：{len(stray)}",
                  f"- 悬空主题卡（D5）：{len(dangling_cards)}",
+                 f"- 缺向量笔记（已重试自愈）：{len(missing_vectors or [])}",
                  f"- 守卫：拒绝 {guard['refused']} / force {guard['forced']}"
-                 f" / 未覆盖拦截 {guard['uncovered']}", ""]
+                 f" / 未覆盖拦截 {guard['uncovered']}"]
+        if pruned_blank:
+            lines.append(f"- 已清理空白处置行：{pruned_blank}")
+        lines.append("")
         if added:
             lines += _sec("新增文件", added)
         if resynced:
@@ -968,6 +995,9 @@ class Store:
         if dangling_cards:
             lines += _sec("悬空主题卡（D5）",
                           [f"`{cid}` — 注册表指向的 abstract 不存在" for cid in dangling_cards])
+        if missing_vectors:
+            lines += _sec("缺向量笔记（已重试自愈）",
+                          [f"`{p}`" for p in missing_vectors])
         return "\n".join(lines) + "\n"
 
     def record_audit_action(self, audit_file: str, issue_id: str, action: str,
@@ -1168,6 +1198,9 @@ class Store:
 
             note_vec = self._embed_cached(f"{title}\n{content}")
             self.vectors.upsert_note_vector(rel, f"{title}", note_vec)
+            # note 级向量落库即算"不缺向量"（缺向量点名指 note 向量；
+            # 两个早退分支在后面，标记必须在此之前打上）
+            self.db.set_vector_ok(rel, True)
 
             if rel.startswith(self._machine_zones):
                 # 机器产物不是记忆：处置行 "- [时间] 已处理 ..." 会被解析为
@@ -1182,7 +1215,11 @@ class Store:
                 obs_vecs.append(vec)
                 self.vectors.upsert_obs_vector(rel, obs["text"], vec)
             self._d2_check(rel, obs_list, obs_vecs)
+            self.db.set_vector_ok(rel, True)
         except Exception as e:
+            # 故障期写入的笔记标记缺向量：hash 未变，外部变更自愈不会重试，
+            # 由审计补位重试（见 audit 的 missing_vectors 自愈）
+            self.db.set_vector_ok(rel, False)
             logger.warning("Vector indexing failed for %s: %s", rel, e)
 
     def _d2_check(self, rel: str, obs_list: list[dict], obs_vecs: list[list[float]]):

@@ -71,3 +71,47 @@ def test_search_kind_validation(store: Store, searcher: Searcher):
         raise AssertionError("should reject unknown kind")
     except ValueError:
         pass
+
+
+def test_short_query_like_fallback(store: Store, searcher: Searcher):
+    """<3 字查询走 LIKE 子串回退——trigram 死区不再吞掉"端口"类高频短词。"""
+    store.write("notes/yacmemo部署配置", NOTE_A)
+    hits = searcher.fts_channel("端口", limit=10)
+    assert [h["path"] for h in hits] == ["notes/yacmemo部署配置.md"]
+    results = searcher.search("端口", limit=5)
+    assert results and results[0]["title"] == "yacmemo部署配置"
+
+
+def test_short_query_empty_result_carries_hint(store: Store, searcher: Searcher):
+    """LIKE 兜底也没命中的短查询要给提示，不许静默返回空。"""
+    store.write("notes/备份策略", NOTE_B)
+    results = searcher.search("端口", limit=5, kind="fts")
+    assert results == []
+    assert searcher.last_notice and "3 字" in searcher.last_notice
+    # LIKE 能命中的短查询无提示
+    searcher.search("备份", limit=5, kind="fts")
+    assert searcher.last_notice is None
+
+
+def test_vector_outage_sets_degradation_notice(store: Store, searcher: Searcher):
+    """向量通道故障时检索结果必须带降级提示（此前完全静默）。"""
+    store.write("notes/备份策略", NOTE_B)
+
+    class _BrokenEmb:
+        def embed_one(self, text):
+            raise ConnectionError("[Errno 111] Connection refused")
+
+        def embed(self, texts):
+            raise ConnectionError("[Errno 111] Connection refused")
+
+    orig = searcher.emb
+    searcher.emb = _BrokenEmb()
+    try:
+        results = searcher.search("restic", limit=5)
+        assert results  # FTS 通道照常命中
+        assert searcher.last_notice and "向量通道不可用" in searcher.last_notice
+    finally:
+        searcher.emb = orig
+    # 恢复后提示清空
+    searcher.search("restic", limit=5)
+    assert searcher.last_notice is None

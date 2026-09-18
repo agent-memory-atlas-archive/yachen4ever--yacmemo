@@ -79,14 +79,14 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 | 工具 | 用途 |
 |---|---|
-| `memory_search` | 混合检索（FTS trigram + 向量，RRF 融合）；疑似重复/矛盾内联 ⚠ 标注 |
+| `memory_search` | 混合检索（FTS trigram + 向量，RRF 融合）；疑似重复/矛盾内联 ⚠ 标注；向量通道故障或短查询未命中时附提示（<3 字查询走 LIKE 回退） |
 | `memory_read` | 笔记全文（[正文开始/结束] 块内逐字原文）+ 相关笔记（工具附加信息，wiki-links + 语义近邻） |
 | `memory_write` | 新建笔记；**未注册主题路径直接拒绝**（先 `topic_register` 后写入，force 不豁免）+ 近似重复标题拒绝（force 需两级确认） |
 | `memory_edit` | 就地更新，文本锚点必须唯一；未命中时附可自纠诊断（点破锚点混入附加信息/空白差异还原文/最接近行） |
 | `memory_edit_section` | 按小节整段替换 |
 | `memory_move` | 移动文件，索引跟随；目标路径同样受主题注册制约束 |
 | `memory_delete` | 删除笔记（**仅用户明确要求时**，git 历史可恢复） |
-| `memory_audit` | 自愈式一致性审计（外部改动/删除自愈、D1–D5 一致性问题、守卫统计、审计快照路径） |
+| `memory_audit` | 自愈式一致性审计（外部改动/删除自愈、D1–D5 一致性问题、缺向量笔记点名+自愈重试、守卫统计、审计快照路径） |
 | `memory_list` | 目录树 / 最近变更 |
 | `memory_context` | **会话开始先调**：返回主题注册表 + 各主题卡摘要头（冷启动回顾） |
 | `topic_list` | 列出长期记忆主题（活跃/已归档分组） |

@@ -242,3 +242,45 @@ def test_disposition_refusal_leaves_no_orphan_row(store: Store):
     with pytest.raises(StoreError):
         store.record_audit_action("", "D4:孤儿.md", "resolved", "x")
     assert store.db.list_audit_actions() == []
+
+
+def test_audit_reports_and_heals_missing_vectors(store: Store):
+    """端点故障期写入的笔记 vector_ok=0：审计点名 + 自愈重试（设计 #3）。
+
+    时序必须是"先断端点、后写入"——健康期写入的文本向量已入缓存，
+    自愈重试会命中缓存直接成功，模拟不出真实故障。"""
+
+    class _BrokenEmb:
+        def embed_one(self, text):
+            raise ConnectionError("endpoint down")
+
+        def embed(self, texts):
+            raise ConnectionError("endpoint down")
+
+    orig = store.emb
+    store.emb = _BrokenEmb()
+    try:
+        # 端点故障期间写入：向量索引失败且未入缓存
+        store.write("notes/故障期笔记", "# 故障期笔记\n- [配置] 端口 9721\n")
+        assert store.db.get_note("notes/故障期笔记.md") is not None  # 文件与 FTS 正常
+        r = store.audit()
+        assert r["missing_vectors"] == ["notes/故障期笔记.md"]
+        content = (store.root / r["audit_file"]).read_text(encoding="utf-8")
+        assert "## 缺向量笔记（已重试自愈）" in content.splitlines()
+        assert "- `notes/故障期笔记.md`" in content.splitlines()
+    finally:
+        store.emb = orig
+
+    # 端点恢复后，下一次审计自愈成功、不再点名
+    r2 = store.audit()
+    assert r2["missing_vectors"] == []
+    assert store.db.get_note("notes/故障期笔记.md") is not None
+
+
+def test_audit_prunes_blank_disposition_rows(store: Store):
+    """全空处置行（body 解析失败事故产物）由审计识别删除。"""
+    store.db.record_audit_action("", "", "", "", "", "")
+    assert len(store.db.list_audit_actions()) == 1
+    r = store.audit()
+    assert r["pruned_blank_actions"] == 1
+    assert store.db.list_audit_actions() == []

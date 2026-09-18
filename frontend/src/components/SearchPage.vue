@@ -11,6 +11,7 @@
         <n-select v-model:value="kind" :options="kindOptions" style="width: 110px" />
         <n-button type="primary" @click="doSearch" :loading="searching">搜索</n-button>
       </n-input-group>
+      <n-alert v-if="notice" type="warning" size="small" style="margin-bottom: 8px">{{ notice }}</n-alert>
       <div v-if="results.length" class="search-results">
         <n-card v-for="(r, i) in results" :key="i" :title="r.title" size="small"
           style="margin-bottom: 8px; cursor: pointer" @click="openNote(r.path)">
@@ -45,6 +46,7 @@ const kind = ref('hybrid')
 const searching = ref(false)
 const searched = ref(false)
 const results = ref([])
+const notice = ref('')
 
 const kindOptions = [
   { label: '混合', value: 'hybrid' },
@@ -63,6 +65,7 @@ async function doSearch() {
   try {
     const data = await api(`/api/${props.user}/search${params({ q: query.value, kind: kind.value, limit: 20 })}`)
     results.value = data.results
+    notice.value = data.notice || ''
   } catch (e) {
     message.error('搜索失败: ' + e.message)
   } finally {

@@ -28,6 +28,7 @@
             <AuditSection title="新增文件（已入索引）" :items="auditData.added" />
             <AuditSection title="外部修改（已自动重建索引）" :items="auditData.resynced" />
             <AuditSection title="外部删除（已清理索引）" :items="auditData.missing" />
+            <AuditSection title="缺向量笔记（已重试自愈）" :items="auditData.missing_vectors" />
 
             <n-card v-if="openD1.length" size="small" title="标题重复（D1）">
               <n-list>

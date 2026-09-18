@@ -26,6 +26,8 @@ memory_search(query: str, limit: int = 10, kind: str = "hybrid") -> str
 
 - `kind="fts"` / `"vector"` 强制单通道（评测用）；默认 hybrid。
 - **查询措辞建议**：给 FTS 通道喂关键词（"端口 9721"、"restic 备份"），自然语句交给向量通道。混合查询（"yacmemo 端口"）两通道同时工作。
+- **短查询回退**：短于 3 字的查询 trigram 无法命中，自动走 LIKE 子串扫描兜底；LIKE 也未命中时输出提示"请换更长的关键词"。
+- **降级提示**：向量通道故障时输出 `⚠ 向量通道不可用（原因），本次结果仅 FTS`——"未找到相关笔记"不再被当成权威结论（2026-09-18 端点故障实测的静默降级问题）。
 
 返回格式：
 
@@ -147,7 +149,8 @@ memory_audit() -> str
 5. D3 悬空 `[[链接]]`；
 6. D5 悬空主题卡（注册表 `卡:` 指向不存在的 abstract，restructure/手工编辑 TOPICS.md 的遗留）；
 7. D4 游离文件（免注册区之外、不属于任何注册主题的散文件——agent 据此提示用户归位）；
-8. 守卫统计（refused / forced 次数）。
+8. **缺向量笔记点名 + 自愈重试**：embedding 端点故障期间写入的笔记（vector_ok=0）审计时重试 embedding，成功即自愈、仍失败保持点名；
+9. 守卫统计（refused / forced / uncovered 次数）；全空处置行自动清理。
 
 修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行与当次审计快照路径 `journal/audit/<日期>.md`——每日一份、同日复审追加；过期快照由 curator 按 `audit_retention_days` 清理）。
 

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS notes (
     path         TEXT PRIMARY KEY,
     title        TEXT NOT NULL,
     content_hash TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
+    updated_at   TEXT NOT NULL,
+    vector_ok    INTEGER NOT NULL DEFAULT 0
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
     title, body, path UNINDEXED, tokenize='trigram'
@@ -97,6 +98,12 @@ class IndexDB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
+        # 存量库迁移：vector_ok 列（2026-09-18 增补，缺向量审计点名/自愈用）
+        cols = {r["name"] for r in self.conn.execute(
+            "PRAGMA table_info(notes)").fetchall()}
+        if "vector_ok" not in cols:
+            self.conn.execute(
+                "ALTER TABLE notes ADD COLUMN vector_ok INTEGER NOT NULL DEFAULT 0")
         self.conn.commit()
         for name in _LOCKED_METHODS:
             fn = getattr(self, name)
@@ -137,6 +144,33 @@ class IndexDB:
 
     def list_notes(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM notes ORDER BY path").fetchall()
+        return [dict(r) for r in rows]
+
+    def set_vector_ok(self, path: str, ok: bool):
+        self.conn.execute("UPDATE notes SET vector_ok=? WHERE path=?",
+                          (1 if ok else 0, path))
+        self.conn.commit()
+
+    def notes_missing_vectors(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT path, title FROM notes WHERE vector_ok=0 ORDER BY path"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def like_search(self, query: str, limit: int) -> list[dict]:
+        """Substring fallback for queries shorter than a trigram（<3 字）。
+
+        FTS5 trigram 分词下短查询永不命中；小库直接对 fts 表 title/body 做
+        LIKE 线性扫描（fts5 支持对列做 LIKE，走全表扫描），按路径序保稳定。"""
+        q = query.strip()
+        if not q:
+            return []
+        like = f"%{q}%"
+        rows = self.conn.execute(
+            "SELECT path, title FROM fts WHERE title LIKE ? OR body LIKE ? "
+            "ORDER BY path LIMIT ?",
+            (like, like, limit),
+        ).fetchall()
         return [dict(r) for r in rows]
 
     def move_note(self, old_path: str, new_path: str):
@@ -298,6 +332,14 @@ class IndexDB:
         rows = self.conn.execute(
             "SELECT * FROM audit_actions ORDER BY acted_at DESC").fetchall()
         return [dict(r) for r in rows]
+
+    def prune_blank_audit_actions(self) -> int:
+        """清理全空处置行（id/kind/action 全空——body 解析失败等事故产物，
+        处置表没有删除接口，由审计自清。真实 id 形如 D1:/D2:/D4:/P:）。"""
+        cur = self.conn.execute(
+            "DELETE FROM audit_actions WHERE id='' AND kind='' AND action=''")
+        self.conn.commit()
+        return cur.rowcount
 
     # ---- vector cache ----
 
