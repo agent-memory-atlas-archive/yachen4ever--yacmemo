@@ -368,7 +368,14 @@ async function viewRun(r) {
     const note = await api(`/api/${props.user}/note${params({ path: r.path })}`)
     snapshotMarkdown.value = note.content
   } catch (e) {
-    message.error('加载快照失败: ' + e.message)
+    if (String(e.message).includes('未找到笔记')) {
+      // 快照可能已被手动删除或 curator 过期清理：降级展示，不弹错误
+      // （审计结果本身仍有效，处置历史以 audit_actions 表为权威）
+      snapshotMarkdown.value = ''
+      message.info('快照文件不存在（可能已被删除或过期清理）')
+    } else {
+      message.error('加载快照失败: ' + e.message)
+    }
   }
 }
 async function loadProposals() {

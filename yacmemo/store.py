@@ -434,6 +434,11 @@ class Store:
         self.db.remove_collisions_involving(rel)
         if self.vectors:
             self.vectors.delete_by_path(rel)
+        # 删的是最近一次审计的快照 → 联动清缓存，否则审计页加载时
+        # 会对着已删除的文件报"未找到笔记"（curator 过期清理同理）
+        if (self.last_audit
+                and self.last_audit.get("audit", {}).get("audit_file") == rel):
+            self.last_audit = None
         self.snapshots.commit(f"delete: {rel}")
         return {"path": rel, "title": title, "deleted": True}
 

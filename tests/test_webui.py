@@ -308,3 +308,24 @@ def test_webui_create_outside_topics_refused(http_server):
     r = httpx.post(f"{base}/notes", json={"title": "test/散记", "content": "x"})
     body = r.json()
     assert body["ok"] is False and "不属于任何注册主题" in body["error"]
+
+
+def test_deleting_last_snapshot_clears_audit_cache(http_server):
+    """手动删除/过期清理最近一次审计快照后，audit/last 缓存必须联动清除，
+    否则审计页对着已删除的文件报"未找到笔记"（2026-09-18 用户实测）。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    httpx.post(f"{base}/notes", json={
+        "title": "notes/快照删除测试", "content": "# 快照删除测试\n内容\n"})
+    r = httpx.post(f"{base}/audit", timeout=5).json()
+    af = r["audit"]["audit_file"]
+    assert af.startswith("journal/audit/")
+
+    # 缓存存在
+    r = httpx.get(f"{base}/audit/last", timeout=5).json()
+    assert r["audit"] is not None
+
+    # 删除快照 → 缓存联动清除
+    r = httpx.delete(f"{base}/note", params={"path": af}, timeout=5).json()
+    assert r["ok"] is True
+    r = httpx.get(f"{base}/audit/last", timeout=5).json()
+    assert r["audit"] is None
