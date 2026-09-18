@@ -264,7 +264,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             d1 = r["title_duplicates"]
             lines.append(f"== 标题重复（{len(d1)}）==")
             for c in d1[:10]:
-                lines.append(f"- [[{c['a_title']}]] ↔ [[{c['b_title']}]] (score {c['score']})")
+                lines.append(f"- `{c['a_path']}` ↔ `{c['b_path']}` (score {c['score']})")
             col = r["collisions"]
             lines.append(f"== 语义撞车（{len(col)}）==")
             for c in col[:10]:

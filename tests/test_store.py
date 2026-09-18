@@ -276,3 +276,12 @@ def test_move_to_uncovered_target_refused(store: Store):
         store.move("notes/搬测试", "test/散记.md")
     r = store.move("notes/搬测试", "archive/搬测试.md")
     assert r["new_path"] == "archive/搬测试.md"
+
+
+def test_audit_records_last_result_for_webui(store: Store):
+    """store.audit() 把结果挂到 last_audit——MCP 跑完审计 WebUI 立即可见。"""
+    store.write("notes/审计缓存测试", "# 审计缓存测试\n内容\n")
+    r = store.audit()
+    assert store.last_audit is not None
+    assert store.last_audit["audit"]["audit_file"] == r["audit_file"]
+    assert store.last_audit["ts"] > 0

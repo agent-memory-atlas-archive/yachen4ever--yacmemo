@@ -210,3 +210,35 @@ def test_audit_snapshot_sections_are_intact_lines(store: Store):
     assert "- `D4:孤儿笔记.md` — `孤儿笔记.md`" in content.splitlines()
     # 爆炸特征：存在单字符行（合法 markdown 快照没有）
     assert not [ln for ln in content.splitlines() if len(ln) == 1 and ln != " "]
+
+
+def test_audit_does_not_flag_its_own_snapshot_links(store: Store):
+    """审计快照会引用悬空链接原文，源笔记删除后快照不得被 D3 自指点名
+    （机器产物区不参与 D3，与 D1/D2 同口径——2026-09-18 实测自指循环）。"""
+    store.write("notes/链接源", "# 链接源\n引用 [[不存在目标]]\n")
+    r1 = store.audit()
+    assert len(r1["dangling_links"]) == 1
+    (store.root / "notes/链接源.md").unlink()
+    r2 = store.audit()
+    assert r2["dangling_links"] == []
+
+
+def test_audit_d1_lines_carry_paths(store: Store):
+    """同题不同目录的撞车只有路径能区分——D1 快照行必须带路径
+    （2026-09-18 实测：六行 [[同名标题]] 完全一样，无法定位文件）。"""
+    store.write("notes/同名笔记", "# 同名笔记\nA\n")
+    store.write("notes/其他/同名笔记", "# 同名笔记\nB\n", force=True)
+    r = store.audit()
+    assert r["title_duplicates"], "expected D1 pairs"
+    content = (store.root / r["audit_file"]).read_text(encoding="utf-8")
+    d1_lines = [ln for ln in content.splitlines() if ln.startswith("- `D1:")]
+    assert d1_lines
+    assert all("`notes/同名笔记.md`" in ln or "`notes/其他/同名笔记.md`" in ln
+               for ln in d1_lines)
+
+
+def test_disposition_refusal_leaves_no_orphan_row(store: Store):
+    """处置先写快照后落库：快照写失败不得留下无轨迹的孤儿处置行。"""
+    with pytest.raises(StoreError):
+        store.record_audit_action("", "D4:孤儿.md", "resolved", "x")
+    assert store.db.list_audit_actions() == []

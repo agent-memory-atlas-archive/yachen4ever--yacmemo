@@ -33,7 +33,7 @@
               <n-list>
                 <n-list-item v-for="(c, i) in openD1" :key="i">
                   <n-space justify="space-between" align="center">
-                    <n-text>[[{{ c.a_title }}]] ↔ [[{{ c.b_title }}]] (score {{ c.score }})</n-text>
+                    <n-text>{{ c.a_path }} ↔ {{ c.b_path }} (score {{ c.score }})</n-text>
                     <n-space>
                       <n-button size="tiny" type="success" @click="dispose(d1Id(c), 'resolved', '合并标题重复')">已处理</n-button>
                       <n-button size="tiny" @click="dispose(d1Id(c), 'dismissed', '标题重复误报')">忽略</n-button>

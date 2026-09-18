@@ -20,6 +20,7 @@ import os
 import posixpath
 import re
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -113,6 +114,8 @@ class Store:
                                       enabled=config.memory.git_snapshots,
                                       user_name=git_user, user_email=git_email)
         self._lock = threading.RLock()
+        # 最近一次审计结果（MCP memory_audit 与 WebUI 审计页共享，见 audit()）
+        self.last_audit: dict | None = None
         for name in self._MUTATING:
             fn = getattr(self, name)
             setattr(self, name,
@@ -836,6 +839,11 @@ class Store:
               if not (c["a_path"].startswith(self._machine_zones)
                       or c["b_path"].startswith(self._machine_zones))]
 
+        # 机器产物区同样不参与 D3：审计快照会引用上一轮悬空链接的原文，
+        # 源笔记删除后快照自己被点名——审计追自己的尾巴（2026-09-18 实测）
+        dangling = [d for d in dangling
+                    if not d["path"].startswith(self._machine_zones)]
+
         # 人类已处置过的问题不再重放（D2 以 collisions.status 天然只列 open）
         disposed = {a["id"] for a in self.db.list_audit_actions()}
         d1 = [c for c in d1 if _d1_id(c) not in disposed]
@@ -859,17 +867,22 @@ class Store:
             resynced, missing, added, d1, collisions, dangling, stray,
             dangling_cards)
 
-        return {"title_duplicates": d1,
-                "collisions": collisions,
-                "dangling_links": dangling,
-                "dangling_cards": dangling_cards,
-                "resynced": resynced,
-                "missing": missing,
-                "added": added,
-                "stray": stray,
-                "git": self.snapshots.status_line(),
-                "guard_stats": self.db.guard_stats(),
-                "audit_file": audit_file}
+        res = {"title_duplicates": d1,
+               "collisions": collisions,
+               "dangling_links": dangling,
+               "dangling_cards": dangling_cards,
+               "resynced": resynced,
+               "missing": missing,
+               "added": added,
+               "stray": stray,
+               "git": self.snapshots.status_line(),
+               "guard_stats": self.db.guard_stats(),
+               "audit_file": audit_file}
+        # 最近一次审计挂在 Store 上：MCP memory_audit 与 WebUI 审计页
+        # 共享同一缓存，agent 跑完审计页面立即可见（2026-09-18 之前两入口
+        # 各自为政，WebUI 看不到 MCP 刚跑的结果）
+        self.last_audit = {"audit": res, "ts": int(time.time())}
+        return res
 
     # ---- audit snapshots & dispositions ----
 
@@ -941,7 +954,7 @@ class Store:
             lines += _sec("外部删除", missing)
         if d1:
             lines += _sec("标题重复（D1）", [
-                f"`{_d1_id(c)}` — `{c['a_title']}` ↔ `{c['b_title']}`"
+                f"`{_d1_id(c)}` — `{c['a_path']}` ↔ `{c['b_path']}`"
                 f"（score {c['score']}）" for c in d1])
         if collisions:
             lines += _sec("语义撞车（D2）", [
@@ -966,14 +979,6 @@ class Store:
         - 处置行追加进当次快照文件（markdown 轨迹，git 自动快照）。
         """
         kind = issue_id.split(":", 1)[0]
-        if kind == "D2":
-            cid = issue_id.split(":", 1)[1]
-            rows = self.db.list_collisions(status=None)
-            row = next((c for c in rows if c["id"] == cid), None)
-            if row is not None:
-                self.db.resolve_collision(
-                    cid, "resolved" if action == "resolved" else "dismissed")
-        self.db.record_audit_action(issue_id, kind, "", "", action, note)
 
         rel = audit_file.replace("\\", "/").strip("/")
         content = ""
@@ -993,7 +998,17 @@ class Store:
             content = f"{head}{marker}{tail.rstrip()}\n{line}\n"
         else:
             content = content.rstrip() + f"\n\n{marker}\n{line}\n"
+        # 快照先行：轨迹写盘成功后才同步 D2 状态与处置表，避免快照写失败
+        # 时留下无轨迹的孤儿处置行（处置表没有删除接口，2026-09-18 实测）
         self.save(rel, content)
+        if kind == "D2":
+            cid = issue_id.split(":", 1)[1]
+            rows = self.db.list_collisions(status=None)
+            row = next((c for c in rows if c["id"] == cid), None)
+            if row is not None:
+                self.db.resolve_collision(
+                    cid, "resolved" if action == "resolved" else "dismissed")
+        self.db.record_audit_action(issue_id, kind, "", "", action, note)
         return rel
 
     def record_proposal_action(self, file: str, index: int, action: str,
