@@ -28,7 +28,8 @@
 **force 两级确认**：`force=true` 是越过近重名守卫的唯一通道，但 24 小时滚动窗口内 forced 事件达到 `force_confirm_threshold`（默认 3）后，裸 force 拒绝，需 `force=true, force_confirm=true` 双参放行（显式人工确认语义）。拒绝信息列出候选已有笔记。全过程落在 `guard_events`：
 
 - `refused` 次数：守卫拦截频率（调 `title_similarity_threshold` 的依据）；
-- `forced` 次数：**违约率的直接度量**（P4 核心指标）。
+- `forced` 次数：**违约率的直接度量**（P4 核心指标）；
+- `uncovered` 次数：主题注册制硬拦截的触发计数（2026-09-18 增补，见 01-architecture §6.1）。
 
 ### 第 2 层：确定性检测（确定，零 LLM）
 

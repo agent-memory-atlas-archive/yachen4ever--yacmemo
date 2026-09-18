@@ -217,14 +217,14 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 
 | 工具 | 签名 | 关键行为 |
 |---|---|---|
-| `memory_search` | `query, limit=10, kind="hybrid"\|"fts"\|"vector"` | 双路 RRF 融合 + 撞车标注内联 |
+| `memory_search` | `query, limit=10, kind="hybrid"\|"fts"\|"vector"` | 双路 RRF 融合 + 撞车标注内联；<3 字查询走 LIKE 回退，向量通道故障附降级提示 |
 | `memory_read` | `path_or_title` | 正文 + 1-hop 相关笔记 |
 | `memory_write` | `title, content, force=false, force_confirm=false` | **主题硬拦截**（未注册主题覆盖的路径拒写，force 不豁免，见 6.1）+ **近重名拦截**（含两级 force 确认）；写入即同步索引 |
 | `memory_edit` | `path, old_string, new_string` | **锚点唯一性强制**：找不到/命中多处 → 拒绝并列出候选位置 |
 | `memory_edit_section` | `path, heading, new_content` | 按 `##` 标题段替换 |
 | `memory_move` | `path, new_path` | 移动 + 全库索引随路径更新（[[链接]] 按标题解析，移动不改标题故无需改写链接）；**目标路径同样受主题硬拦截**（移入免注册区放行） |
-| `memory_delete` | `path` | **仅用户明确要求时调用**；删文件 + 全部索引行；git 快照保留历史 |
-| `memory_audit` | — | 自愈（外部改动/删除 hash 级重算与清理）+ D1 全量扫描 + collisions 报告 + D3/D4 + 守卫统计 + git 快照状态行 |
+| `memory_delete` | `path` | **仅用户明确要求时调用**；删文件 + 全部索引行；git 快照保留历史；删的是最近审计快照时联动清 last_audit 缓存 |
+| `memory_audit` | — | 自愈（外部改动/删除 hash 级重算与清理、缺向量笔记重试 embedding）+ D1/D3/D4/D5 扫描 + collisions 报告 + 守卫统计 + 空白处置行自清 + git 快照状态行 |
 | `memory_list` | `path="", sort="name"\|"mtime"` | 目录树 / 最近变更 |
 | `memory_context` | — | **会话开始先调**：PROFILE 前置 + 注册表 + 活跃主题 abstract 摘要头（冷启动回顾） |
 | `topic_list` | — | 列出活跃/已归档主题（分组） |
@@ -277,6 +277,8 @@ memory_write(title, content):
 ### 6.2 索引与快照同步性
 
 所有写工具（write/edit/edit_section/move/delete）在返回成功前同步完成：文件写入 → hash → embedding（仅变更部分）→ FTS/向量/冲突表更新 → git 快照。单次调用总开销 < 300ms（典型笔记）。无懒索引、无后台补偿。
+
+embedding 端点故障时写入**不失败**：文件与 FTS 正常落库，向量缺失以 `notes.vector_ok=0` 标记（2026-09-18 增补），由 `memory_audit` 点名并重试 embedding 自愈——端点恢复后下次审计自动收敛。
 
 ---
 

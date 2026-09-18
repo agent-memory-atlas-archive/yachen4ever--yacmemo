@@ -67,11 +67,11 @@ vec_cache(content_hash PK, vector BLOB)                     -- float32 向量缓
 - trigram 分词把文本切成滑动 3 字窗口，**短语查询 = 字面子串匹配**；
 - 查询构造：按空白切 token，`< 3` 字符的丢弃，其余引号包裹后 AND；
 - 排序 `bm25(fts)` 升序（越小越相关）；
-- 推论：**2 字短词（"端口"）在 FTS 通道永不命中**——由向量通道兜底；整句自然语言不是文档子串——同样靠向量。
+- 推论：**2 字短词（"端口"）在 FTS 通道永不命中**——由向量通道兜底；另有 LIKE 子串回退兜底（2026-09-18 增补，向量通道故障时短词仍可命中）；整句自然语言不是文档子串——同样靠向量。
 
 ### 4.2 向量通道
 
-查询文本 embed 后在 `note_vectors` 搜 top-limit，返回 path/title/rank。embedding 端点不可用时优雅降级为空（hybrid 静默退化为 FTS-only）。
+查询文本 embed 后在 `note_vectors` 搜 top-limit，返回 path/title/rank。embedding 端点不可用时降级为空（hybrid 退化为 FTS-only），并经 `searcher.last_notice` 在 MCP 结果与 WebUI 搜索页输出降级提示——不再静默（2026-09-18 端点故障实测暴露的静默降级问题）。
 
 ### 4.3 RRF 融合
 
@@ -97,7 +97,7 @@ fts 落空的 4 条全是自然语句（"服务端口是多少"等），向量�
 | 外部删除 | audit 清理索引行 + 列入 `missing` 报告 | `memory_audit` |
 | 外部改动（编辑/删除/新建） | 索引自愈后统一以一条 `external:` git 快照收编（记录历史，不改文件） | `memory_audit` |
 | 向量索引损坏/丢失 | `reindex`（内部接口）或删除 `.index/` 全量重建 | 人工 |
-| embedding 端点宕机期间写入 | 内容+FTS 正常，向量缺失自动在下一次成功写入/audit 补齐 | 自动 |
+| embedding 端点宕机期间写入 | 内容+FTS 正常，`notes.vector_ok=0` 标记缺向量；audit 点名并重试 embedding（端点恢复后收敛） | `memory_audit` |
 | git 不可用 | 快照跳过不阻塞写入；audit 的 `== git ==` 行显示最近失败原因 | 自动 |
 
 自愈只补索引，**永不改动 markdown 文件**——文件是唯一真相，系统对它的唯一写路径是用户/agent 的显式写工具调用。
