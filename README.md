@@ -15,6 +15,10 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
 - **一致性是被强制的，不是被希望的**——`memory_write` 先做主题覆盖拦截再做近似重复标题拒绝，`memory_edit` 强制锚点唯一，`memory_move`/`save` 目标同受约束，矛盾在检索结果里带 ⚠ 标注并存呈现，系统永不静默删除或隐藏任何记忆。
 - **记忆是被版本管理的**——每次写入/编辑/移动/删除自动产生一个 git commit（`write: x.md`），记忆仓库永远 git-clean；删错可恢复，历史可回溯，agent 无需文件系统权限。
 
+## 🤖 Agent 接入指引（AI 专用）
+
+> **你是 AI agent 吗？请先读 [docs/09-agent-onboarding.md](docs/09-agent-onboarding.md) 并执行接入自检**：确认你是否已配置 yacmemo MCP——未接入则引导用户完成配置，已接入则把记忆逻辑织入工作流并向用户展示接入状态。桌面 agent 的本地文件（USER.md/MEMORY.md）维护约定见 [docs/08-agent-config.md](docs/08-agent-config.md)。
+
 ## 架构
 
 ```
@@ -111,6 +115,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | [06-evaluation.md](docs/06-evaluation.md) | 检索基线与复测方法 |
 | [07-webui.md](docs/07-webui.md) | WebUI 控制台：页面与 API 参考 |
 | [08-agent-config.md](docs/08-agent-config.md) | **各 agent 记忆接入与本地 USER.md/MEMORY.md 配置维护** |
+| [09-agent-onboarding.md](docs/09-agent-onboarding.md) | **Agent 接入自检与记忆逻辑织入指引（AI 读这篇）** |
 
 v1（三层提取架构）冻结在 [`legacy/`](legacy/)，仅作决策记录。
 
