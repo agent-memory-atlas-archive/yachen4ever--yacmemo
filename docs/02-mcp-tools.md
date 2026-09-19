@@ -118,6 +118,8 @@ memory_edit(path: str, old_string: str, new_string: str) -> str
 
 **这是更新事实的正确方式**——事实变更永远就地编辑，不新建笔记。
 
+**合并清除计数**（2026-09-19 增补）：编辑消解语义撞车后（重索引重算不再命中旧冲突对），成功返回追加"（自动清除过期冲突对 N 对）"——看到它即说明这次编辑合并掉了 D2 重复；计数同样出现在审计概览/快照与 `memory_audit` 输出（见 §7）。
+
 ## 5. memory_edit_section
 
 ```
@@ -156,7 +158,8 @@ memory_audit() -> str
 6. D5 悬空主题卡（注册表 `卡:` 指向不存在的 abstract，restructure/手工编辑 TOPICS.md 的遗留）；
 7. D4 游离文件（免注册区之外、不属于任何注册主题的散文件——agent 据此提示用户归位）；
 8. **缺向量笔记点名 + 自愈重试**：embedding 端点故障期间写入的笔记（vector_ok=0）审计时重试 embedding，成功即自愈、仍失败保持点名；
-9. 守卫统计（refused / forced / uncovered 次数）；全空处置行自动清理。
+9. 守卫统计（refused / forced / uncovered 次数）；全空处置行自动清理；
+10. **自动清除过期冲突对统计**（2026-09-19 增补）：笔记删除或重算后不再命中的 D2 旧对，概览行 + `== 自动清除过期冲突对 ==` 行 + 审计快照留痕。
 
 修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行与当次审计快照路径 `journal/audit/<日期>.md`——每日一份、同日复审追加；过期快照由 curator 按 `audit_retention_days` 清理）。
 

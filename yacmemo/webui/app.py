@@ -176,17 +176,37 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err(str(e))
         return _ok({"path": r["path"], "title": r["title"], "content": r["content"]})
 
+    def _log_call(c: dict, request: Request, tool: str, summary: str,
+                  t0: float, ok: bool = True, error: str = "",
+                  before_hash: str = ""):
+        """WebUI 控制台的变更留痕（2026-09-19 增补：此前控制台保存/删除
+        不产生 call_log 行，使用记录页只见 MCP 不见控制台——atlas 评审
+        点名的 "a gap worth closing"）。"""
+        u = c.get("usage")
+        if not u:
+            return
+        ip = request.client.host if request.client else ""
+        u.log_call(request.path_params["user"], tool, summary[:200],
+                   int((time.monotonic() - t0) * 1000), ok=ok,
+                   error=error[:200], client="webui", ip=ip,
+                   before_hash=before_hash)
+
     async def note_save(request: Request):
         try:
             c = _ctx(request.path_params["user"])
         except KeyError:
             return _err("未知用户", 404)
         body = await _body(request)
+        t0 = time.monotonic()
         try:
             r = await run_in_threadpool(c["store"].save,
                                         body.get("path", ""), body.get("content", ""))
         except Exception as e:
+            _log_call(c, request, "webui:note_save", body.get("path", ""),
+                      t0, ok=False, error=str(e))
             return _err(str(e))
+        _log_call(c, request, "webui:note_save", body.get("path", ""), t0,
+                  before_hash=r.get("before_hash", ""))
         return _ok(r)
 
     async def note_create(request: Request):
@@ -195,6 +215,7 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         except KeyError:
             return _err("未知用户", 404)
         body = await _body(request)
+        t0 = time.monotonic()
         try:
             r = await run_in_threadpool(
                 c["store"].write, body.get("title", ""), body.get("content", ""),
@@ -202,7 +223,10 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                 force_confirm=bool(body.get("force_confirm", True)),
             )
         except Exception as e:
+            _log_call(c, request, "webui:note_create", body.get("title", ""),
+                      t0, ok=False, error=str(e))
             return _err(str(e))
+        _log_call(c, request, "webui:note_create", body.get("title", ""), t0)
         return _ok(r)
 
     async def note_delete(request: Request):
@@ -211,10 +235,15 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         except KeyError:
             return _err("未知用户", 404)
         path = request.query_params.get("path", "")
+        t0 = time.monotonic()
         try:
             r = await run_in_threadpool(c["store"].delete_note, path)
         except Exception as e:
+            _log_call(c, request, "webui:note_delete", path,
+                      t0, ok=False, error=str(e))
             return _err(str(e))
+        _log_call(c, request, "webui:note_delete", path, t0,
+                  before_hash=r.get("before_hash", ""))
         return _ok(r)
 
     async def search(request: Request):
@@ -433,12 +462,16 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         except KeyError:
             return _err("未知用户", 404)
         body = await _body(request)
+        t0 = time.monotonic()
         try:
             r = await run_in_threadpool(c["store"].update_preference,
                                         body.get("section", ""),
                                         body.get("content", ""))
         except Exception as e:
+            _log_call(c, request, "webui:profile_save",
+                      body.get("section", ""), t0, ok=False, error=str(e))
             return _err(str(e))
+        _log_call(c, request, "webui:profile_save", body.get("section", ""), t0)
         return _ok(r)
 
     # ---- 配置管理（config.toml 在线编辑：用户 / embedding / curator）----

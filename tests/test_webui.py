@@ -128,7 +128,9 @@ def test_usage_logged_for_mcp_calls(http_server, tmp_path):
             await s.initialize()
             await s.call_tool("memory_write", {
                 "title": "notes/调用日志测试", "content": "# 调用日志测试\n内容\n"})
-            await s.call_tool("memory_search", {"query": "内容"})
+            await s.call_tool("memory_edit", {
+                "path": "调用日志测试", "old_string": "内容", "new_string": "内容改"})
+            await s.call_tool("memory_search", {"query": "内容改"})
 
     asyncio.run(call())
 
@@ -143,7 +145,42 @@ def test_usage_logged_for_mcp_calls(http_server, tmp_path):
     write_row = next(r for r in rows if r["tool"] == "memory_write")
     assert "调用日志测试" in write_row["summary"]
     assert write_row["ok"] == 1
+    # edit 的 before_hash 落库（变更前内容 hash，atlas 评审的 before-image 缺口）
+    edit_row = next(r for r in rows if r["tool"] == "memory_edit")
+    assert edit_row["before_hash"]
     conn.close()
+
+
+def test_usage_logged_for_webui_mutations(http_server, tmp_path):
+    """WebUI 控制台的保存/新建/删除/画像编辑同样落 call_log（client=webui），
+    变更类操作带 before_hash——使用记录页不再只见 MCP 不见控制台。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    r = httpx.post(f"{base}/notes", json={
+        "title": "notes/留痕测试", "content": "# 留痕测试\n"})
+    assert r.json()["ok"] is True
+    r = httpx.put(f"{base}/note", json={
+        "path": "notes/留痕测试", "content": "# 留痕测试\n改\n"})
+    assert r.json()["ok"] is True
+    r = httpx.delete(f"{base}/note", params={"path": "留痕测试"})
+    assert r.json()["ok"] is True
+    r = httpx.put(f"{base}/profile", json={
+        "section": "留痕小节", "content": "- [测试] 值"})
+    assert r.json()["ok"] is True
+
+    usage_db = tmp_path / "server-data" / "usage.db"
+    conn = sqlite3.connect(usage_db)
+    conn.row_factory = sqlite3.Row
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM call_log WHERE tool LIKE 'webui:%' AND user_id='alice'")]
+    conn.close()
+    tools = {r["tool"] for r in rows}
+    assert {"webui:note_create", "webui:note_save", "webui:note_delete",
+            "webui:profile_save"} <= tools
+    save_row = next(r for r in rows if r["tool"] == "webui:note_save")
+    assert save_row["client"] == "webui" and save_row["ok"] == 1
+    assert save_row["before_hash"]  # 覆盖已有文件：有变更前内容 hash
+    del_row = next(r for r in rows if r["tool"] == "webui:note_delete")
+    assert del_row["before_hash"]
 
 
 def test_webui_overview(http_server):

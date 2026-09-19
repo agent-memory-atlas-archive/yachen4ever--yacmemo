@@ -16,6 +16,7 @@ meaningful anywhere. Exit code is always 0 — this is a measurement, not a gate
 from __future__ import annotations
 
 import argparse
+import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -114,7 +115,7 @@ QUERIES: list[tuple[str, str]] = [
 ]
 
 
-def build(root: Path, emb: EmbeddingClient | None):
+def build(root: Path, emb: EmbeddingClient | None, seed: bool = True):
     config = Config(
         memory=MemoryConfig(root=str(root)),
         embedding=EmbeddingConfig(),
@@ -124,8 +125,11 @@ def build(root: Path, emb: EmbeddingClient | None):
     db = IndexDB(config.sqlite_path)
     vectors = VectorStore(config.lancedb_path, 1024) if emb else None
     store = Store(config, db, emb, vectors)
-    for title, content in CORPUS.items():
-        store.write(title, content)
+    # 0.1.1 起写入受主题注册制约束：语料登记为评测主题，写入其目录
+    store.topic_register("检索评测语料", description="搜索基线固定语料（eval_search）")
+    if seed:
+        for title, content in CORPUS.items():
+            store.write(f"topics/检索评测语料/{title}", content)
     searcher = Searcher(config, db, emb, vectors)
     return store, searcher
 
@@ -147,6 +151,59 @@ def probe_embedding(args) -> EmbeddingClient | None:
 
 def recall_at_k(results: list[dict], expected_title: str, k: int = 3) -> bool:
     return any(r["title"] == expected_title for r in results[:k])
+
+
+def negative_cases(store: Store, searcher: Searcher,
+                   emb: EmbeddingClient | None) -> list[tuple[str, bool]]:
+    """负向检索断言（docs/06 §七，2026-09-19 增补；atlas rubric #7）：
+    召回基线只测"该回来的要回来"，这里测"不该回来的不得回来"。"""
+    cases: list[tuple[str, bool]] = []
+    topic_dir = "topics/检索评测语料"
+
+    # N1 已删除笔记不得被任何通道召回
+    store.write(f"{topic_dir}/临时口令记录",
+                "# 临时口令记录\n\n- [配置] 临时口令 hunter2\n")
+    store.delete_note("临时口令记录")
+    kinds = ["fts", "hybrid"] + (["vector"] if emb else [])
+    for kind in kinds:
+        hits = [r["title"] for r in
+                searcher.search("hunter2 临时口令", limit=10, kind=kind)]
+        cases.append((f"已删除笔记不得被召回 [{kind}]",
+                      "临时口令记录" not in hits))
+
+    # N2 已人工处置（dismissed）的 D2 冲突对不得再出 ⚠ 警告
+    # （D2 依赖向量通道，FTS-only 运行跳过）
+    if emb:
+        a, b = "Kong部署记录", "API网关决策"
+        store.write(f"{topic_dir}/{a}", f"# {a}\n\n- [决策] 网关用 Kong\n")
+        store.write(f"{topic_dir}/{b}", f"# {b}\n\n- [决策] 网关用 Kong\n")
+        q = "网关 Kong 决策"
+        pair_paths = {f"{topic_dir}/{a}.md", f"{topic_dir}/{b}.md"}
+
+        def _warned():
+            return any(r.get("warnings") for r in
+                       searcher.search(q, limit=10, kind="hybrid")
+                       if r["title"] in (a, b))
+
+        warned_before = _warned()
+        for c in store.db.list_collisions(status="open"):
+            if {c["a_path"], c["b_path"]} <= pair_paths:
+                store.db.resolve_collision(c["id"], "dismissed")
+        cases.append(("冲突对先警告、处置后不再警告 [hybrid]",
+                      warned_before and not _warned()))
+
+    # N3 跨用户隔离：独立第二个 store（空语料）不得召回本库内容
+    root2 = Path(tempfile.mkdtemp(prefix="yacmemo-eval-u2-"))
+    try:
+        _, searcher2 = build(root2, emb, seed=False)
+        hits2 = [r["title"] for r in
+                 searcher2.search("yacmemo 端口 9721", limit=10, kind="fts")]
+        cases.append(("跨用户不得串库 [fts]",
+                      "yacmemo部署配置" not in hits2))
+    finally:
+        shutil.rmtree(root2, ignore_errors=True)
+
+    return cases
 
 
 def main():
@@ -192,14 +249,16 @@ def main():
         note = " (skipped)" if total == 0 else ""
         print(f"Recall@3 [{kind:>6}]: {hit}/{total}{note}")
 
+    print("\nNegative assertions（不该召回的不得召回 / 处置过的不再警告）:")
+    for name, ok in negative_cases(store, searcher, emb):
+        print(f"  {'✓' if ok else '✗'} {name}")
+
     audit = store.audit()
     print(f"\naudit: title-dups={len(audit['title_duplicates'])} "
           f"collisions={len(audit['collisions'])} "
           f"dangling={len(audit['dangling_links'])}")
 
     if not args.keep:
-        import shutil
-
         shutil.rmtree(root, ignore_errors=True)
     else:
         print(f"corpus kept at: {root}")

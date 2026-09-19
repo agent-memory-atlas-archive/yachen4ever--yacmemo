@@ -12,10 +12,16 @@ integration_check(onboarded_version=...) 获取增量变更与最新写入约定
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.1.3"
+AGENT_CONTRACT_VERSION = "0.2.1"
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.2.1": (
+        "- memory_edit / memory_edit_section 成功返回在合并改写清掉旧冲突对时，"
+        "追加\"（自动清除过期冲突对 N 对）\"——看到它即说明这次编辑消解了语义撞车；\n"
+        "- memory_audit 输出新增\"== 自动清除过期冲突对 ==\"行；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.1.3": (
         "- 拦截错误自带近失诊断：写入缺 topics/ 前缀会被点名，"
         "并给出可直接重试的 title；\n"

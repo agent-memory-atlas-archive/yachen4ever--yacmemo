@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from yacmemo.fs_utils import content_hash
 from yacmemo.store import AnchorError, Store, StoreError, TitleConflict
 
 NOTE_A = """# yacmemo部署配置
@@ -275,6 +276,53 @@ def test_uncovered_write_without_near_match_keeps_guidance(store: Store):
     assert "疑似路径" not in msg
     assert "topic_register" in msg and "免注册区" in msg
     assert "共 1 个" in msg  # 种子主题：笔记主题
+
+
+# ---- 变更留痕：before_hash 与冲突对自动清除计数（2026-09-19，atlas 评审回应）----
+
+def test_edit_reports_cleared_collisions_and_before_hash(store: Store):
+    """合并型编辑：旧冲突对不再命中即"自动清除"，计数与 before_hash 一并返回。"""
+    store.write("notes/A配置", "# A配置\n\n- [配置] 服务端口为 9721\n")
+    store.write("notes/B配置", "# B配置\n\n- [配置] 服务端口为 9721\n")
+    assert len(store.db.list_collisions(status="open")) == 1
+    old = (store.root / "notes/A配置.md").read_text(encoding="utf-8")
+
+    r = store.edit("notes/A配置", "服务端口为 9721", "每日备份到 NAS")
+
+    assert r["cleared_collisions"] == 1
+    assert r["before_hash"] == content_hash(old)
+    assert store.db.list_collisions(status="open") == []
+
+
+def test_edit_without_collision_change_reports_zero(store: Store):
+    """普通编辑（不消解撞车）不虚报清除计数。"""
+    store.write("notes/普通笔记", "# 普通笔记\n\n- [配置] 服务端口为 9721\n")
+    r = store.edit("notes/普通笔记", "9721", "9722")
+    assert r["cleared_collisions"] == 0
+
+
+def test_save_and_delete_return_before_hash(store: Store):
+    store.write("notes/已有笔记", "# 已有笔记\n内容A\n")
+    r = store.save("notes/已有笔记.md", "# 已有笔记\n内容B\n")
+    assert r["before_hash"] == content_hash("# 已有笔记\n内容A\n")
+    r2 = store.save("notes/全新笔记.md", "# 全新笔记\n")
+    assert r2["before_hash"] == ""  # 新建没有变更前状态
+    r3 = store.delete_note("已有笔记")
+    assert r3["before_hash"] == content_hash("# 已有笔记\n内容B\n")
+
+
+def test_audit_reports_pruned_stale_collisions(store: Store):
+    """审计的过期冲突对清理是"索引损坏"级兜底：notes 行消失而 collision
+    行残留（正常路径都会联动清理），审计清除并计数。"""
+    store.write("notes/A配置", "# A配置\n\n- [配置] 服务端口为 9721\n")
+    store.write("notes/B配置", "# B配置\n\n- [配置] 服务端口为 9721\n")
+    assert len(store.db.list_collisions(status="open")) == 1
+    store.db.remove_note("notes/A配置.md")
+    (store.root / "notes/A配置.md").unlink()
+
+    r = store.audit()
+
+    assert r["pruned_stale_collisions"] == 1
 
 
 def test_write_system_files_refused(store: Store):

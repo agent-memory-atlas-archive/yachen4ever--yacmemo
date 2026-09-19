@@ -116,6 +116,9 @@ class Store:
         self._lock = threading.RLock()
         # 最近一次审计结果（MCP memory_audit 与 WebUI 审计页共享，见 audit()）
         self.last_audit: dict | None = None
+        # 最近一次 _index_note 自动清除的过期冲突对数（open 状态、重算后不再
+        # 命中）——合并型编辑的可见信号，由 edit/edit_section 读取上报
+        self._last_cleared_collisions = 0
         for name in self._MUTATING:
             fn = getattr(self, name)
             setattr(self, name,
@@ -283,7 +286,9 @@ class Store:
         title = self._title_of(rel, new_content)
         self._index_note(rel, title, new_content)
         self.snapshots.commit(f"edit: {rel}")
-        return {"path": rel, "title": title}
+        return {"path": rel, "title": title,
+                "before_hash": content_hash(content),
+                "cleared_collisions": self._last_cleared_collisions}
 
     def _edit_miss_hint(self, content: str, old: str) -> str:
         """未命中锚点的确定性诊断：拒绝消息必须是可执行的下一步指令
@@ -396,7 +401,9 @@ class Store:
         title = self._title_of(rel, new_text)
         self._index_note(rel, title, new_text)
         self.snapshots.commit(f"edit: {rel}")
-        return {"path": rel, "heading": wanted}
+        return {"path": rel, "heading": wanted,
+                "before_hash": content_hash(content),
+                "cleared_collisions": self._last_cleared_collisions}
 
     def save(self, path: str, content: str) -> dict:
         """Create-or-overwrite by exact path (WebUI editor, curator reports).
@@ -413,12 +420,14 @@ class Store:
             # registry, otherwise save() becomes a write-gate bypass.
             self._require_covered(rel)
         old_title = self._title_of(rel) if abs_path.is_file() else None
+        before_hash = (content_hash(abs_path.read_text(encoding="utf-8"))
+                       if abs_path.is_file() else "")
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(content, encoding="utf-8")
         title = self._title_from_content(rel, content) or old_title
         self._index_note(rel, title, content)
         self.snapshots.commit(f"save: {rel}")
-        return {"path": rel, "title": title}
+        return {"path": rel, "title": title, "before_hash": before_hash}
 
     def delete_note(self, path: str) -> dict:
         """User-instructed deletion (WebUI / memory_delete tool): remove the
@@ -428,7 +437,9 @@ class Store:
         rel = self.resolve(path)
         abs_path = self.root / rel
         title = self._title_of(rel)
+        before_hash = ""
         if abs_path.exists():
+            before_hash = content_hash(abs_path.read_text(encoding="utf-8"))
             abs_path.unlink()
         self.db.remove_note(rel)
         self.db.remove_collisions_involving(rel)
@@ -440,7 +451,8 @@ class Store:
                 and self.last_audit.get("audit", {}).get("audit_file") == rel):
             self.last_audit = None
         self.snapshots.commit(f"delete: {rel}")
-        return {"path": rel, "title": title, "deleted": True}
+        return {"path": rel, "title": title, "deleted": True,
+                "before_hash": before_hash}
 
     # ------------------------------------------------------------------ move
 
@@ -877,7 +889,7 @@ class Store:
         added = self._sync_new_files()
         titles = self.db.all_titles()
         d1 = d1_scan(titles, self.config.guard.title_similarity_threshold)
-        self.db.prune_stale_collisions()
+        pruned_stale = self.db.prune_stale_collisions()
         collisions = self.db.list_collisions(status="open")
 
         contents = {}
@@ -939,7 +951,7 @@ class Store:
         # 审计快照落盘（journal/audit/ 免注册区，markdown 审计轨迹 + git 快照）
         audit_file = self._write_audit_snapshot(
             resynced, missing, added, d1, collisions, dangling, stray,
-            dangling_cards, missing_vectors, pruned_blank)
+            dangling_cards, missing_vectors, pruned_blank, pruned_stale)
 
         res = {"title_duplicates": d1,
                "collisions": collisions,
@@ -951,6 +963,7 @@ class Store:
                "stray": stray,
                "missing_vectors": missing_vectors,
                "pruned_blank_actions": pruned_blank,
+               "pruned_stale_collisions": pruned_stale,
                "git": self.snapshots.status_line(),
                "guard_stats": self.db.guard_stats(),
                "audit_file": audit_file}
@@ -975,13 +988,14 @@ class Store:
 
     def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
                               dangling, stray, dangling_cards=(),
-                              missing_vectors=None, pruned_blank=0) -> str:
+                              missing_vectors=None, pruned_blank=0,
+                              pruned_stale=0) -> str:
         """每日一份审计快照（journal/audit/<YYYYMMDD>.md），同日重跑以"复审"
         小节追加进当天文件——对齐 curator 的同日合并，标题天然唯一不撞 D1，
         且 journal/audit/ 不会随审计频率无界膨胀（过期文件由 curator 清理）。"""
         body = self._audit_body(resynced, missing, added, d1, collisions,
                                 dangling, stray, dangling_cards,
-                                missing_vectors, pruned_blank)
+                                missing_vectors, pruned_blank, pruned_stale)
         day = datetime.now().strftime("%Y%m%d")
         rel = f"{self._audit_dir}{day}.md"
         abs_path = self.root / rel
@@ -1006,7 +1020,7 @@ class Store:
 
     def _audit_body(self, resynced, missing, added, d1, collisions,
                     dangling, stray, dangling_cards,
-                    missing_vectors=None, pruned_blank=0) -> str:
+                    missing_vectors=None, pruned_blank=0, pruned_stale=0) -> str:
         guard = self.db.guard_stats()
 
         def _sec(title, items):
@@ -1028,6 +1042,9 @@ class Store:
                  f" / 未覆盖拦截 {guard['uncovered']}"]
         if pruned_blank:
             lines.append(f"- 已清理空白处置行：{pruned_blank}")
+        if pruned_stale:
+            lines.append(f"- 已自动清除过期冲突对：{pruned_stale}"
+                         "（笔记已删除或重算后不再命中）")
         lines.append("")
         if added:
             lines += _sec("新增文件", added)
@@ -1243,8 +1260,10 @@ class Store:
         self.db.upsert_note(rel, title, chash)
         self.db.fts_replace(rel, title, content)
 
+        self._last_cleared_collisions = 0
         if not (self.emb and self.vectors):
             return
+        pre_open = len(self.db.collisions_for(rel))
         try:
             # Stale vectors/collisions from a previous version of this note
             # must go before re-adding (obs ids are content-addressed, so
@@ -1258,12 +1277,20 @@ class Store:
             # 两个早退分支在后面，标记必须在此之前打上）
             self.db.set_vector_ok(rel, True)
 
+            def _settle():
+                # 重索引后不再命中的旧冲突对即"自动清除"——合并型编辑的
+                # 可见信号（2026-09-19 atlas 评审指出清除转换无留痕）
+                self._last_cleared_collisions = max(
+                    0, pre_open - len(self.db.collisions_for(rel)))
+
             if rel.startswith(self._machine_zones):
                 # 机器产物不是记忆：处置行 "- [时间] 已处理 ..." 会被解析为
                 # 伪 observation 且跨快照高度相似，入 obs 空间必然产生 D2 假阳性
+                _settle()
                 return
             obs_list = parse_observations(content)
             if not obs_list:
+                _settle()
                 return
             obs_vecs = []
             for obs in obs_list:
@@ -1272,9 +1299,11 @@ class Store:
                 self.vectors.upsert_obs_vector(rel, obs["text"], vec)
             self._d2_check(rel, obs_list, obs_vecs)
             self.db.set_vector_ok(rel, True)
+            _settle()
         except Exception as e:
             # 故障期写入的笔记标记缺向量：hash 未变，外部变更自愈不会重试，
             # 由审计补位重试（见 audit 的 missing_vectors 自愈）
+            self._last_cleared_collisions = pre_open
             self.db.set_vector_ok(rel, False)
             logger.warning("Vector indexing failed for %s: %s", rel, e)
 

@@ -60,7 +60,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 usage.log_call(user_id, tool_name, summary,
                                int((time.monotonic() - t0) * 1000),
                                ok=out["ok"], error=out["error"],
-                               client=client, ip=ip)
+                               client=client, ip=ip,
+                               before_hash=out.get("before_hash", ""))
 
     def _fmt_search(results: list[dict]) -> str:
         if not results:
@@ -180,7 +181,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         with _logged("memory_edit", ctx, summarize_args("memory_edit", locals()), out):
             try:
                 r = store.edit(path, old_string, new_string)
-                return f"已修改并重新索引: {r['path']}"
+                out["before_hash"] = r.get("before_hash", "")
+                note = (f"（自动清除过期冲突对 {r['cleared_collisions']} 对）"
+                        if r.get("cleared_collisions") else "")
+                return f"已修改并重新索引: {r['path']}{note}"
             except StoreError as e:
                 return f"{e}"
             except Exception as e:
@@ -202,7 +206,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                      summarize_args("memory_edit_section", locals()), out):
             try:
                 r = store.edit_section(path, heading, new_content)
-                return f"已替换小节 '{r['heading']}' 并重新索引: {r['path']}"
+                out["before_hash"] = r.get("before_hash", "")
+                note = (f"（自动清除过期冲突对 {r['cleared_collisions']} 对）"
+                        if r.get("cleared_collisions") else "")
+                return f"已替换小节 '{r['heading']}' 并重新索引: {r['path']}{note}"
             except StoreError as e:
                 return f"{e}"
             except Exception as e:
@@ -241,6 +248,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         with _logged("memory_delete", ctx, summarize_args("memory_delete", locals()), out):
             try:
                 r = store.delete_note(path)
+                out["before_hash"] = r.get("before_hash", "")
                 return f"已删除: {r['path']}（git 历史可恢复）"
             except StoreError as e:
                 return f"{e}"
@@ -275,6 +283,9 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 lines.append(f"== 外部删除（{len(r['missing'])}，已清理索引）==")
                 for p in r["missing"]:
                     lines.append(f"- {p}")
+            if r.get("pruned_stale_collisions"):
+                lines.append(f"== 自动清除过期冲突对 == {r['pruned_stale_collisions']} 对"
+                             "（笔记已删除，或内容更新后重算不再命中）")
             d1 = r["title_duplicates"]
             lines.append(f"== 标题重复（{len(d1)}）==")
             for c in d1[:10]:

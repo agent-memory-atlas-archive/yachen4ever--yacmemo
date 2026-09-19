@@ -1220,7 +1220,7 @@ wheels = [
 
 [[package]]
 name = "yacmemo"
-version = "0.1.3"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

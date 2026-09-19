@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS call_log (
     summary     TEXT NOT NULL DEFAULT '',
     duration_ms INTEGER NOT NULL DEFAULT 0,
     ok          INTEGER NOT NULL DEFAULT 1,
-    error       TEXT NOT NULL DEFAULT ''
+    error       TEXT NOT NULL DEFAULT '',
+    before_hash TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_call_ts ON call_log(ts);
 CREATE INDEX IF NOT EXISTS idx_call_user_tool ON call_log(user_id, tool);
@@ -50,17 +51,24 @@ class UsageDB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
+        # 旧库迁移：before_hash 列（2026-09-19 增补——atlas 评审指出 call_log
+        # 只有参数摘要没有变更前镜像；存 before-image 的 hash，尺寸安全）
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(call_log)")}
+        if "before_hash" not in cols:
+            self.conn.execute(
+                "ALTER TABLE call_log ADD COLUMN before_hash TEXT NOT NULL DEFAULT ''")
         self.conn.commit()
 
     def log_call(self, user_id: str, tool: str, summary: str = "",
                  duration_ms: int = 0, ok: bool = True, error: str = "",
-                 client: str = "", ip: str = ""):
+                 client: str = "", ip: str = "", before_hash: str = ""):
         with self._lock:
             self.conn.execute(
                 "INSERT INTO call_log (id, ts, user_id, client, ip, tool, summary, "
-                "duration_ms, ok, error) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "duration_ms, ok, error, before_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex, _now(), user_id, client[:120], ip, tool,
-                 summary[:200], duration_ms, 1 if ok else 0, error[:200]),
+                 summary[:200], duration_ms, 1 if ok else 0, error[:200],
+                 before_hash[:64]),
             )
             self._trim()
             self.conn.commit()

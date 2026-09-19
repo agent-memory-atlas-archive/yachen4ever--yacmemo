@@ -45,7 +45,7 @@
 
 - 增量式：只比新写的行，不跑全量；旧值经 vec_cache 零成本复用；
 - **刻意不裁决**：不判断"是否矛盾"、不决定"谁有效"——只标记"疑似在说同一件事"；
-- 自愈联动：涉及笔记被编辑/外部修改/删除时，collisions 行删除并重算（`remove_collisions_involving` + audit 的 hash 级 resync）；
+- 自愈联动：涉及笔记被编辑/外部修改/删除时，collisions 行删除并重算（`remove_collisions_involving` + audit 的 hash 级 resync）；**清除有留痕**（2026-09-19 增补）：重索引后不再命中的旧对即"自动清除"，计数上报三处——`memory_edit` / `memory_edit_section` 成功返回追加"（自动清除过期冲突对 N 对）"、审计概览与快照的概览行、`memory_audit` 输出的 `== 自动清除过期冲突对 ==` 行。合并型编辑由此有了可见信号：**看到清除计数 = 这次编辑消解了语义撞车**；
 - **机器产物区不进 obs 空间**：journal/audit/ 审计快照与 curator/ 提案报告是系统派生输出，不是记忆——其处置行 `- [时间] 已处理 ...` 会被 `parse_observations` 当作伪 observation（类别=时间戳）且跨快照高度相似，故 `_index_note` 对机器产物区（`store._machine_zones`）跳过 obs 索引与 D2，D1 候选同样排除（快照标题同构、提案报告归一化剥日期后互相撞）。审计快照仍可被 FTS/note 级向量检索到。
 
 **D3 悬空链接**：`[[目标]]` 不匹配任何既有标题 → audit 列出（多为手误或待创建）。机器产物区豁免——审计快照会引用上一轮悬空链接的原文，源笔记删除后不得自指点名（与 D1/D2 同口径）。引用目标不含文字的标记（如文献引注 `[[1,28,28]]`）不算链接，已过滤。
@@ -55,6 +55,8 @@
 **D5 悬空主题卡**：注册表 `卡:` 字段指向不存在的 abstract（restructure/手工编辑 TOPICS.md 的遗留）。D3 只扫笔记正文里的链接，注册表自身无校验——audit 补位点名，处置靠修注册表或重建卡。
 
 已知盲区（接受）：措辞距离远但逻辑矛盾的 D2 漏检（如"sys_user 无 role_color"vs"新增 role_color 字段"）。堵住它的代价是全量 LLM 扫描——v1 的教训，不做。
+
+**覆盖边界（刻意）**：D2 只作用于 observation 行（`- [类别] 文本`），不比对笔记全文——正文散文里的重复事实不产生 ⚠（写约定要求事实行写进 observation 正是为此）。这类重复的兜底是 note 级向量检索把两篇同时召回、交读取时的主模型裁决，加上 audit 的 D1 标题扫描。
 
 ### 第 3 层：主模型裁决（读取时刻）
 
@@ -75,7 +77,7 @@ collisions(id, kind,           -- obs / title
            a_path, b_path, a_text, b_text, score,
            detected_at, status)  -- open / resolved / dismissed
 
-guard_events(id, ts, kind,     -- refused / forced（clear_all 与 reindex 不清除）
+guard_events(id, ts, kind,     -- refused / forced / uncovered（clear_all 与 reindex 不清除）
              attempted_title, matched_path)
 ```
 
