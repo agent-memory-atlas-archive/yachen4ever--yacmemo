@@ -232,6 +232,51 @@ def test_write_force_does_not_bypass_topic_gate(store: Store):
         store.write("test/散记", "# 散记\n内容\n", force=True, force_confirm=True)
 
 
+# ---- 拦截消息近失诊断（2026-09-19 TeleAgent 实测教训）----
+
+def test_write_missing_topics_prefix_gets_near_miss_hint(store: Store):
+    """注册后写入漏 topics/ 前缀：错误须直接给出可重试的 title，并点名该主题。"""
+    store.topic_register("女儿AI陪伴老师", description="测试")
+    with pytest.raises(StoreError) as e:
+        store.write("女儿AI陪伴老师/abstract", "# x\n")
+    msg = str(e.value)
+    assert "疑似路径前缀" in msg
+    assert 'title="topics/女儿AI陪伴老师/abstract"' in msg
+    assert "《女儿AI陪伴老师》" in msg  # 命中主题必须在活跃列表出现
+    assert store.db.guard_stats()["uncovered"] == 1
+
+
+def test_active_topic_list_shows_count_and_near_match_beyond_eight(store: Store):
+    """列表带总数；第 9 个主题（注册表末尾）被近失命中时必须点名——
+    旧版静默截断到 8 个曾把刚注册的主题切掉，诱导 agent 误判注册表未同步。"""
+    for i in range(2, 10):
+        store.topic_register(f"主题{i:02d}", description="t")
+    with pytest.raises(StoreError) as e:
+        store.write("主题09/abstract", "# x\n")
+    msg = str(e.value)
+    assert "共 9 个" in msg
+    assert "《主题09》" in msg
+
+
+def test_near_miss_fuzzy_dir_name(store: Store):
+    """目录名拼错：按名称最接近给出修正路径。"""
+    store.topic_register("女儿AI陪伴老师", description="t")
+    with pytest.raises(StoreError) as e:
+        store.write("女儿AI陪伴老湿/笔记", "# x\n")
+    assert "名称最接近" in str(e.value)
+    assert 'title="topics/女儿AI陪伴老师/笔记"' in str(e.value)
+
+
+def test_uncovered_write_without_near_match_keeps_guidance(store: Store):
+    """无近失命中时不给诊断行，行动指引保持完整。"""
+    with pytest.raises(StoreError) as e:
+        store.write("zzz/无关主题", "# x\n")
+    msg = str(e.value)
+    assert "疑似路径" not in msg
+    assert "topic_register" in msg and "免注册区" in msg
+    assert "共 1 个" in msg  # 种子主题：笔记主题
+
+
 def test_write_system_files_refused(store: Store):
     """系统文件走专用工具，不允许 memory_write 直写。"""
     with pytest.raises(StoreError, match="系统文件"):

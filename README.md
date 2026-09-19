@@ -79,26 +79,27 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 **第一次用？**请先读 [用户使用手册](docs/00-user-guide.md)——上手、日常用法、常见问题都在里面。
 
-## MCP 工具（16 个）
+## MCP 工具（17 个）
 
 | 工具 | 用途 |
 |---|---|
 | `memory_search` | 混合检索（FTS trigram + 向量，RRF 融合）；疑似重复/矛盾内联 ⚠ 标注；向量通道故障或短查询未命中时附提示（<3 字查询走 LIKE 回退） |
 | `memory_read` | 笔记全文（[正文开始/结束] 块内逐字原文）+ 相关笔记（工具附加信息，wiki-links + 语义近邻） |
-| `memory_write` | 新建笔记；**未注册主题路径直接拒绝**（先 `topic_register` 后写入，force 不豁免）+ 近似重复标题拒绝（force 需两级确认） |
+| `memory_write` | 新建笔记（**带 `topics/` 前缀写 `topics/<主题>/笔记名`**）；**未注册主题路径直接拒绝**，拦截消息自带近失诊断（缺前缀/拼错目录会给出可重试的 title）+ 近似重复标题拒绝（force 需两级确认） |
 | `memory_edit` | 就地更新，文本锚点必须唯一；未命中时附可自纠诊断（点破锚点混入附加信息/空白差异还原文/最接近行） |
 | `memory_edit_section` | 按小节整段替换 |
 | `memory_move` | 移动文件，索引跟随；目标路径同样受主题注册制约束 |
 | `memory_delete` | 删除笔记（**仅用户明确要求时**，git 历史可恢复） |
 | `memory_audit` | 自愈式一致性审计（外部改动/删除自愈、D1–D5 一致性问题、缺向量笔记点名+自愈重试、守卫统计、审计快照路径） |
 | `memory_list` | 目录树 / 最近变更 |
-| `memory_context` | **会话开始先调**：返回主题注册表 + 各主题卡摘要头（冷启动回顾） |
+| `memory_context` | **会话开始先调**：返回接入契约版本头 + 主题注册表 + 各主题卡摘要头（冷启动回顾） |
 | `topic_list` | 列出长期记忆主题（活跃/已归档分组） |
-| `topic_register` | 注册新主题（**仅在用户明确要求时调用**，如"把 X 加入长期记忆"），创建 topics/<主题>/abstract.md |
+| `topic_register` | 注册新主题（**仅在用户明确要求时调用**，如"把 X 加入长期记忆"），创建 topics/<主题>/abstract.md；成功返回可复制的写入模板 |
 | `topic_unregister` | 注销主题（**仅用户明示**，仅移出注册表，笔记不动，游离后裁决） |
 | `archive_topic` | 归档主题（**仅用户明示**）：整个主题目录移入 archive/，检索保留、context 退出 |
 | `get_user_preference` | 读画像/偏好（PROFILE.md 功能层，全文或指定小节） |
 | `update_user_preference` | 创建/替换画像/偏好的一个小节（agent 维护） |
+| `integration_check` | **Agent 接入契约版本核对**：agent 汇报本地记录的契约版本，落后时返回增量变更与写入约定速览——agent 据此自主更新本地提示词（docs/09 §四） |
 
 完整规格：[docs/02-mcp-tools.md](docs/02-mcp-tools.md)；使用约定（贴进 agent 系统提示）：[docs/01-architecture.md](docs/01-architecture.md) 第八节。
 

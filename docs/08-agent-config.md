@@ -20,6 +20,7 @@ TeleAgent 这类桌面 agent 自带本地记忆机制：`USER.md`（用户指定
 ```markdown
 ## 长期记忆（yacmemo）
 - 长期记忆统一存 yacmemo（MCP，主题注册制），多终端多 agent 共享；本地文件只存指针、不存事实副本
+- 接入契约版本: 0.1.3（每次会话开始与 memory_context 头部比对；落后即调 integration_check 自主更新本节，见 docs/09 §四）
 - 会话开始先 memory_context 回顾主题体系；写入前先 memory_search 查重，已有同主题笔记用 memory_edit / memory_edit_section 就地更新
 - 画像/偏好存 PROFILE.md 功能层：get_user_preference / update_user_preference 读写；SSH 别名、项目、设备、网络等背景一律 memory_search / memory_read 检索
 - 使用约定见 yacmemo 主题卡「yacmemo 记忆使用约定」与仓库 docs/02-mcp-tools.md
@@ -40,6 +41,7 @@ TeleAgent 这类桌面 agent 自带本地记忆机制：`USER.md`（用户指定
 yacmemo 侧发生**结构性变化**后，逐个检查本地配置描述是否过时：
 
 - 工具面增减（13 → 16：archive_topic / get_user_preference / update_user_preference 加入）；
+- **接入契约版本前进**（2026-09-19 起）：不必等人工巡检——`memory_context` 头部版本与本地记录比对，落后即 `integration_check` 自主刷新（docs/09 §四）；本节其余条目用于契约机制覆盖不到的部署层变化；
 - 画像/偏好从"主题"迁到 PROFILE.md 功能层（旧说法"画像在「用户画像」主题"已失效）；
 - 主题目录化（`topics/<主题>/` + abstract.md）、archive/ 归档生命周期；
 - 审计行为变化（journal/audit/ 快照落盘、处置记录、AIGC 头清理规则）；

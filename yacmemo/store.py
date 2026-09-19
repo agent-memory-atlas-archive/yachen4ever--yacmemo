@@ -796,16 +796,67 @@ class Store:
         if self._path_covered(rel, topics):
             return
         self.db.add_guard_event("uncovered", attempted_title, rel, forced=False)
-        active = [t["title"] for t in topics if not t.get("archived")]
-        hint = "、".join(f"《{t}》" for t in active[:8]) or "（暂无）"
-        raise StoreError(
-            f"写入被拦截: {rel} 不属于任何注册主题（主题注册制硬约束，force 不豁免）。\n"
+        raise StoreError(self._uncovered_error(rel, topics))
+
+    def _uncovered_error(self, rel: str, topics: list[dict]) -> str:
+        """拦截消息 = 行动指引 + 近失诊断 + 完整度明确的活跃主题列表。
+
+        2026-09-19 TeleAgent 实测的教训：写入漏了 topics/ 前缀被拦后，
+        旧消息的活跃主题列表静默截断到 8 个，恰好切掉刚注册的主题，
+        agent 得出"注册表未同步"的错误假设，白烧一个推理块才自纠。
+        诊断行让错误从死胡同变成一步修复；列表带总数且命中主题必显示。"""
+        active = [t for t in topics if not t.get("archived")]
+        near, matched = self._near_miss_topics(rel, active)
+        lines = [
+            f"写入被拦截: {rel} 不属于任何注册主题（主题注册制硬约束，force 不豁免）。",
+            *near,
             "- 新主题：先征得用户同意后 topic_register 注册"
             "（会在 topics/<主题>/abstract.md 建卡），\n"
             "  之后把笔记写入 topics/<主题>/ 目录下；\n"
             "- 已有主题：写入该主题目录下的模块笔记，如 topics/<主题>/笔记名.md；\n"
-            "- journal/、archive/、curator/ 免注册区不受限。\n"
-            f"当前活跃主题: {hint}")
+            "  abstract 是摘要卡（保持一句话现状），详细内容请写成模块笔记；\n"
+            "- journal/、archive/、curator/ 免注册区不受限。",
+        ]
+        titles = [t["title"] for t in active]
+        if not titles:
+            lines.append("当前活跃主题: （暂无）")
+        else:
+            shown = list(dict.fromkeys(titles[:8] + matched))
+            listed = "、".join(f"《{t}》" for t in shown)
+            if len(titles) > len(shown):
+                lines.append(f"当前活跃主题（共 {len(titles)} 个，"
+                             f"显示与本次写入最相关者，其余略）: {listed} …")
+            else:
+                lines.append(f"当前活跃主题（共 {len(titles)} 个）: {listed}")
+        return "\n".join(lines)
+
+    def _near_miss_topics(self, rel: str,
+                          active: list[dict]) -> tuple[list[str], list[str]]:
+        """未覆盖路径的近失诊断：写入意图最可能是某个已注册主题，只是路径
+        缺 topics/ 前缀或目录名拼错。返回 (诊断行, 需在活跃列表点名的标题)。"""
+        first = rel.split("/", 1)[0]
+        name = posixpath.splitext(posixpath.basename(rel))[0]
+        by_title = {t["title"]: t for t in active}
+        t = None
+        if by_title:
+            best = max(by_title, key=lambda k: fuzz.ratio(first, k))
+            if fuzz.ratio(first, best) >= 60:
+                t = by_title[best]
+        lines, matched = [], []
+        if t is not None and t["card"]:
+            d = posixpath.dirname(t["card"])
+            if d:
+                if t["title"] == first:
+                    lead = f"⚠ 疑似路径前缀/目录名不对：主题「{t['title']}」已注册，目录 {d}/。"
+                else:
+                    lead = (f"⚠ 疑似路径/目录名不对：你想写的可能是主题"
+                            f"「{t['title']}」（名称最接近），其目录 {d}/。")
+                lines.append(
+                    lead + f"\n"
+                    f"  改用 title=\"{d}/{name}\" 即可写入；abstract 是摘要卡，"
+                    f"详细内容建议写成 {d}/<笔记名>。")
+                matched.append(t["title"])
+        return lines, matched
 
     def _stray_files(self, topics: list[dict]) -> list[str]:
         """Markdown files outside any registered topic (and outside free zones)."""

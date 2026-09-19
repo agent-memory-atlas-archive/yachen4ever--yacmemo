@@ -1,4 +1,4 @@
-# MCP 工具规格（16 个）
+# MCP 工具规格（17 个）
 
 > 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。
 > 所有工具返回人类可读文本；错误以中文消息直接返回（不抛协议错误），agent 可读可自纠。
@@ -62,18 +62,24 @@ memory_write(title: str, content: str, force: bool = False,
              force_confirm: bool = False) -> str
 ```
 
-新建笔记。`title` 可含目录前缀（`"projects/foo"` → `projects/foo.md`），目录只是归档，**笔记的标题是去掉目录后的主题名**。文件名对非法字符（`\ / : * ? " < > |`）做替换清洗。
+新建笔记。`title` 可含目录前缀，**主题目录内写作 `topics/<主题>/笔记名`**（缺 `topics/` 前缀会被主题硬拦截，拦截消息会给出修正后的 title）。目录只是归档，**笔记的标题是去掉目录后的主题名**。文件名对非法字符（`\ / : * ? " < > |`）做替换清洗。
 
 **主题硬拦截**（2026-09-17 增补，force 不豁免）：写入路径必须被某个注册主题覆盖——注册主题卡/相关笔记所在目录之下（每主题一目录，目录即归属），否则拒绝：
 
 ```
-写入被拦截: test/散记.md 不属于任何注册主题（主题注册制硬约束，force 不豁免）。
+写入被拦截: 女儿AI陪伴老师/abstract.md 不属于任何注册主题（主题注册制硬约束，force 不豁免）。
+⚠ 疑似路径前缀/目录名不对：主题「女儿AI陪伴老师」已注册，目录 topics/女儿AI陪伴老师/。
+  改用 title="topics/女儿AI陪伴老师/abstract" 即可写入；abstract 是摘要卡，
+  详细内容建议写成 topics/女儿AI陪伴老师/<笔记名>。
 - 新主题：先征得用户同意后 topic_register 注册（会在 topics/<主题>/abstract.md 建卡），
   之后把笔记写入 topics/<主题>/ 目录下；
 - 已有主题：写入该主题目录下的模块笔记，如 topics/<主题>/笔记名.md；
+  abstract 是摘要卡（保持一句话现状），详细内容请写成模块笔记；
 - journal/、archive/、curator/ 免注册区不受限。
-当前活跃主题: 《……》
+当前活跃主题（共 9 个）: 《……》
 ```
+
+**近失诊断**（2026-09-19 增补）：拦截前把写入路径首段与注册主题名做精确/模糊比对，命中就在错误里直接给可重试的 title——缺 `topics/` 前缀、目录名拼错这类错误一轮自纠，不用猜。活跃主题列表带总数，**被命中的主题无论排位必显示**（TeleAgent 实测中列表静默截断到 8 个恰好切掉刚注册的主题，agent 误判"注册表未同步"白烧一个推理块）。
 
 系统文件（`TOPICS.md`/`PROFILE.md`）不允许经此工具创建/覆盖——分别走 `topic_register` / `update_user_preference`。拦截事件记入 `guard_events`（kind=`uncovered`），与 refused/forced 一样进守卫统计。
 
@@ -192,7 +198,15 @@ topic_register(title: str, description: str = "", related: str = "") -> str
 - **调用门槛**：仅在用户明确要求时调用（"把 X 加入长期记忆"）——这条写进约定块，注册行为本身即用户授权的凭证；
 - **注册是写入的前置条件**：主题硬拦截（见 §3）下，未注册主题覆盖的路径一律拒写——`topic_register` 是新主题的唯一授权门；
 - 重复主题名拒绝（提示直接编辑既有 abstract）；
-- 注册后 abstract 与注册表立即入索引；主题目录内 agent 可按模块自由增设详细 md（目录即归属）。
+- 注册后 abstract 与注册表立即入索引；主题目录内 agent 可按模块自由增设详细 md（目录即归属）；
+- **成功返回含可复制的写入模板**（2026-09-19 增补），例如：
+
+```
+已注册主题「女儿AI陪伴老师」，abstract: topics/女儿AI陪伴老师/abstract.md。
+后续写入约定：
+- 详细笔记：memory_write(title="topics/女儿AI陪伴老师/<笔记名>", ...) ——必须带目录前缀（如 "topics/女儿AI陪伴老师/xxx"），缺前缀会被主题硬拦截；
+- abstract 是摘要卡，保持一句话现状：现状变化用 memory_edit 就地更新，不要把长文塞进 abstract。
+```
 
 ## 11. topic_unregister
 
@@ -212,7 +226,9 @@ topic_unregister(title: str) -> str
 memory_context() -> str
 ```
 
-**每次会话开始先调用**。返回核心记忆上下文 = `TOPICS.md` 注册表全文 + 各主题卡摘要头（前 12 行）。解决冷启动失忆：agent 不必"想到去搜什么"，主题体系直接在场。
+**每次会话开始先调用**。返回核心记忆上下文 = 接入契约版本头 + `TOPICS.md` 注册表全文 + 各主题卡摘要头（前 12 行）。解决冷启动失忆：agent 不必"想到去搜什么"，主题体系直接在场。
+
+**版本头**（2026-09-19 增补）：形如 `[yacmemo 接入契约 v0.1.3——与你本地记录的版本不一致时，调用 integration_check(onboarded_version="<你的版本>") 自主更新]`。agent 把接入时依据的契约版本记在本地接入提示词里，每次会话开始比对，落后即自主更新（见 §17）。
 
 ## 13. memory_delete
 
@@ -263,11 +279,40 @@ update_user_preference(section: str, content: str) -> str
 - 写提炼后的结论（"- [类别] 内容" 语法），不贴对话原文；
 - 每次更新自动 git 快照，可回溯。
 
+## 17. integration_check
+
+```
+integration_check(onboarded_version: str = "") -> str
+```
+
+**Agent 接入契约版本核对**（2026-09-19 新增，"教 AI 自我更新"机制）：
+
+```
+integration_check(onboarded_version="0.1.2")
+→ yacmemo 接入契约当前版本: 0.1.3
+  你声明的版本: 0.1.2——有更新，请据此自主更新本地接入提示词，并记录本次核对到的新版本。
+
+  【0.1.3】
+  - 拦截错误自带近失诊断：……
+
+  ## 写入约定速览
+  - 长期记忆只写注册主题目录内：topics/<主题>/<笔记名> ……
+```
+
+工作机制（服务器不推送，agent 自主拉取）：
+
+1. **版本声明**：agent 把接入时依据的契约版本记在本地接入提示词/USER.md 里（如 `yacmemo 接入契约版本: 0.1.3`）；
+2. **发现**：`memory_context` 头部随身携带当前契约版本，每次会话开始自然比对；
+3. **更新**：版本落后时调用本工具，返回**增量变更**（逐版本条目）+ **写入约定速览全文**——agent 据此刷新本地提示词并记录新版本，无需人工介入；
+4. 留空 `onboarded_version` 返回当前版本 + 全部记录在案的变更；声明版本比服务端还新则提示"可能连到了旧实例"；
+5. **契约版本独立于包版本**：只在 agent 可感知行为变化（工具语义、返回文案、写入约定）时前进，数据源在 `yacmemo/agent_changes.py`——改约定必须同步追加 `AGENT_CHANGELOG` 条目并前进版本号（有测试守护）。
+
 ## Agent 决策树（更新）
 
 ```
-会话开始              → memory_context（画像/偏好前置 + 主题体系）
-用户要新增长期记忆主题 → topic_register（仅用户明示时）→ 目录内增设模块 md
+会话开始              → memory_context（契约版本头 + 画像/偏好前置 + 主题体系）
+契约版本落后          → integration_check(onboarded_version=...) → 自主更新本地提示词
+用户要新增长期记忆主题 → topic_register（仅用户明示时）→ 按返回模板写 topics/<主题>/ 目录内
 用户不再长期记录某主题 → topic_unregister（仅用户明示）→ 引导归位/清理
 用户说某项目翻篇了    → archive_topic（仅用户明示；检索保留、context 退出）
 用户要删某条记忆      → memory_delete（仅用户明示；git 可恢复）

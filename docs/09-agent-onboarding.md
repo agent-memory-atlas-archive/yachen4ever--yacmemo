@@ -25,18 +25,29 @@ codex mcp add yacmemo --url http://debsvc.local:9721/<用户ID>/mcp
 
 1. **会话开始**：先调 `memory_context` 冷启动回顾，然后向用户展示一行接入摘要，例如：
 
-   > ✅ 已接入 yacmemo 记忆层（用户：yachen）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；最近审计无待处理问题。
+   > ✅ 已接入 yacmemo 记忆层（用户：yachen，契约 v0.1.3）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；最近审计无待处理问题。
 
 2. **日常遵循记忆纪律**（完整约定见 [01-architecture.md §八](01-architecture.md)，工具规格见 [02-mcp-tools.md](02-mcp-tools.md)）：
 
    - 回答事实性问题前先 `memory_search`；结果带 ⚠ 时先读两篇、用 `memory_edit` 合并，然后再回答；
    - 写入先查重：已有同主题笔记用 `memory_edit` / `memory_edit_section` **就地更新**，不新建重复笔记；
-   - **长期记忆只写注册主题目录内**——新主题须请用户明确授权后 `topic_register`（越界写入会被硬拦截，`force` 不豁免）；流水账放 `journal/`；
+   - **长期记忆只写注册主题目录内**——路径必须带 `topics/` 前缀：`topics/<主题>/<笔记名>`。写 `女儿AI陪伴老师/abstract` 会被拦截，写 `topics/女儿AI陪伴老师/abstract` 才对（2026-09-19 TeleAgent 实测：漏前缀被拦后 agent 空转了一轮才自纠；现在拦截消息会直接给出可重试的 title，但别依赖拦截——先写对）；新主题须请用户明确授权后 `topic_register`（越界写入硬拦截，`force` 不豁免）；流水账放 `journal/`；
+   - **abstract 是摘要卡**（`topics/<主题>/abstract.md`）：保持一句话现状，现状变化用 `memory_edit` 就地更新；详细内容写成模块笔记 `topics/<主题>/<笔记名>`，不要把长文塞进 abstract；
    - 事实行用 observation 语法：`- [配置] 服务端口为 9721`；
    - 注册 / 注销 / 归档主题、删除笔记：**仅在用户明确要求时执行**。
 
 3. **不确定就问**：找不到该写进哪个主题、或对记忆内容有疑问，向用户说明而不是猜测。
 
-## ④ 桌面 agent 附加项
+## ④ 接入契约版本与自主更新
+
+yacmemo 的工具语义与写入约定有版本号（**接入契约版本**），服务器不推送、agent 自主拉取：
+
+1. **声明**：把你接入时依据的契约版本记进本地接入提示词 / USER.md，一行即可：`yacmemo 接入契约版本: 0.1.3`；
+2. **发现**：`memory_context` 返回头部带当前契约版本，每次会话开始自然比对；
+3. **更新**：发现落后（或版本号为空）时调用 `integration_check(onboarded_version="<你的版本>")`——返回增量变更与**写入约定速览全文**，据此刷新本地接入提示词、更新记录的版本号，然后向用户报告一句"yacmemo 接入约定已从 0.1.2 更新到 0.1.3"。无需等用户指令、无需重读仓库文档。
+
+机制详情与版本历史的数据源：[02-mcp-tools.md §17](02-mcp-tools.md)。
+
+## ⑤ 桌面 agent 附加项
 
 TeleAgent 类自带本地记忆文件（USER.md / MEMORY.md）的 agent：本地文件只存指针、不存事实副本，模板与维护约定见 [08-agent-config.md](08-agent-config.md) §二。

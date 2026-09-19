@@ -10,11 +10,18 @@ phrasing are identical across transports.
 from __future__ import annotations
 
 import logging
+import posixpath
 import time
 from contextlib import contextmanager
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from .agent_changes import (
+    AGENT_CHANGELOG,
+    AGENT_CONTRACT_DIGEST,
+    AGENT_CONTRACT_VERSION,
+    contract_version_key,
+)
 from .search import Searcher
 from .store import Store, StoreError
 from .usage import UsageDB, summarize_args
@@ -37,7 +44,7 @@ def _client_from_ctx(ctx: Context | None) -> tuple[str, str]:
 
 def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                    usage: UsageDB | None = None, user_id: str = "local") -> None:
-    """Register the 8 memory tools on an MCP server instance."""
+    """Register the 17 memory tools on an MCP server instance."""
 
     @contextmanager
     def _logged(tool_name: str, ctx: Context | None, summary: str, out: dict):
@@ -139,7 +146,9 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         不受限。新主题先用 topic_register 注册（仅用户明确要求时），force 不豁免。
 
         Args:
-            title: 笔记标题，可含目录前缀（如 "projects/yacmemo部署配置"）
+            title: 笔记标题，可含目录前缀；主题目录内写作
+                "topics/<主题>/笔记名"（缺 topics/ 前缀会被主题硬拦截，
+                拦截消息会给出修正后的 title）
             content: markdown 正文（首行建议 "# 标题"；事实行用 "- [类别] 内容"）
             force: 明确越过近似标题守卫（会被记录为违约指标）
             force_confirm: force 使用频繁（24h 内达阈值）时的人工确认二级开关
@@ -367,6 +376,14 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             except Exception as e:
                 out["ok"], out["error"] = False, str(e)
                 return f"注册失败: {e}"
+            folder = posixpath.dirname(r["card"]) if r["card"] else ""
+            if folder:
+                return (f"已注册主题「{r['title']}」，abstract: {r['card']}。\n"
+                        f"后续写入约定：\n"
+                        f"- 详细笔记：memory_write(title=\"{folder}/<笔记名>\", ...) "
+                        f"——必须带目录前缀（如 \"{folder}/xxx\"），缺前缀会被主题硬拦截；\n"
+                        f"- abstract 是摘要卡，保持一句话现状：现状变化用 memory_edit "
+                        f"就地更新，不要把长文塞进 abstract。")
             return (f"已注册主题「{r['title']}」，abstract: {r['card']}。"
                     f"该主题后续的笔记写入主题卡所在目录；现状变化就地更新 abstract。")
 
@@ -454,11 +471,59 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
 
     @mcp.tool()
     def memory_context(ctx: Context = None) -> str:
-        """返回核心记忆上下文：主题注册表 + 各主题卡摘要头。每次会话开始时先调用一次。"""
+        """返回核心记忆上下文：主题注册表 + 各主题卡摘要头。每次会话开始时先调用一次。
+
+        返回头部带接入契约版本：与你本地记录的版本不一致时，调用
+        integration_check 自主更新本地接入提示词。"""
         out = {"ok": True, "error": ""}
         with _logged("memory_context", ctx, "", out):
             try:
-                return store.memory_context()
+                body = store.memory_context()
             except Exception as e:
                 out["ok"], out["error"] = False, str(e)
                 return f"读取失败: {e}"
+            return (f"[yacmemo 接入契约 v{AGENT_CONTRACT_VERSION}——"
+                    "与你本地记录的版本不一致时，调用 "
+                    "integration_check(onboarded_version=\"<你的版本>\") 自主更新]\n\n"
+                    + body)
+
+    @mcp.tool()
+    def integration_check(onboarded_version: str = "", ctx: Context = None) -> str:
+        """Agent 接入契约版本核对：汇报你本地接入提示词所基于的契约版本。
+        落后于服务端时返回增量变更与最新写入约定速览，据此自主更新本地提示词。
+
+        Args:
+            onboarded_version: 你接入时依据的契约版本（如 "0.1.2"）；
+                不确定或从未记录则留空
+        """
+        out = {"ok": True, "error": ""}
+        with _logged("integration_check", ctx,
+                     summarize_args("integration_check", locals()), out):
+            cur = AGENT_CONTRACT_VERSION
+            declared = (onboarded_version or "").strip()
+            if declared == cur:
+                return f"yacmemo 接入契约版本一致（{cur}），无需更新。"
+            if declared and (contract_version_key(declared)
+                             > contract_version_key(cur)):
+                return (f"yacmemo 服务端契约版本: {cur}；你声明的 {declared} 更新"
+                        "——可能连接到了旧实例，请与用户确认部署版本。")
+            updates = [
+                f"【{v}】\n{AGENT_CHANGELOG[v]}"
+                for v in sorted(AGENT_CHANGELOG, key=contract_version_key)
+                if not declared or contract_version_key(v) > contract_version_key(declared)
+            ]
+            parts = [f"yacmemo 接入契约当前版本: {cur}"]
+            if not declared:
+                parts.append("你未声明本地版本——请按下方内容核对/刷新本地接入提示词，"
+                             "并记录本次核对到的版本；此后每次会话开始与 "
+                             "memory_context 头部比对即可自主发现更新。")
+            elif updates:
+                parts.append(f"你声明的版本: {declared}——有更新，请据此自主更新"
+                             "本地接入提示词，并记录本次核对到的新版本。")
+            else:
+                parts.append(f"你声明的 {declared} 之后没有记录在案的 agent 可感知"
+                             "变化（可能早于变更记录起点），按下方速览核对即可。")
+            if updates:
+                parts.append("\n".join(updates))
+            parts.append(AGENT_CONTRACT_DIGEST)
+            return "\n\n".join(parts)
