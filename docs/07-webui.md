@@ -1,3 +1,5 @@
+> [English](en/07-webui.md) | 简体中文
+
 # WebUI 控制台
 
 > 服务端自带，浏览器打开 `http://<host>:9721/ui/` 即用。与 MCP 同进程同端口，无独立部署。

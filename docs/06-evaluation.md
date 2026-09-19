@@ -1,3 +1,5 @@
+> [English](en/06-evaluation.md) | 简体中文
+
 # 检索评测
 
 > 工具：`scripts/eval_search.py`。这是一份**测量**，不是门禁——退出码恒为 0。

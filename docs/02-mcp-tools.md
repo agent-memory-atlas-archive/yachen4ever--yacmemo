@@ -1,3 +1,5 @@
+> [English](en/02-mcp-tools.md) | 简体中文
+
 # MCP 工具规格（17 个）
 
 > 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。

@@ -1,0 +1,148 @@
+> English | [简体中文](../07-webui.md)
+
+# WebUI Console
+
+> Ships with the server; open `http://<host>:9721/ui/` in a browser and it is ready to use. Shares process and port with MCP; no separate deployment.
+> The frontend is a Vue 3 + Naive UI project (`frontend/`) that needs building: `scripts/build_webui.sh` → output lands in `yacmemo/webui/dist/` (served directly by `app.py`). **Without a build the service still starts**, `/ui/` returns a 503 with build instructions, and MCP/API are unaffected.
+
+## 1. Overview
+
+- The WebUI and the MCP endpoints share the same Starlette application and the same user contexts (Store/Searcher/IndexDB instances) — **what you see and change in the browser is exactly the data the agents are using**; there is no second data path;
+- Route order: `/api/*` and `/ui/*` are registered before the per-user MCP mounts; the config layer also reserves `api`/`ui`/`health` as user-id reserved words, ruling out shadowing;
+- Error convention: business-level refusals (e.g. guard interception) return HTTP 200 + `{"ok": false, "error": "..."}`; unknown users return 404;
+- No separate authentication; follows the "personal use on the internal network" trust boundary (see the security boundary in [05-deployment.md](05-deployment.md)).
+
+## 2. Page Guide
+
+A selector at the top switches the memory user (the `[[users]]` in config.toml); the left menu has five pages: **Topics / Search / Audit / Profile / Settings**.
+
+### 2.1 Topic Browsing
+
+The left side is the **topic tree** — every markdown file in storage is visible, with nothing shown twice:
+
+- **Active topics**: each topic is one directory (`abstract.md` plus agent-added module notes), expanded level by level;
+- **Archived**: expands all files under the `archive/<topic>/` directories;
+- **Registry-free zones**: the two system directories journal / curator;
+- **Stray files**: flagged with the same criteria as the backend's D4 stray detection (outside registry-free zones + system files + registry coverage) — under the topic hard interception the tool surface cannot produce new strays, so anything appearing here can only be files hand-created in Obsidian or left behind after unregistration; have an agent file them into place or delete them;
+- **System files**: TOPICS.md (the registry) and PROFILE.md (profile & preferences).
+
+Selecting an entry shows it on the right; this merges all capabilities of the old "Notes" page:
+
+- **View**: the body renders as markdown by default; `编辑` (Edit) switches to a source textarea, `预览` (Preview) switches back to the rendered view;
+- **Edit**: `保存` (Save) goes through `store.save` — whole-file overwrite, the title follows the first-line `# 标题` (# Title) heading, and the index is rebuilt in sync (FTS/vectors/collisions recomputed);
+- **Delete**: requires a confirm; deletes the file + cleans all indexes. Still recoverable from git. abstract.md cannot be deleted from the UI;
+- **No UI entry for creating notes**: creation goes through MCP `memory_write` (stricter guards, prevents duplicate titles), or create by hand in Obsidian and let audit self-healing bring it into the index.
+
+### 2.2 Search
+
+A page for manually verifying retrieval quality. Switch between the `hybrid` (default) / `fts` / `vector` channels; results include scores, channel sources, and ⚠ collision flags; a banner appears at the top of the page when the vector channel is down or a short query misses. Usage advice is the same as for MCP: keyword-style queries are more reliable via fts, natural sentences rely on vector.
+
+### 2.3 Audit
+
+The audit page has a **two-tab** structure; each of the two audit engines gets one complete workflow:
+
+**Tab 1 "Deterministic Audit"** — fast, zero LLM, includes self-healing; equivalent to `memory_audit`:
+
+- "Audit Now" at the top; on page load the most recent audit result is shown (the in-memory cache hangs off the Store and is shared with MCP memory_audit; after a service restart a re-audit is needed; when a snapshot is deleted — manually or by curator expiry cleanup — the cache is cleared in step, and the page degrades to a notice for the missing snapshot file instead of an error);
+- Pending issues are grouped into cards by D1–D5 (duplicate title (D1) / semantic collision (D2) / dangling link (D3) / dangling topic card (D5) / stray file (D4)), each with "Handled" / "Ignore" actions: the disposition line is appended to that day's snapshot's 处置记录 (Disposition Record) section and persisted to the `audit_actions` table (reruns do not replay; D2 syncs collision status);
+- Self-healing cards (new file / external modification / external deletion / **notes missing vectors**) are display-only, with no disposition buttons — notes missing vectors were written while the embedding endpoint was down, and the audit has already retried and filled them in automatically;
+- When audit snapshot files are deleted (manually or by curator expiry cleanup), the most-recent-audit cache is cleared in step, and the page degrades to a notice rather than an error;
+- **Disposition history**: read in full from the `audit_actions` table (including proposal adjudication records) — the table is the authoritative data source for dispositions; the section embedded in the snapshot is only that day's trail;
+- **Historical audit snapshots**: `journal/audit/<date>.md`, one per day; same-day reruns append under a 复审 (Re-review) subsection; listed newest-first and clickable for review; expiry cleanup is handled by the curator timer according to `audit_retention_days` (default 7 days).
+
+Disposition guidance per issue type:
+
+| Output | Meaning | Disposition |
+|---|---|---|
+| New file / external modification / external deletion | self-healing results | no action needed |
+| Duplicate title (D1) | two notes with near-duplicate titles after normalization | merge manually, then "Handled"; or "Ignore" |
+| Semantic collision (D2) | similar observation pairs across notes (with both texts and the score) | **human adjudication**: merge, then "Handled"; or "Ignore" (syncs collision status) |
+| Dangling link (D3) | the `[[target]]` does not exist | "Handled" after fixing/removing it; "Ignore" if it is not a note reference |
+| Dangling topic card (D5) | the abstract the registry points to does not exist | "Handled" after fixing the registry or rebuilding the card |
+| Stray file (D4) | loose notes not filed under any registered topic | "Handled" after filing into place; or "Ignore" |
+
+> Registry-free zones (journal/archive/curator) are never judged stray. Guard statistics (refused / forced counts) sit at the bottom of the cards.
+
+**Judging semantic collisions**: 1) the two notes are two copies of the same topic → merge the content into the keeper, delete the other, click "Handled"; 2) the two notes cover different topics and merely both happen to contain this fact → click "Ignore"; 3) one note is an older version of the other → merge the new content into the keeper, click "Handled". Collision detection only applies to observation lines in the `- [类别] 内容` (`- [category] content`) form; GFM task lists (`- [x]`) are checkboxes and do not participate (see [03-storage-and-search.md](03-storage-and-search.md)).
+
+**Tab 2 "Quality Proposals"** — the curator deep-review workflow:
+
+- "Deep Review Now" hands the registry, the topic cards, and the audit results to the LLM configured under `[curator]` (about 1–3 minutes; the weekly timer runs it automatically); the report lands at `curator/提案-<日期>.md` (proposal-<date>.md), and same-day reruns append under a 复审 (Re-review) subsection (the title stays unique per day, so D1 is not triggered);
+- Proposals are displayed **structurally** per item (severity / type / notes involved / suggestion), with counters at the top for pending / adopted / ignored;
+- **Adjudication belongs to humans**: each item can be "Adopt" or "Ignore" — the decision is persisted (`audit_actions` table, P-class entries) and appended to the proposal note's 裁决记录 (Adjudication Record) section (git auto-snapshot); **after adopting, click "Copy Execution Instructions"** and paste a complete instruction to any agent to execute via the MCP tools; after execution the agent leaves a trace in the proposal file. The system and the WebUI only record decisions and never modify note content directly — an extension of the iron rule "curator only proposes": changes always go through the guarded, git-snapshotted store tool semantics.
+
+"Full Index Rebuild" is a dangerous maintenance operation (it also zeroes the run metrics); it lives in the **Settings → Health Overview → Maintenance** card, not on the audit page.
+
+### 2.4 Profile & Preferences
+
+Visual editing of PROFILE.md: the left side lists all sections (identity / communication style / materials & document preferences …), click to view, `编辑` (Edit) then saves the whole section; `+ 新建小节` (+ New Section) creates one by entering a section name. Equivalent to MCP's `get_user_preference` / `update_user_preference`, and likewise goes through the write path (automatic git snapshot).
+
+### 2.5 Settings
+
+Three blocks on one page:
+
+- **Usage log**: a trace of every MCP tool call — top cards (calls/errors/clients over the last 14 days) + a table (time/user/tool/summary/client UA/IP/duration), filterable by tool; guard refusals count as normal business results and are not logged as errors;
+- **Health overview**: embedding configuration status (unconfigured = FTS-only mode), plus per-user note counts / open collision counts / guard statistics / topic counts;
+- **config.toml online editing**: before saving it automatically validates TOML syntax + structure (invalid configs are rejected outright), backs up the original file as `config.toml.bak-<timestamp>`, and keeps the 600 permission; optional "save and restart service" (systemd restart, about 3 seconds offline). Deleting a user is a dangerous operation — no button is provided; handle it manually over SSH.
+
+## 3. API Reference
+
+All responses are JSON; business failures return `{"ok": false, "error": "..."}` (HTTP 200), unknown users 404.
+
+| Method | Path | Params | Description |
+|---|---|---|---|
+| GET | `/api/overview` | — | user list (notes/collisions/guard stats) + embedding status + today's call count |
+| GET | `/api/usage` | `limit` `user` `tool` | call log (default 100 entries, newest first) |
+| GET | `/api/usage/clients` | — | client summary (UA + IP + call count + last active) |
+| GET | `/api/usage/days` | — | per-day call/error counts for the last 14 days |
+| GET | `/api/{user}/notes` | `path` `sort` | note list (with mtime/size) |
+| POST | `/api/{user}/notes` | `{title, content, force, force_confirm}` | create (goes through the write-path guards) |
+| GET | `/api/{user}/note` | `path` | read one note (by path or title) |
+| PUT | `/api/{user}/note` | `{path, content}` | whole-file save (title follows the first-line heading) |
+| DELETE | `/api/{user}/note` | `path` | delete (file + all indexes) |
+| GET | `/api/{user}/search` | `q` `limit` `kind` | search (includes ⚠ warnings) |
+| POST | `/api/{user}/audit` | — | run the audit (includes self-healing; mutates the index); returns `audit_file` (this run's snapshot path) |
+| GET | `/api/{user}/audit/last` | — | most recent audit result (in-memory cache, lost on restart) |
+| GET | `/api/{user}/audit/runs` | — | historical audit snapshot list (journal/audit/*.md, newest first) |
+| GET | `/api/{user}/audit/actions` | — | full disposition/adjudication history (audit_actions table) |
+| POST | `/api/{user}/audit/action` | `{file, id, action, label, note?}` | record a disposition (appends to the snapshot's disposition record; D2 syncs collision status) |
+| POST | `/api/{user}/proposal/action` | `{file, index, action, type?, reason?, note?}` | adjudicate a proposal item (persisted in the table + traced in the proposal note's 裁决记录 (Adjudication Record) section) |
+| POST | `/api/{user}/collision` | `{id, status}` | collision adjudication: `resolved` / `dismissed` |
+| POST | `/api/{user}/curator` | — | trigger a deep review (synchronous wait, about 1–2 minutes); returns the report markdown |
+| GET | `/api/{user}/proposals` | — | list curator proposal reports |
+| GET | `/api/config` | — | read config.toml verbatim (contains secrets; for internal-network administration only) |
+| POST | `/api/config` | `{content, restart?}` | validate (TOML + load_config) → back up → save; with `restart=true` the service restarts after a delay |
+
+`{user}` is a user id from config.toml. Scripting examples:
+
+```bash
+curl -s http://debsvc.local:9721/api/yachen/search?q=端口 | python -m json.tool
+curl -s -X POST http://debsvc.local:9721/api/yachen/audit
+```
+
+## 4. Usage Log (usage.db)
+
+- Location: `[server].data_dir/usage.db` (default `data/usage.db`, relative to the service startup directory);
+- Table `call_log`: `id / ts / user_id / client / ip / tool / summary / duration_ms / ok / error`;
+- **Rolling retention of the most recent 20,000 entries**; no maintenance needed;
+- Writer: `tools.py` records after every MCP tool call (stdio calls record the client as `stdio`; HTTP calls take the request UA and the remote IP);
+- `ok` semantics: unexpected exceptions = 0; business results such as guard refusals = 1 (guard behavior is separately queryable in the `guard_events` table).
+
+## 5. Build and Implementation Notes
+
+- **Frontend project**: Vue 3 + Naive UI + Vite (`frontend/`), sources `src/App.vue` + `src/components/` (the five page components) + `src/composables/api.js` (a unified fetch wrapper);
+- **Build**: `scripts/build_webui.sh` (npm ci + vite build) → output lands in `yacmemo/webui/dist/`, matching `app.py`'s `STATIC_DIR`; the vite outDir uses `new URL('../yacmemo/webui/dist', import.meta.url)`, resolved relative to `frontend/vite.config.js` (one level up is the repo root) — do not change it to `../../yacmemo/webui/dist` (that would point outside the repository);
+- **Chunking**: manualChunks puts `vue` and `naive-ui` into their own chunks — iterating on business code does not invalidate the big-dependency caches;
+- **Dev mode**: `cd frontend && npm run dev` (Vite dev server on port 5173, `/api` proxied to local 9721);
+- **Unbuilt behavior**: when `dist/` does not exist the service starts normally and `/ui/` returns 503 + build instructions (PlainTextResponse); MCP/API remain fully functional;
+- **No npm on the server**: build on a dev machine, then scp: `scp -r yacmemo/webui/dist <server>:/srv/yacmemo/yacmemo/webui/` (dist is not in git);
+- Backend handlers are async; Store's blocking operations run via `run_in_threadpool` and never block the MCP event loop; cross-thread safety is guaranteed by the IndexDB/VectorStore/Store instance locks;
+- Static assets are mounted only at `/ui/assets` (Vite output); `/ui/` is served `index.html` directly by the handler.
+
+## 6. Common Operations
+
+- **See what the agents did in the last two weeks**: Settings page → in the usage log area filter by tool `memory_write`; the summary column is the list of written titles;
+- **Adjudicate a collision**: Audit page → read both texts → click "Handled" if already merged; click "Ignore" if it is confirmed a false positive; before deciding, click the path to jump to the Topics page and verify;
+- **Troubleshoot "can't find it"**: on the Search page try `fts` / `vector` separately → check Settings → Health Overview for whether embedding is configured → check the Audit page for whether the file made it into the index;
+- **Manually edited files**: click run on the Audit page and the index aligns;
+- **Upgrade frontend dependencies / change components**: run `scripts/build_webui.sh` on a dev machine → scp dist → a browser refresh applies it (no service restart needed).

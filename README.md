@@ -1,3 +1,5 @@
+> [English](README.en.md) | 简体中文
+
 # yacmemo
 
 带 API 级一致性守卫的个人记忆层 —— markdown 为本、全本地、agent 无关。

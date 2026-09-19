@@ -1,3 +1,5 @@
+> [English](en/03-storage-and-search.md) | 简体中文
+
 # 存储与检索
 
 > 代码位置：`store.py`（CRUD/守卫/索引）、`index_db.py`（SQLite）、`vector.py`（LanceDB）、`search.py`（融合检索）、`embedding.py`（embedding 客户端）。

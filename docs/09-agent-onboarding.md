@@ -1,3 +1,5 @@
+> [English](en/09-agent-onboarding.md) | 简体中文
+
 # Agent 接入指引（AI 专用）
 
 > 如果你是 AI agent（Claude Code / Codex / Cursor / 自研 runtime……）并读到了本文，请按顺序完成下面的接入自检，并把结果明确告诉用户。本文是 README 的展开版；接入方式的完整说明见 [08-agent-config.md](08-agent-config.md)。

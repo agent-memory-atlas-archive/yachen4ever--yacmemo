@@ -1,3 +1,5 @@
+> [English](en/08-agent-config.md) | 简体中文
+
 # Agent 记忆接入与本地配置维护
 
 > 本文说明各 AI agent 如何接入 yacmemo 记忆层，以及**桌面 agent 本地配置文件（USER.md / MEMORY.md）的维护约定**——避免架构升级后本地配置描述过时。
