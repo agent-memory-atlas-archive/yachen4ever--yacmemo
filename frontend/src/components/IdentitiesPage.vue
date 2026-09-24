@@ -44,7 +44,7 @@
               </template>
               <template #description>
                 agents/{{ row.agent }}/{{ d.device }}/ · {{ d.notes }} 个笔记 · token：
-                <n-code :code="`${row.agent}_${d.device}`" language="text" />
+                <n-code :code="`${d.device}_${row.agent}`" language="text" />
               </template>
             </n-thing>
           </n-list-item>
