@@ -49,7 +49,7 @@ password = ""
 # MCP 请求携带 token 即表明身份：Authorization: Bearer <device>_<agent>
 # （如 r9000x_teleagent；stdio 用环境变量 YACMEMO_TOKEN）。
 # token 是确定性拼接，无需注册存储；WebUI 身份页可校验名称并生成配置片段。
-# 层级：user 层共享；agents/<agent>/ 平铺文件 = agent 层（跨设备共享）；
+# 层级：user 层共享；agents/<agent>/shared/ = agent 层（跨设备共享）；
 # agents/<agent>/<device>/ = 本机专属；不同 identity 互相不可见。
 # 未携带 token 的旧配置照常可用 user 层，但 agents/ 区不可见不可写。
 

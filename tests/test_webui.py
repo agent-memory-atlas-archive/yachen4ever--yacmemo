@@ -374,7 +374,7 @@ def test_identity_api_list_and_create(http_server):
 
     # 人类经 WebUI（identity=None = 管理员）可直接写 agents/ 种子目录
     r = httpx.post(f"{base}/notes", json={
-        "title": "agents/hermes/必读", "content": "# 必读\n- 指针与纪律\n"})
+        "title": "agents/hermes/shared/必读", "content": "# 必读\n- 指针与纪律\n"})
     assert r.json()["ok"] is True
 
     # 创建 identity：token = <device>_<agent> 确定性拼接
@@ -402,7 +402,9 @@ def test_identity_api_list_and_create(http_server):
     assert hermes["shared_files"] == 1
     assert hermes["devices"] == [
         {"device": "r9000x", "notes": 0, "last_mtime": 0, "active": False}]
+    # 建 identity 预创建 shared/必读.md 占位模板：目录即激活、注入即有内容
     tele = next(x for x in rows if x["agent"] == "teleagent")
+    assert tele["shared_files"] == 1
     assert tele["devices"] == [
         {"device": "m5air", "notes": 0, "last_mtime": 0, "active": False}]
 

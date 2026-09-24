@@ -38,7 +38,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/<用户ID>/mcp
    - 回答事实性问题前先 `memory_search`；结果带 ⚠ 时先读两篇、用 `memory_edit` 合并，然后再回答；
    - 写入先查重：已有同主题笔记用 `memory_edit` / `memory_edit_section` **就地更新**，不新建重复笔记；
    - **长期记忆只写注册主题目录内**——路径必须带 `topics/` 前缀：`topics/<主题>/<笔记名>`。写 `女儿AI陪伴老师/abstract` 会被拦截，写 `topics/女儿AI陪伴老师/abstract` 才对（2026-09-19 TeleAgent 实测：漏前缀被拦后 agent 空转了一轮才自纠；现在拦截消息会直接给出可重试的 title，但别依赖拦截——先写对）；新主题须请用户明确授权后 `topic_register`（越界写入硬拦截，`force` 不豁免）；流水账放 `journal/`；
-   - **专属必读写自己的 identity 区**：`agents/<agent>/必读.md`（同 agent 跨设备共享）或 `agents/<agent>/<device>/必读.md`（本机专属）；只放指针与纪律，事实一律进 topics/；引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
+   - **专属必读写自己的 identity 区**：`agents/<agent>/shared/必读.md`（同 agent 跨设备共享）或 `agents/<agent>/<device>/必读.md`（本机专属）；只放指针与纪律，事实一律进 topics/；引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
    - **abstract 是摘要卡**（`topics/<主题>/abstract.md`）：保持一句话现状，现状变化用 `memory_edit` 就地更新；详细内容写成模块笔记 `topics/<主题>/<笔记名>`，不要把长文塞进 abstract；
    - 事实行用 observation 语法：`- [配置] 服务端口为 9721`；
    - 注册 / 注销 / 归档主题、删除笔记：**仅在用户明确要求时执行**。

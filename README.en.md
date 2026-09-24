@@ -46,9 +46,9 @@ memory_root (git repo, auto commit on every change, always git-clean)
   ├── PROFILE.md                 profile & preferences (functional layer, injected ahead of context)
   ├── topics/<topic>/            abstract.md + module md files added by agents
   ├── archive/ journal/ curator/  registry-free zones (archived topics / running logs / proposals)
-  ├── agents/<agent>/<device>/    identity-exclusive memory (agent tier shared across devices +
-  │                               per-machine tier; token = <device>_<agent>; identities are
-  │                               mutually invisible)
+  ├── agents/<agent>/shared/      identity-exclusive memory: agent tier shared across devices +
+  │                               <device>/ per-machine tier; token = <device>_<agent>;
+  │                               identities are mutually invisible
   └── .index/                    derived indexes (rebuildable, not in git)
 ```
 

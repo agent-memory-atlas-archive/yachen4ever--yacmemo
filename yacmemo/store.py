@@ -751,13 +751,13 @@ class Store:
         return "\n\n".join(parts)
 
     def _identity_context(self, identity: Identity) -> list[str]:
-        """专属必读注入：agent 层（agents/<agent>/必读.md，同 agent 跨设备
-        共享）+ identity 层（agents/<agent>/<device>/必读.md，本机专属）。
+        """专属必读注入：agent 层（agents/<agent>/shared/必读.md，同 agent
+        跨设备共享）+ identity 层（agents/<agent>/<device>/必读.md，本机专属）。
         必读按约定是指针型短文——全量注入，单文件 80 行兜底。"""
         parts = []
         found = False
         for label, prefix in (
-                (f"{identity.agent}（同 agent 跨设备共享）", identity.agent_prefix),
+                (f"{identity.agent}（同 agent 跨设备共享）", identity.shared_prefix),
                 (f"{identity.agent}@{identity.device}（本机专属）", identity.device_prefix)):
             rel = f"{prefix}必读.md"
             p = self.root / rel
@@ -765,12 +765,18 @@ class Store:
                 continue
             found = True
             head = "\n".join(p.read_text(encoding="utf-8").splitlines()[:80])
-            parts.append(f"# 专属必读·{label}｜{rel}\n{head}")
+            section = f"# 专属必读·{label}｜{rel}\n{head}"
+            if "占位模板" in head:
+                # WebUI 建 identity 时预创建的占位模板：注入时持续点名，
+                # 促使 agent 尽快用 memory_edit 填写（确保"去读且去写"）
+                section += ("\n⚠ 本必读仍是占位模板——请用 memory_edit 就地"
+                            "填写专属纪律，填写后移除模板标记行。")
+            parts.append(section)
         if not found:
             parts.append(
                 "# 专属必读（尚未创建）\n"
                 f"- agent 层（同 agent 跨设备共享）："
-                f"memory_write(title=\"{identity.agent_prefix}必读\", …)\n"
+                f"memory_write(title=\"{identity.shared_prefix}必读\", …)\n"
                 f"- identity 层（本机专属）："
                 f"memory_write(title=\"{identity.device_prefix}必读\", …)\n"
                 "- 必读只放指针与纪律，事实一律进 topics/（与 user 层共享）")
@@ -875,10 +881,11 @@ class Store:
         if not writable(rel, identity):
             raise StoreError(
                 f"写入被拦截: {rel} 不在你的 identity 专属范围内。\n"
-                f"你的身份: {identity.token}——可写 {identity.agent_prefix}"
-                "（第一层平铺文件，同 agent 跨设备共享）与 "
+                f"你的身份: {identity.token}——可写 {identity.shared_prefix}"
+                "（同 agent 跨设备共享子树）与 "
                 f"{identity.device_prefix}（本机专属）子树；"
-                "其他 agent / 其他设备的专属区互相不可见。")
+                "agents/<agent>/ 第一层平铺文件只读兼容（历史遗留），"
+                "写入请进上述两类子树；其他 agent / 其他设备的专属区互相不可见。")
 
     def _require_agents_visible(self, rel: str, identity: Identity | None) -> None:
         """agents/ 专属区的读守卫：其他 identity 的专属区不可见。

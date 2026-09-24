@@ -132,7 +132,8 @@ const treeData = computed(() => {
       .filter(n => n.path.startsWith('curator/'))
       .map(noteNode) },
   ]})
-  // 专属记忆（agents/）：agent 层平铺文件 + 各设备子树（与后端 identity 分层同构）
+  // 专属记忆（agents/）：shared/ = agent 层共享子树，<device>/ = 本机专属
+  //（与后端 identity 分层同构）
   const agentNotes = notes.value.filter(n => n.path.startsWith('agents/'))
   if (agentNotes.length) {
     const byAgent = {}
@@ -140,7 +141,7 @@ const treeData = computed(() => {
       const seg = n.path.split('/')
       const agent = seg[1] || '（未分组）'
       const g = (byAgent[agent] = byAgent[agent] || { shared: [], devices: {} })
-      if (seg.length === 3) g.shared.push(n)
+      if (seg[2] === 'shared') g.shared.push(n)
       else if (seg.length >= 4) {
         (g.devices[seg[2]] = g.devices[seg[2]] || []).push(n)
       }

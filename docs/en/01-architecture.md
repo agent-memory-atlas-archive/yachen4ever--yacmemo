@@ -126,9 +126,9 @@ memory_root/
 │                     + agent 可按模块自由增设的详细 md——目录即归属
 ├── archive/<主题>/   已归档主题（免注册区，检索仍可用，context 不再注入）
 ├── journal/          时间线流水（免注册区，豁免重名拦截）
-├── agents/<agent>/          identity 专属区：第一层平铺文件 = agent 层（同 agent
-│                            跨设备共享，如 必读.md）；<device>/ 子树 = 本机专属；
-│                            不同 identity 互相不可见（2026-09-24 起，见 4.5）
+├── agents/<agent>/          identity 专属区：shared/ 子树 = agent 层（同 agent
+│                            跨设备共享，如 shared/必读.md）；<device>/ 子树 = 本机
+│                            专属；不同 identity 互相不可见（2026-09-24 起，见 4.5）
 └── .index/           派生索引（SQLite + LanceDB，可随时删除重建，不进 git）
 ```
 
@@ -183,10 +183,10 @@ Every successful store change automatically produces a git commit (write/edit/ed
 MCP requests may carry an identity token (`Authorization: Bearer <device>_<agent>`, e.g. `r9000x_teleagent`; stdio uses the `YACMEMO_TOKEN` env var) that states "which agent on which machine". The token is a deterministic concatenation with no registration or storage; one user can mount multiple identities:
 
 - **User tier (shared)**: `topics/`, `journal/`, `TOPICS.md`, `PROFILE.md` — fully shared by all identities;
-- **Agent tier**: flat files directly under `agents/<agent>/` — shared across that agent's devices (role discipline, must-reads);
+- **Agent tier**: the `agents/<agent>/shared/` subtree — shared across that agent's devices (role discipline, must-reads);
 - **Identity tier**: the `agents/<agent>/<device>/` subtree — visible only to that identity (per-machine environment, device differences).
 
-Exclusive isolation is enforced server-side (`visible`/`writable` in `identity.py` are the single source of truth, shared by store/search/tools): reads, retrieval (scoped search), listing and writes are all filtered, and `memory_context` automatically injects the agent-tier and device-tier `必读.md` at cold start. Conventions: the first level under `agents/<agent>/` holds flat files only — any subdirectory is treated as a device directory (which keeps visibility a pure string predicate); must-reads hold pointers and discipline only, facts go into `topics/` to be shared with every agent. Legacy setups without a token keep working on the user tier; the `agents/` zone is invisible and unwritable for them. The WebUI is the human-administrator view (sees everything); its "Identities" page lists identities and mints tokens, and the WebUI's own access password is `[webui].password`.
+Exclusive isolation is enforced server-side (`visible`/`writable` in `identity.py` are the single source of truth, shared by store/search/tools): reads, retrieval (scoped search), listing and writes are all filtered, and `memory_context` automatically injects the agent-tier and device-tier `必读.md` at cold start. Conventions: the first level under `agents/<agent>/` holds only two kinds of subdirectories — `shared/` and `<device>/` (`shared` is a reserved name and cannot be used as a device name), which keeps visibility a pure string predicate; legacy flat files are read-only, and all writes go into the two subtrees; must-reads hold pointers and discipline only, facts go into `topics/` to be shared with every agent. Legacy setups without a token keep working on the user tier; the `agents/` zone is invisible and unwritable for them. The WebUI is the human-administrator view (sees everything); its "Identities" page lists identities and mints tokens, and the WebUI's own access password is `[webui].password`.
 
 ---
 
@@ -359,7 +359,7 @@ A list of `[[链接]]` pointing to nonexistent notes, output by audit. `memory_m
 主题：
 9. 主题的注册、注销与归档都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了" / "X 归档吧"）→ topic_register / topic_unregister / archive_topic；主题现状写入 abstract（topics/<主题>/abstract.md）并就地更新，目录内可按模块增设详细 md。
 10. 只在注册主题内写笔记（**已代码化为写路径硬拦截**，见 6.1）；journal/、archive/、curator/、agents/ 之外发现游离文件时提示用户归位。
-11. 专属必读写自己的 identity 区：agents/<agent>/必读.md（同 agent 跨设备共享）或 agents/<agent>/<device>/必读.md（本机专属）；必读只放指针与纪律，事实一律进 topics/。携带 identity token 时 memory_context 自动注入，注入即视为已读，无需提示词提醒。引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
+11. 专属必读写自己的 identity 区：agents/<agent>/shared/必读.md（同 agent 跨设备共享）或 agents/<agent>/<device>/必读.md（本机专属）；必读只放指针与纪律，事实一律进 topics/。携带 identity token 时 memory_context 自动注入，注入即视为已读，无需提示词提醒。引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
 12. memory_search 只返回 user 层 + 你的专属区——搜不到别人的专属内容是设计使然，不是索引坏了。
 删除：
 13. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。

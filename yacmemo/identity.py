@@ -8,11 +8,13 @@ token 约定为 `<device>_<agent>`（device 在前——同一台机器的各 ag
 层级模型（visible/writable 是唯一权威实现，store/search/tools 共用）：
 - user 层（所有 identity 共享）：topics/、journal/、archive/、curator/、
   TOPICS.md、PROFILE.md；
-- agent 层（同 agent 跨设备共享）：agents/<agent>/ 下的平铺文件（必读.md）；
+- agent 层（同 agent 跨设备共享）：agents/<agent>/shared/ 子树（必读.md）；
 - identity 层（仅本 identity）：agents/<agent>/<device>/ 子树。
 
-约定：agents/<agent>/ 下第一层只能是文件，子目录一律视为设备目录——
-可见性判定因此是纯字符串逻辑，不需要文件系统参与。
+约定：agents/<agent>/ 第一层只有两类子目录——shared/ 与 <device>/
+（shared 为保留目录名，不能用作设备名）。历史平铺文件
+（agents/<agent>/x.md）只读兼容，写入一律收敛到上述两类子树——
+可见性判定因此仍是纯字符串逻辑，不需要文件系统参与。
 无身份访问规则：
 - 人类入口（WebUI、服务端内部）identity=None → 全库可见（人类是管理员）；
 - MCP 工具未带 token → user 层照常可用，agents/ 区不可见不可写。
@@ -24,6 +26,8 @@ import re
 from dataclasses import dataclass
 
 AGENTS_PREFIX = "agents/"
+# agent 层共享子树目录名（保留字：设备名不得占用）
+SHARED_DIR = "shared"
 # slug：小写字母/数字/短横线，1-32 位；不允许下划线——它是 token 的分隔符
 _SLUG_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?")
 
@@ -45,8 +49,13 @@ class Identity:
 
     @property
     def agent_prefix(self) -> str:
-        """agent 层共享区（平铺文件）。"""
+        """agent 根目录（其下只有 shared/ 与 <device>/ 两类子目录）。"""
         return f"agents/{self.agent}/"
+
+    @property
+    def shared_prefix(self) -> str:
+        """agent 层共享子树（同 agent 跨设备共享）。"""
+        return f"agents/{self.agent}/{SHARED_DIR}/"
 
     @property
     def device_prefix(self) -> str:
@@ -65,6 +74,9 @@ def _validate_slug(kind: str, value: str) -> str:
         raise IdentityError(
             f"{kind} 名非法: {value!r}（需小写字母/数字/短横线，1-32 位，"
             "不含下划线——它是 token 分隔符）")
+    if kind == "device" and v == SHARED_DIR:
+        raise IdentityError(
+            "device 名不能是 'shared'——它是 agent 层共享子树的保留目录名")
     return v
 
 
@@ -98,6 +110,9 @@ def visible(rel: str, identity: Identity | None) -> bool:
     """rel 是否对 identity 可见（MCP 读/检索/list 的统一过滤谓词）。
 
     identity=None（人类/服务端内部）恒可见。
+    agents/<agent>/ 下两类子目录：shared/（同 agent 共享）与 <device>/
+    （本机专属）。历史平铺文件（agents/<agent>/x.md）保持可读——写入已
+    一律收敛到 shared/，见 writable。
     """
     if identity is None:
         return True
@@ -108,19 +123,18 @@ def visible(rel: str, identity: Identity | None) -> bool:
         return False
     if len(seg) <= 2:
         return True  # 目录本身（list 用）
-    # 平铺文件（agent 层共享，len(seg)==3）对所有同 agent 设备可见；
-    # 更深的路径都是设备子树，只有本机可见（含共享子目录约定上不存在，
-    # 人类经 WebUI 手工创建的也会对 agent 隐藏——见模块 docstring）
     if len(seg) == 3:
-        return True
-    return seg[2] == identity.device
+        return True  # 历史平铺文件：只读兼容
+    return seg[2] == SHARED_DIR or seg[2] == identity.device
 
 
 def writable(rel: str, identity: Identity | None) -> bool:
     """rel 是否对 identity 可写（MCP 写路径守卫谓词）。
 
-    identity=None 对 agents/ 区一律不可写（user 层照常——由调用方区分：
+    identity=None 对 agents/ 区一律不可写（user 层写守卫由调用方区分：
     store 的守卫只在 rel 落在 agents/ 时才咨询本函数）。
+    agents/<agent>/ 第一层不再允许平铺文件（只读兼容历史），写入收敛为
+    两类子树：shared/（同 agent 共享）与本机 <device>/。
     """
     if identity is None:
         return False
@@ -130,5 +144,5 @@ def writable(rel: str, identity: Identity | None) -> bool:
     if len(seg) < 2 or seg[1] != identity.agent:
         return False
     if len(seg) == 3:
-        return True  # agent 层平铺共享文件：同 agent 的设备共同维护
-    return seg[2] == identity.device
+        return False  # 平铺层禁止写入：共享内容进 shared/，设备内容进设备子树
+    return seg[2] == SHARED_DIR or seg[2] == identity.device

@@ -3,7 +3,7 @@
     <n-alert type="info" :show-icon="false" style="margin-bottom: 16px">
       <n-text strong>专属记忆层级模型：</n-text>
       user 层（topics/、journal/、PROFILE.md）所有身份共享；
-      <n-text code>agents/&lt;agent&gt;/</n-text> 下平铺文件为 agent 层（同 agent 跨设备共享）；
+      <n-text code>agents/&lt;agent&gt;/shared/</n-text> 为 agent 层（同 agent 跨设备共享）；
       <n-text code>agents/&lt;agent&gt;/&lt;device&gt;/</n-text> 为 identity 层（本机专属）。
       不同 identity 互相不可见：memory_search 只返回 user 层 + 自己的专属区，
       memory_context 自动注入自己的两份必读。
@@ -31,7 +31,7 @@
           </n-space>
         </template>
         <n-text depth="3" style="font-size: 12px">
-          agent 层共享目录：agents/{{ row.agent }}/（第一层平铺文件，所有设备共享）
+          agent 层共享子树：agents/{{ row.agent }}/shared/（同 agent 所有设备共享）
         </n-text>
         <n-space vertical size="small" style="margin-top: 6px">
           <n-button v-for="f in filesOf(row.agent).shared" :key="f.path"
@@ -145,14 +145,14 @@ function fileName(f) {
   return f.title || f.path.split('/').pop().replace(/\.md$/, '')
 }
 
-// agents/ 下按 agent 分组：第一层平铺文件 = agent 层共享，更深层 = 设备子树
+// agents/<agent>/ 下按层分组：shared/ = agent 层共享子树，其余子目录 = 设备
 function filesOf(agent) {
   const shared = []
   const devices = {}
   for (const f of agentFiles.value) {
     const seg = f.path.split('/')
     if (seg[1] !== agent) continue
-    if (seg.length === 3) shared.push(f)
+    if (seg[2] === 'shared') shared.push(f)
     else if (seg.length >= 4) (devices[seg[2]] = devices[seg[2]] || []).push(f)
   }
   return { shared, devices }

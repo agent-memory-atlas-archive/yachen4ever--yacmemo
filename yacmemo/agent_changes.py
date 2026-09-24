@@ -12,10 +12,20 @@ integration_check(onboarded_version=...) 获取增量变更与最新写入约定
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.3.1"
+AGENT_CONTRACT_VERSION = "0.3.2"
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.2": (
+        "- agent 层共享区路径变更：共享内容（必读等）迁入 "
+        "agents/<agent>/shared/ 子树；本机层不变（agents/<agent>/<device>/）。"
+        "第一层平铺文件（agents/<agent>/x.md）只读兼容——写入一律进 shared/ "
+        "或本机设备子树，编辑/新建平铺路径会被拦截；\n"
+        "- shared/必读.md 占位模板：WebUI 建 identity 时自动预创建，注入时"
+        "若仍是模板（含'占位模板'标记）会持续提醒用 memory_edit 填写；\n"
+        "- device 名不能叫 shared（保留目录名）；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.1": (
         "- 会话必读口径明确：memory_context 注入的画像 + agent 层必读 + "
         "本机层必读三件套即会话必读内容，注入即视为已读，无需再单独读文件；\n"
@@ -66,8 +76,8 @@ AGENT_CONTRACT_DIGEST = (
     "- abstract（topics/<主题>/abstract.md）是摘要卡，保持一句话现状；"
     "详细内容写成模块笔记；\n"
     "- 更新事实用 memory_edit / memory_edit_section 就地改，不新建重复笔记；\n"
-    "- 专属必读：写 agents/<agent>/必读.md（同 agent 跨设备共享，第一层只放"
-    "平铺文件）或 agents/<agent>/<device>/必读.md（本机专属）；只放指针与纪律，"
+    "- 专属必读：agent 层写 agents/<agent>/shared/必读.md（同 agent 跨设备"
+    "共享），本机层写 agents/<agent>/<device>/必读.md；只放指针与纪律，"
     "事实进 topics/；引用其他层路径必须代入真实设备名，模板占位一律用尖括号"
     "（agents/<agent>/<device>/…），禁止留空段（agents/x//必读.md 会被当成"
     "真实路径、检索必然失败）；\n"

@@ -176,10 +176,13 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                 for agent_dir in sorted(agents_dir.iterdir()):
                     if not agent_dir.is_dir():
                         continue
-                    shared = list(agent_dir.glob("*.md"))
+                    # shared/ = agent 层共享子树；其余子目录 = 设备
+                    shared_dir = agent_dir / "shared"
+                    shared = (list(shared_dir.rglob("*.md"))
+                              if shared_dir.is_dir() else [])
                     devices = []
                     for d in sorted(agent_dir.iterdir()):
-                        if not d.is_dir():
+                        if not d.is_dir() or d.name == "shared":
                             continue
                         notes = list(d.rglob("*.md"))
                         devices.append({
@@ -211,6 +214,7 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
     async def identity_create(request: Request):
         try:
             uid = request.path_params["user"]
+            c = _ctx(uid)
         except KeyError:
             return _err("未知用户", 404)
         body = await _body(request)
@@ -220,14 +224,32 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         except IdentityError as e:
             return _err(str(e))
         _register_identity(uid, ident)
+        # shared/必读.md 占位模板随创建落盘（目录即激活，git 快照照常）——
+        # agent 首次冷启动就能从注入里读到"待填写"提醒，而不是空指引
+        stub_rel = f"{ident.shared_prefix}必读.md"
+        stub_created = False
+        if not (c["store"].root / stub_rel).is_file():
+            stub = (f"# {ident.agent} 专属必读（跨设备共享）\n\n"
+                    "> 占位模板：请用 memory_edit 就地替换为你的专属纪律与指针，"
+                    "填写后移除本行。\n"
+                    "- [纪律] 只放指针与纪律；事实一律写 topics/（user 层共享）\n")
+            try:
+                await run_in_threadpool(c["store"].save, stub_rel, stub)
+                stub_created = True
+            except Exception as e:
+                logger.warning("identity stub creation failed for %s: %s",
+                               stub_rel, e)
         return _ok({
             "token": ident.token,
             "agent": ident.agent,
             "device": ident.device,
             "agent_dir": ident.agent_prefix,
+            "shared_dir": ident.shared_prefix,
             "device_dir": ident.device_prefix,
+            "stub_created": stub_created,
             "note": "token 即 <device>_<agent> 确定性拼接，可随时在此页重建；"
-                    "专属目录在对应 identity 第一次写入时自动创建",
+                    "shared/必读.md 占位模板已就位，agent 冷启动注入即读，"
+                    "填写前注入会持续提醒",
         })
 
     async def index(request: Request):

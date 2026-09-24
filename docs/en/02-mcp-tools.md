@@ -25,14 +25,14 @@ The token is a deterministic concatenation (`<device>_<agent>`; lowercase letter
 | Tier | Paths | Visibility | Purpose |
 |---|---|---|---|
 | user tier | `topics/`, `journal/`, `TOPICS.md`, `PROFILE.md`, ... | shared by all identities | topic memory, profile, running logs |
-| agent tier | flat files under `agents/<agent>/` | shared across that agent's devices | role discipline, must-reads |
+| agent tier | `agents/<agent>/shared/` subtree | shared across that agent's devices | role discipline, must-reads |
 | identity tier | `agents/<agent>/<device>/` subtree | this identity only | per-machine environment, device differences |
 
 - **Exclusive isolation is server-enforced**: reads, retrieval, listing and writes are all filtered end to end — an identity sees only the user tier + its own agent tier + its own device subtree; other identities' exclusive zones are invisible and unwritable;
 - **Scoped search**: `memory_search` returns only the user tier + this identity's exclusive zone;
-- **memory_context auto-injection**: with a token, the agent-tier `agents/<agent>/必读.md` and device-tier `agents/<agent>/<device>/必读.md` sections are appended (a write template is provided when they do not exist yet);
+- **memory_context auto-injection**: with a token, the agent-tier `agents/<agent>/shared/必读.md` and device-tier `agents/<agent>/<device>/必读.md` sections are appended (a write template is provided when they do not exist yet; a placeholder stub keeps prompting until filled);
 - **Legacy setups without a token keep working** on the user tier, but the `agents/` zone is invisible and unwritable (writes are intercepted with configuration guidance); a misspelled token is rejected as an invalid token with the convention spelled out;
-- Write convention: **must-reads hold pointers and discipline only — facts always go into `topics/`** to be shared with every agent; the first level under `agents/<agent>/` holds flat files only, and any subdirectory is treated as a device directory. When referencing another tier's file, substitute the real device name (`agents/teleagent/r9000x/必读.md`); template placeholders always use angle brackets (`agents/<agent>/<device>/…`) and empty segments are forbidden — `agents/teleagent//必读.md` is treated as a literal path and retrieval will always fail.
+- Write convention: **must-reads hold pointers and discipline only — facts always go into `topics/`** to be shared with every agent; the first level under `agents/<agent>/` holds only two kinds of subdirectories — `shared/` and `<device>/` (legacy flat files are read-only; all writes go into the two subtrees). When referencing another tier's file, substitute the real device name (`agents/teleagent/r9000x/必读.md`); template placeholders always use angle brackets (`agents/<agent>/<device>/…`) and empty segments are forbidden — `agents/teleagent//必读.md` is treated as a literal path and retrieval will always fail.
 
 ## 1. memory_search
 
