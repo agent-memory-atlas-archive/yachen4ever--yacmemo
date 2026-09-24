@@ -16,9 +16,14 @@ def test_parse_proposal_plain_and_fenced():
     assert parse_proposal(fenced)["summary"] == "s2"
 
 
-def test_parse_proposal_invalid_raises():
-    with pytest.raises(ValueError):
+def test_parse_proposal_invalid_raises_with_diagnosis():
+    """解析失败必须可诊断：错误带原始返回开头 + 常见原因指引（2026-09-24 实测：
+    [curator].model 配成 embedding 模型时回显垃圾内容，旧报错 'Expecting value'
+    无从查案）。RuntimeError 不是 ValueError，调用方按宽异常兜底。"""
+    with pytest.raises(RuntimeError) as e:
         parse_proposal("这不是 JSON")
+    assert "这不是 JSON" in str(e.value)
+    assert "embedding" in str(e.value)
 
 
 def test_build_material_contains_registry_cards_and_audit(tstore: Store):

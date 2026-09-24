@@ -437,7 +437,8 @@ async function runCurator() {
     message.success('深度审查完成')
     await loadProposals()
   } catch (e) {
-    message.error('深度审查失败: ' + e.message)
+    // 服务端消息已带「深度审查失败」前缀，避免重复
+    message.error(e.message)
   } finally {
     curatorRunning.value = false
   }
@@ -462,12 +463,33 @@ async function judge(p, f, action) {
   }
 }
 
+async function copyText(text) {
+  // navigator.clipboard 仅在 secure context（HTTPS/localhost）可用——
+  // LAN 上纯 IP 的 HTTP 访问是 insecure context，必须走 execCommand 兜底
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  try {
+    if (!document.execCommand('copy')) throw new Error('浏览器拒绝了复制')
+  } finally {
+    document.body.removeChild(ta)
+  }
+}
+
 async function copyExecInstruction(p, f) {
   const text = (`请执行记忆质量提案 ${p.file} 第${f.index}条（[${f.severity}] ${f.type}）：`
     + `${f.reason} 涉及：${f.paths.join('、') || '—'} 建议：${f.proposal || '—'}。`
     + `执行完成后在提案文件的「裁决记录」下留痕。`)
   try {
-    await navigator.clipboard.writeText(text)
+    await copyText(text)
     message.success('执行指令已复制，粘贴给任意 agent 即可')
   } catch (e) {
     message.error('复制失败：' + e.message)

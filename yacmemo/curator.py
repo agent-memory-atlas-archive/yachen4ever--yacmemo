@@ -70,7 +70,15 @@ def default_llm_call(config: Config):
             timeout=cfg.timeout,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        try:
+            return resp.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            # 端点 200 + 非 chat 响应（空体/错模型回显）时不指名就查不到案：
+            # 错误必须带上状态码与 body 开头，把嫌疑指向 [curator] 三件套
+            raise RuntimeError(
+                f"LLM 响应不可用（HTTP {resp.status_code}，body 开头: "
+                f"{resp.text[:200]!r}）——请检查 [curator].base_url / api_key，"
+                "并确认 model 是 chat 主模型而非 embedding 等非对话模型") from e
 
     return call
 
@@ -102,7 +110,13 @@ def parse_proposal(raw: str) -> dict:
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
-    return json.loads(text.strip())
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"提案 JSON 解析失败（{e}）。LLM 原始返回开头: {raw[:200]!r}——"
+            "常见原因：[curator].model 配成了非 chat 模型（如 embedding 模型）"
+            "或返回被截断（调大 max_tokens）") from e
 
 
 def _format_findings(findings: list) -> list[str]:
