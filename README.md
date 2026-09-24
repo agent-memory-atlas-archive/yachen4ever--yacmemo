@@ -12,8 +12,8 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
 - **一个服务，所有设备**——唯一的服务进程跑在数据所在的机器上（streamable HTTP）。Claude Code、Codex、Cursor、自研 runtime……任何 MCP 客户端只需添加一个 URL，客户端零安装、零进程。
 - **记忆子系统里没有生成式 LLM**——唯一的模型调用是 0.6B 的 embedding（~50ms）。结构靠约定产生，一致性靠确定性 API 守卫强制，模糊判断交给你的主模型在读取时完成。
 - **主题注册制**——长期记忆的主题由你显式声明（"把 X 加入长期记忆"），注册表 + 主题卡让主次分明；**写入被硬性限定在已注册主题内**（未注册主题的路径一律拒写，force 不豁免——先注册、后写入）；agent 会话开始先回顾记忆体系，冷启动不再失忆；
-- **curator 质量策展**——可配置的 LLM 定期审查记忆质量，产出**提案报告**：只提案、绝不自动执行，批准后才落地；
-- **WebUI 控制台**——浏览器打开 `/ui/`（Vue 3 + Naive UI，`scripts/build_webui.sh` 构建）：主题树内浏览/编辑笔记（**存储中任何 markdown 皆可见**：注册主题、已归档、免注册区、游离文件、系统文件）、在线搜索、**审计双模式**（确定性规则 + curator LLM 深度审查提案）、**审计历史快照与问题处置记录**（journal/audit/，可回看、可追溯）、画像/偏好编辑、使用留痕与健康总览、**config.toml 在线配置**；
+- **curator 质量策展**——可配置的 LLM 定期审查记忆质量，产出**提案报告**：只提案、绝不自动执行；**判断/执行/验证三权分立**——人在 WebUI 只做判断（忽略误报 / 复制执行指令派给任意 agent），agent 执行并经 `memory_audit_update` 汇报过程，复审由审计自动确认（已执行且下轮不再报告即通过）；提案全部条目收口后自动**结案**，不再出现在 agent 的检索结果里；
+- **WebUI 控制台**——浏览器打开 `/ui/`（Vue 3 + Naive UI，`scripts/build_webui.sh` 构建）：主题树内浏览/编辑笔记（**存储中任何 markdown 皆可见**：注册主题、已归档、免注册区、游离文件、系统文件）、在线搜索、**审计双模式**（确定性规则 + curator LLM 深度审查提案，工作流条 + 状态标签 + 执行时间线 + 状态筛选）、**审计历史快照与判断/执行记录**（journal/audit/ + audit_actions/audit_exec_events，可回看、可追溯）、画像/偏好编辑、使用留痕与健康总览、**config.toml 在线配置**；
 - **一致性是被强制的，不是被希望的**——`memory_write` 先做主题覆盖拦截再做近似重复标题拒绝，`memory_edit` 强制锚点唯一，`memory_move`/`save` 目标同受约束，矛盾在检索结果里带 ⚠ 标注并存呈现，系统永不静默删除或隐藏任何记忆。
 - **记忆是被版本管理的**——每次写入/编辑/移动/删除自动产生一个 git commit（`write: x.md`），记忆仓库永远 git-clean；删错可恢复，历史可回溯，agent 无需文件系统权限。
 
@@ -83,7 +83,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 **第一次用？**请先读 [用户使用手册](docs/00-user-guide.md)——上手、日常用法、常见问题都在里面。
 
-## MCP 工具（17 个）
+## MCP 工具（18 个）
 
 | 工具 | 用途 |
 |---|---|
@@ -94,7 +94,8 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `memory_edit_section` | 按小节整段替换 |
 | `memory_move` | 移动文件，索引跟随；目标路径同样受主题注册制约束 |
 | `memory_delete` | 删除笔记（**仅用户明确要求时**，git 历史可恢复） |
-| `memory_audit` | 自愈式一致性审计（外部改动/删除自愈、D1–D5 一致性问题、缺向量笔记点名+自愈重试、守卫统计、过期冲突对清除计数、审计快照路径） |
+| `memory_audit` | 自愈式一致性审计（外部改动/删除自愈、D1–D5 一致性问题、缺向量笔记点名+自愈重试、守卫统计、过期冲突对清除计数、审计快照路径）；输出含「执行进度」与「复审通过」节 |
+| `memory_audit_update` | 执行审计问题修复时向 server 汇报进度（executing/progress/executed/blocked），identity 自动入时间线；复审由审计自动确认 |
 | `memory_list` | 目录树 / 最近变更 |
 | `memory_context` | **会话开始先调**：返回接入契约版本头 + 主题注册表 + 各主题卡摘要头（冷启动回顾） |
 | `topic_list` | 列出长期记忆主题（活跃/已归档分组） |

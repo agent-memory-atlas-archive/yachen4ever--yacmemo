@@ -41,6 +41,8 @@ codex mcp add yacmemo --url http://debsvc.local:9721/<用户ID>/mcp
    - **专属必读写自己的 identity 区**：`agents/<agent>/shared/必读.md`（同 agent 跨设备共享）或 `agents/<agent>/<device>/必读.md`（本机专属）；只放指针与纪律，事实一律进 topics/；引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
    - **abstract 是摘要卡**（`topics/<主题>/abstract.md`）：保持一句话现状，现状变化用 `memory_edit` 就地更新；详细内容写成模块笔记 `topics/<主题>/<笔记名>`，不要把长文塞进 abstract；
    - 事实行用 observation 语法：`- [配置] 服务端口为 9721`；
+   - **执行审计问题要汇报进度**：处理 `memory_audit` 发现的问题、或 WebUI「复制执行指令」派下的问题时，先 `memory_audit_update(issue_id, "executing")` 接手，关键动作 `"progress"` 汇报，完成 `"executed"` 附改动摘要，受阻 `"blocked"` 说明卡点；复审由审计自动确认（下轮不再报告即通过），不要声称"已验证"、不要代替人忽略问题；
+   - **已结案提案不再可检索**：curator/ 提案报告的全部条目执行完成或忽略后会被系统打结案标记，`memory_search` 默认不返回——不要去执行已结案提案里的条目；`memory_read` 按路径仍可读（那是明确查阅）；
    - 注册 / 注销 / 归档主题、删除笔记：**仅在用户明确要求时执行**。
 
 3. **不确定就问**：找不到该写进哪个主题、或对记忆内容有疑问，向用户说明而不是猜测。

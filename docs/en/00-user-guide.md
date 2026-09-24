@@ -147,7 +147,12 @@ The agent calls `update_user_preference` to maintain it section by section (e.g.
 
 ### 2.6 Weekly curator proposals
 
-In the early hours of every Saturday, the curator (a configurable LLM reviewer) automatically runs a whole-store quality review and produces the Proposal Report. **It only proposes, never executes** — pick the items you approve in the report and have the agent execute them. Manual trigger anytime: WebUI audit page → the "Deep Review" button (about 1–2 minutes); historical proposals are listed by date in the "Quality Proposals" area of the audit page. Which LLM the curator uses and which users it covers are configured in the config.toml on the WebUI "Settings" page (saving auto-validates + backs up; changes take effect after a restart). Of course, you can also direct things yourself at any time (as this guide does throughout).
+In the early hours of every Saturday, the curator (a configurable LLM reviewer) automatically runs a whole-store quality review and produces the Proposal Report. **It only proposes, never executes** — proposals are work items for agents: **there is no "Adopt" step; dispatching is adopting**. In the "Quality Proposals" area of the WebUI audit page, each proposal has exactly two actions:
+
+- **Copy Execution Instruction** — paste it to any agent and work starts; the agent reports progress (started/progress/done/blocked) back to the system in real time, and the full timeline is shown under the item;
+- **Ignore** — a false positive or something you don't want done; one click settles it permanently.
+
+Once every finding is executed or dismissed, the proposal is **closed automatically**: a settled marker is stamped at the top of the file and it no longer appears in agents' search results (so old reports can't be dug up and executed twice). Manual deep review anytime: WebUI audit page → "Deep Review Now" (about 1–2 minutes); historical proposals are listed by date and filterable by status. Which LLM the curator uses and which users it covers are configured in the config.toml on the WebUI "Settings" page (saving auto-validates + backs up; changes take effect after a restart). Of course, you can also direct things yourself at any time (as this guide does throughout).
 
 ### 2.7 The audit habit
 
@@ -168,7 +173,7 @@ The agent calls `memory_audit`, which outputs six kinds of information:
 
 Once a week is recommended, or anytime memory feels "a bit messy".
 
-> The WebUI audit page is more convenient: audit snapshots are taken **once per day** (`journal/audit/<date>.md`; re-running on the same day appends a "Re-review" section), and for each issue (duplicate titles/collisions/dangling/stray) you can directly click "Handled" or "Ignore" — disposition records are kept with the snapshot, and handled items stop being flagged repeatedly; expired snapshots are auto-cleaned weekly by the curator (7 days kept by default) — see [07-webui.md](07-webui.md) §2.3 for details.
+> **The WebUI audit page is more convenient**, and the whole page follows one role split: **humans only judge (dismiss false positives / dispatch to agents), agents only execute (and report progress), the system only verifies (re-checks confirmed automatically)**. Each issue carries a status tag (pending / executing / executed / verified / dismissed) and two actions — "Copy Execution Instruction" embeds the reporting convention, so pasting it to any agent starts the work; "Ignore" settles a false positive permanently. For issues an agent has fixed, the next audit not reporting them anymore means automatic "verified" — no human sign-off needed; a verified issue that reappears is flagged as regressed. Filter by status; snapshots are taken **once per day** (`journal/audit/<date>.md`; re-running on the same day appends a "Re-review" section), the "Judgment & execution log" merges human dispositions and agent reports chronologically, and expired snapshots are auto-cleaned weekly by the curator (7 days kept by default) — see [07-webui.md](07-webui.md) §2.3 for details.
 
 ---
 
@@ -225,7 +230,7 @@ Open `http://debsvc.local:9721/ui/` in a browser (bundled with the server, nothi
 
 - **Notes**: browse by user in the left-hand list; the body renders as markdown; "Edit" modifies the source file directly and syncs the index; "＋" creates a new note (the near-duplicate-title guard applies here too; if rejected, tick "Force" and save again — clicking the button on the web page counts as the human confirmation); "Delete" also cleans the index (still recoverable from git);
 - **Search**: manually verify retrieval quality anytime; supports switching between the hybrid/fts/vector channels; ⚠ markers are directly visible; clicking a result jumps to the note;
-- **Audit**: dual mode — "Deterministic Audit" for quick self-healing + rule detection (duplicate titles/semantic collisions/dangling links/stray files), "Deep Review" produces a proposal report from the configured LLM; collision entries carry "Merged / Ignore" buttons — this is the entry point for human adjudication;
+- **Audit**: dual mode — "Deterministic Audit" for quick self-healing + rule detection (duplicate titles/semantic collisions/dangling links/stray files), "Deep Review" produces a proposal report from the configured LLM; both areas run the full workflow: each issue/proposal carries a status tag (pending/executing/executed/verified/dismissed), filters by status, and an expandable agent execution timeline; a human makes exactly two judgments — "Ignore" a false positive, or "Copy Execution Instruction" to dispatch an agent; issues an agent fixed are verified automatically on the next audit;
 - **Usage Log**: a usage log of every MCP tool call **and every WebUI console change** (save/create/delete/profile edits, client marked as `webui`) — time, user, tool, content summary, client UA, IP, duration, pre-change content hash. The most important page to watch during the trial period: which clients are active, what they called, what they wrote, whether anything errored;
 - **Health**: embedding configuration status, per-user note counts/collision counts/guard statistics, the **topic memory overview table**, curator proposal counts, client inventory, call volumes and error counts over the last 14 days;
 - **Settings**: online config.toml editing (users / embedding model / curator LLM) — auto-validated and backed up before saving, with an optional service restart.
@@ -245,7 +250,7 @@ This is not a malfunction — it's the anti-duplication mechanism doing its job.
 "This note and another one may be talking about the same thing." Just have the agent read both and merge. The system never deletes on its own — it would rather make you take an extra look than let a correct memory disappear.
 
 **Q: How should I handle "semantic collisions" in the audit?**
-See the three cases in the WebUI section above: two copies of the same topic → merge into one note, then click "Handled"; different topics that happen to share one fact → click "Ignore". Collisions are grouped by note pair; for each pair you can directly click "Open A / Open B" to jump over and compare.
+Two copies of the same topic → decide which one to keep and dispatch the merge to an agent (copy the execution instruction); different topics that happen to share one fact → click "Ignore". Collisions are grouped by note pair with both sides' text shown, so you can compare before judging.
 
 **Q: Can't find something you're sure was recorded?**
 Troubleshoot in order: ① switch to a keyword-style query ("port 9721" instead of "what's the port"); ② use `memory_list` to check whether the file exists; ③ use `memory_audit` to see whether external changes haven't been aligned; ④ check the embedding endpoint via `/health` and the config — when it's down, semantic retrieval (natural-sentence queries) stops working and results carry a "vector channel unavailable" degradation hint, while keyword retrieval (including the substring fallback for two-character words) keeps working;

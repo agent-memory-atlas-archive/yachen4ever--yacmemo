@@ -12,8 +12,8 @@ yacmemo lets **all AI agents on all your computers** share one and the same long
 - **One service, all devices** — the only service process runs on the machine where the data lives (streamable HTTP). Claude Code, Codex, Cursor, in-house runtimes... any MCP client only needs to add one URL: zero installation, zero processes on the client.
 - **No generative LLM inside the memory subsystem** — the only model call is a 0.6B embedding (~50ms). Structure is produced by conventions, consistency is enforced by deterministic API guards, and fuzzy judgment is left to your main model at read time.
 - **Topic registry** — long-term memory topics are declared explicitly by you ("add X to long-term memory"); the registry + topic cards keep primary and secondary content clearly separated; **writes are hard-limited to registered topics** (paths under unregistered topics are always rejected, and force does not exempt — register first, write later); agents review the memory system at the start of a session, so cold starts no longer mean amnesia;
-- **Curator quality curation** — a configurable LLM periodically reviews memory quality and produces **proposal reports**: proposals only, never executed automatically; changes land only after approval;
-- **WebUI console** — open `/ui/` in a browser (Vue 3 + Naive UI, built with `scripts/build_webui.sh`): browse/edit notes inside the topic tree (**every markdown in storage is visible**: registered topics, archived, registry-free zones, stray files, system files), online search, **dual-mode audit** (deterministic rules + curator LLM deep-review proposals), **audit history snapshots and issue disposition records** (journal/audit/, reviewable and traceable), profile & preferences editing, usage log and health overview, **online config.toml editing**;
+- **Curator quality curation** — a configurable LLM periodically reviews memory quality and produces **proposal reports**: proposals only, never executed automatically; **judgment / execution / verification are separated** — in the WebUI a human only judges (dismiss false positives / copy an execution instruction to dispatch to any agent), agents execute and report progress via `memory_audit_update`, and re-verification is the audit's job (executed and no longer reported next round = verified); once every finding is settled the proposal is **closed** automatically and disappears from agent search results;
+- **WebUI console** — open `/ui/` in a browser (Vue 3 + Naive UI, built with `scripts/build_webui.sh`): browse/edit notes inside the topic tree (**every markdown in storage is visible**: registered topics, archived, registry-free zones, stray files, system files), online search, **dual-mode audit** (deterministic rules + curator LLM deep-review proposals; workflow strip + status tags + execution timelines + status filters), **audit history snapshots and the judgment/execution log** (journal/audit/ + audit_actions/audit_exec_events, reviewable and traceable), profile & preferences editing, usage log and health overview, **online config.toml editing**;
 - **Consistency is enforced, not hoped for** — `memory_write` applies topic-coverage interception first and near-duplicate title rejection second, `memory_edit` enforces unique anchors, `memory_move`/`save` targets are bound by the same constraints, contradictions are presented side by side with ⚠ markers in search results, and the system never silently deletes or hides any memory.
 - **Memory is version-controlled** — every write/edit/move/delete automatically produces a git commit (`write: x.md`), and the memory repo is always git-clean; mistaken deletions are recoverable, history is traceable, and agents need no filesystem permissions.
 
@@ -84,7 +84,7 @@ Agents on the same machine can also use stdio: `uv run yacmemo-mcp --root /path/
 
 **Using it for the first time?** Read the [user guide](docs/en/00-user-guide.md) first — onboarding, daily usage, and the FAQ are all in there.
 
-## MCP Tools (17)
+## MCP Tools (18)
 
 | Tool | Purpose |
 |---|---|
@@ -95,7 +95,8 @@ Agents on the same machine can also use stdio: `uv run yacmemo-mcp --root /path/
 | `memory_edit_section` | Replace an entire section in one go |
 | `memory_move` | Move a file, index follows; the destination path is bound by the same topic registry constraints |
 | `memory_delete` | Delete a note (**only when the user explicitly asks**; recoverable from git history) |
-| `memory_audit` | Self-healing consistency audit (self-heals external changes/deletions, D1–D5 consistency issues, names notes missing vectors + self-heal retry, guard statistics, expired conflict-pair cleanup counts, audit snapshot path) |
+| `memory_audit` | Self-healing consistency audit (self-heals external changes/deletions, D1–D5 consistency issues, names notes missing vectors + self-heal retry, guard statistics, expired conflict-pair cleanup counts, audit snapshot path); output includes "execution progress" and "verified on re-audit" sections |
+| `memory_audit_update` | Report execution progress while fixing an audit issue (executing/progress/executed/blocked); identity is recorded into the timeline automatically; re-verification is confirmed by the audit |
 | `memory_list` | Directory tree / recent changes |
 | `memory_context` | **Call first at session start**: returns the integration contract version header + topic registry + each topic card's abstract header (cold-start review) |
 | `topic_list` | List long-term memory topics (grouped into active/archived) |
