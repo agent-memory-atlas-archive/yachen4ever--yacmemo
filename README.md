@@ -10,7 +10,7 @@ yacmemo 让**你所有电脑上的所有 AI agent** 共享同一份长期记忆�
 
 - **markdown 是唯一真相**——笔记就是你服务器上的普通文件：人可读、可 git、可 Obsidian。SQLite + LanceDB 只是派生索引，删掉随时可重建。
 - **一个服务，所有设备**——唯一的服务进程跑在数据所在的机器上（streamable HTTP）。Claude Code、Codex、Cursor、自研 runtime……任何 MCP 客户端只需添加一个 URL，客户端零安装、零进程。
-- **记忆子系统里没有生成式 LLM**——唯一的模型调用是 0.6B 的 embedding（~50ms）。结构靠约定产生，一致性靠确定性 API 守卫强制，模糊判断交给你的主模型在读取时完成。
+- **记忆读写主路径零生成式 LLM**——常驻的模型调用只有 0.6B 的 embedding（~50ms）。结构靠约定产生，一致性靠确定性 API 守卫强制，模糊判断交给你的主模型在读取时完成；唯一的生成式环节是 curator 深度审查，而它离线运行、只读、只提案、绝不执行——落地永远走人工派发 + 写路径守卫。
 - **主题注册制**——长期记忆的主题由你显式声明（"把 X 加入长期记忆"），注册表 + 主题卡让主次分明；**写入被硬性限定在已注册主题内**（未注册主题的路径一律拒写，force 不豁免——先注册、后写入）；agent 会话开始先回顾记忆体系，冷启动不再失忆；
 - **curator 质量策展**——可配置的 LLM 定期审查记忆质量，产出**提案报告**：只提案、绝不自动执行；**判断/执行/验证三权分立**——人在 WebUI 只做判断（忽略误报 / 复制执行指令派给任意 agent），agent 执行并经 `memory_audit_update` 汇报过程，复审由审计自动确认（已执行且下轮不再报告即通过）；提案全部条目收口后自动**结案**，不再出现在 agent 的检索结果里；
 - **WebUI 控制台**——浏览器打开 `/ui/`（Vue 3 + Naive UI，`scripts/build_webui.sh` 构建）：主题树内浏览/编辑笔记（**存储中任何 markdown 皆可见**：注册主题、已归档、免注册区、游离文件、系统文件）、在线搜索、**审计双模式**（确定性规则 + curator LLM 深度审查提案，工作流条 + 状态标签 + 执行时间线 + 状态筛选）、**审计历史快照与判断/执行记录**（journal/audit/ + audit_actions/audit_exec_events，可回看、可追溯）、画像/偏好编辑、使用留痕与健康总览、**config.toml 在线配置**；
@@ -127,7 +127,7 @@ v1（三层提取架构）冻结在 [`legacy/`](legacy/)，仅作决策记录。
 
 ## 技术栈
 
-Python 3.11+ · mcp SDK（FastMCP）· SQLite（FTS5 trigram，WAL）· LanceDB · Qwen3-Embedding-0.6B（任意 OpenAI 兼容端点）· rapidfuzz；WebUI 前端 Vue 3 + Naive UI + Vite。服务端单进程；无队列、无图数据库；写入路径零生成式 LLM（curator 提案审查为唯一例外，且只提案不执行）。
+Python 3.11+ · mcp SDK（FastMCP）· SQLite（FTS5 trigram，WAL）· LanceDB · Qwen3-Embedding-0.6B（任意 OpenAI 兼容端点）· rapidfuzz；WebUI 前端 Vue 3 + Naive UI + Vite。服务端单进程；无队列、无图数据库；读写主路径零生成式 LLM（curator 深度审查为唯一生成式环节：离线、只读、只提案不执行）。
 
 ## License
 

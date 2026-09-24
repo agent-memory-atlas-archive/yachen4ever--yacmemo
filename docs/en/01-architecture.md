@@ -53,9 +53,9 @@ Building our own is not a return to v1: it keeps only the parts proven valuable,
 
 SQLite (FTS/metadata/collision records) and LanceDB (vectors) are all derived indexes; delete them and they can be fully rebuilt from the files. Humans can read and edit directly, it works with git, it works with Obsidian.
 
-### Principle 2: no generative LLM inside the memory subsystem
+### Principle 2: zero generative LLM on the memory read/write main path
 
-The only model invocation in the entire pipeline is embedding (Qwen3-Embedding-0.6B, ~50ms per call, <1GB resident). All generative work — extraction, splitting, adjudication, summarization — either does not happen (structure comes from conventions) or is done by the main model inside the conversation (adjudication happens at read time). This directly eliminates OV pain point 2.
+The only model invocation in the store's read/write pipeline (retrieval/writes/guards/audit) is embedding (Qwen3-Embedding-0.6B, ~50ms per call, <1GB resident). All generative work — extraction, splitting, adjudication, summarization — either does not happen (structure comes from conventions) or is done by the main model inside the conversation (adjudication happens at read time). The one generative component is the **curator deep review** — but it lives outside the read/write main path: it runs offline (weekly timer), is read-only, proposes only, and never executes; the ruling belongs to the human, and anything that lands goes through the guarded store write path. This directly eliminates OV pain point 2.
 
 ### Principle 3: structure comes from conventions; consistency is enforced by the API
 
