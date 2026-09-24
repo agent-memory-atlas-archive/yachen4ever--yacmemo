@@ -475,3 +475,39 @@ def test_proposal_not_settled_until_all_findings_done(store: Store):
     assert PROPOSAL_SETTLED_MARKER not in (store.root / rel).read_text(encoding="utf-8")
     store.audit_exec_report(f"P:{rel}:2", "executing")  # 执行中不算结案
     assert PROPOSAL_SETTLED_MARKER not in (store.root / rel).read_text(encoding="utf-8")
+
+
+def test_audit_reconciles_hand_stamped_settled_proposal(store: Store):
+    """0.3.4 之前完成的工作：agent 手工打了结案标、无执行事件——审计补记
+    executed（含旧口径「已采纳」条目）；dismissed 不翻转；幂等；P 类不产生
+    复审通过事件。"""
+    rel = "curator/提案-20260925c.md"
+    content = _proposal_markdown().replace(
+        "**状态：待裁决**",
+        "> 状态：已结案 —— 全部 2 条已裁决执行完毕（agent 2026-09-25 补标）")
+    store.save(rel, content)
+    store.record_proposal_action(rel, 1, "adopted", type_="outdated", reason="条目一")
+    store.record_proposal_action(rel, 2, "dismissed", type_="other", reason="条目二")
+
+    r = store.audit()
+    assert r["reconciled_proposals"] == 1
+    last = store.db.exec_last_status()
+    assert last[f"P:{rel}:1"]["event"] == "executed"
+    assert last[f"P:{rel}:1"]["identity"] == "reconcile"
+    assert f"P:{rel}:2" not in last
+
+    r2 = store.audit()
+    assert r2["reconciled_proposals"] == 0
+    assert store.db.exec_last_status()[f"P:{rel}:1"]["event"] == "executed"
+
+
+def test_audit_reconciles_untracked_findings_under_marker(store: Store):
+    rel = "curator/提案-20260925d.md"
+    content = _proposal_markdown().replace(
+        "**状态：待裁决**", "> 状态：已结案（agent 补标）")
+    store.save(rel, content)
+    r = store.audit()
+    assert r["reconciled_proposals"] == 2
+    last = store.db.exec_last_status()
+    assert last[f"P:{rel}:1"]["event"] == "executed"
+    assert last[f"P:{rel}:2"]["event"] == "executed"

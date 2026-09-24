@@ -187,7 +187,7 @@ Full consistency audit that also **self-heals**:
 
 Fix suggestions are inlined throughout the output. Findings are shown as soon as discovered; **the system never auto-deletes or auto-invalidates anything**. External changes involved in self-healing are snapshotted into the repo uniformly as `external: self-healed N note(s)`, preserving the git-clean invariant (the end of the output carries a git snapshot status line and the current audit snapshot path `journal/audit/<date>.md` — one per day, with same-day re-audits appending; stale snapshots are cleaned up by curator according to `audit_retention_days`).
 
-Two output sections added 2026-09-25: `== execution progress ==` (issues currently being worked on by agents, as reported via `memory_audit_update`, with the latest updates) and `== verified on re-audit ==` (issues already executed and no longer reported this round — confirmed automatically by the audit, no human sign-off needed).
+Output sections added 2026-09-25: `== execution progress ==` (issues currently being worked on by agents, as reported via `memory_audit_update`, with the latest updates), `== verified on re-audit ==` (D-class issues already executed and no longer reported this round — confirmed automatically, no human sign-off) and `== proposal settlement backfill ==` (proposals whose file carries the settled marker get `executed` events backfilled for findings lacking them — hand-stamped markers and structured reports both count).
 
 ## 7.5 memory_audit_update
 

@@ -12,10 +12,19 @@ integration_check(onboarded_version=...) 获取增量变更与最新写入约定
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.3.4"
+AGENT_CONTRACT_VERSION = "0.3.5"
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.5": (
+        "- 提案结案调和：文件头部已带「> 状态：已结案」标记的提案（含 agent"
+        " 用 memory_edit 手工打的标），审计时自动为缺执行事件的条目补记 "
+        "executed（identity=reconcile）——手工打标与 memory_audit_update "
+        "汇报两条路都算数，审计后状态一致；\n"
+        "- 「复审通过」封口只作用于 D 类问题（D1–D5）；提案条目（P 类）"
+        "不再产生复审通过事件，完成即已执行；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.4": (
         "- 已结案提案默认隐去：curator/ 提案报告的全部条目都执行完成或忽略后，"
         "文件头部会打「> 状态：已结案」标记，memory_search 默认不再返回它"

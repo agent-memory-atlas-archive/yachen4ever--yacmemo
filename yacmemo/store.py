@@ -1064,6 +1064,11 @@ class Store:
                           if t["card"] and not (self.root / t["card"]).is_file()
                           and _d5_id(t["title"], t["card"]) not in disposed]
 
+        # 提案结案调和：文件已带已结案标记（含 agent 手工打标）而条目缺
+        # 执行事件的——事件机制上线前完成的工作、或 agent 确认完成后手工
+        # 打标——补记 executed。markdown 事实源优先，两条记录路线最终一致
+        reconciled = self._reconcile_proposals()
+
         # 执行进度派生（判断与执行分离：人在 WebUI 判断，agent 经
         # memory_audit_update 汇报执行，审计只做最终验证——已执行且本轮
         # 不再报即复审通过，追加系统事件封口，下轮不再重放）
@@ -1075,7 +1080,8 @@ class Store:
                        | set(dangling_cards))
         verified = []
         for iid, st in exec_last.items():
-            if iid in current_ids or st["event"] == "verified":
+            # P 类（提案条目）没有确定性复审检查，复审封口只属于 D 类
+            if iid.startswith("P:") or iid in current_ids or st["event"] == "verified":
                 continue
             self.db.add_exec_event(iid, st["kind"], "verified",
                                    note="复审通过：本轮审计不再报告此问题")
@@ -1094,7 +1100,7 @@ class Store:
         audit_file = self._write_audit_snapshot(
             resynced, missing, added, d1, collisions, dangling, stray,
             dangling_cards, missing_vectors, pruned_blank, pruned_stale,
-            verified)
+            verified, reconciled)
 
         res = {"title_duplicates": d1,
                "collisions": collisions,
@@ -1109,6 +1115,7 @@ class Store:
                "pruned_stale_collisions": pruned_stale,
                "exec_status": exec_status,
                "verified": verified,
+               "reconciled_proposals": reconciled,
                "git": self.snapshots.status_line(),
                "guard_stats": self.db.guard_stats(),
                "audit_file": audit_file}
@@ -1134,14 +1141,14 @@ class Store:
     def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
                               dangling, stray, dangling_cards=(),
                               missing_vectors=None, pruned_blank=0,
-                              pruned_stale=0, verified=()) -> str:
+                              pruned_stale=0, verified=(), reconciled=0) -> str:
         """每日一份审计快照（journal/audit/<YYYYMMDD>.md），同日重跑以"复审"
         小节追加进当天文件——对齐 curator 的同日合并，标题天然唯一不撞 D1，
         且 journal/audit/ 不会随审计频率无界膨胀（过期文件由 curator 清理）。"""
         body = self._audit_body(resynced, missing, added, d1, collisions,
                                 dangling, stray, dangling_cards,
                                 missing_vectors, pruned_blank, pruned_stale,
-                                verified)
+                                verified, reconciled)
         day = datetime.now().strftime("%Y%m%d")
         rel = f"{self._audit_dir}{day}.md"
         abs_path = self.root / rel
@@ -1167,7 +1174,7 @@ class Store:
     def _audit_body(self, resynced, missing, added, d1, collisions,
                     dangling, stray, dangling_cards,
                     missing_vectors=None, pruned_blank=0, pruned_stale=0,
-                    verified=()) -> str:
+                    verified=(), reconciled=0) -> str:
         guard = self.db.guard_stats()
 
         def _sec(title, items):
@@ -1189,6 +1196,8 @@ class Store:
                  f" / 未覆盖拦截 {guard['uncovered']}"]
         if verified:
             lines.append(f"- 复审通过（agent 已执行、本轮不再报告）：{len(verified)}")
+        if reconciled:
+            lines.append(f"- 提案结案补记：{reconciled} 条（文件已标结案，补记执行事件）")
         if pruned_blank:
             lines.append(f"- 已清理空白处置行：{pruned_blank}")
         if pruned_stale:
@@ -1330,6 +1339,46 @@ class Store:
         return {"event": e, "timeline": self.db.list_exec_events(issue_id)}
 
     # ---- proposal settlement（提案全部条目执行/忽略后对 agent 隐去）----
+
+    def _reconcile_proposals(self) -> int:
+        """文件已标已结案、而条目缺结构化执行事件的提案，补记 executed。
+
+        补记对象 = 提案文件头部带已结案标记，且条目既无执行事件、也未被
+        忽略——覆盖两类真实场景：事件机制上线前完成的执行（含 WebUI
+        旧口径「已采纳」的条目，采纳只是派发意图、文件标记证明已落地），
+        和 agent 确认完成后用 memory_edit 手工打标。markdown 事实源
+        优先，幂等。
+        """
+        imported = 0
+        d = self.root / "curator"
+        if not d.is_dir():
+            return 0
+        for p in sorted(d.glob("提案-*.md")):
+            rel = p.relative_to(self.root).as_posix()
+            try:
+                content = p.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if PROPOSAL_SETTLED_MARKER not in content:
+                continue
+            indices = self._proposal_findings_indices(rel)
+            if not indices:
+                continue
+            prefix = f"P:{rel}:"
+            has_event = set(self.db.exec_last_status().keys())
+            # dismissed 保持原状态（忽略不翻转为执行）；adopted 正是要调和
+            # 的主体——人批过 + 文件标结案 = 事件机制上线前的"已执行"
+            dismissed = {a["id"] for a in self.db.list_audit_actions()
+                         if a["id"].startswith(prefix) and a["action"] == "dismissed"}
+            for i in indices:
+                iid = f"{prefix}{i}"
+                if iid in has_event or iid in dismissed:
+                    continue
+                self.db.add_exec_event(
+                    iid, "P", "executed", identity="reconcile",
+                    note="结案补记：提案文件已标记已结案（条目在事件机制上线前完成或人工确认）")
+                imported += 1
+        return imported
 
     def _proposal_findings_indices(self, rel: str) -> list[int]:
         """提案文件里的条目序号（1..N）；文件缺失或无提案节返回空表。"""

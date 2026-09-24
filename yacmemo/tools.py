@@ -384,6 +384,9 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 lines.append(f"== 复审通过（{len(verified)}）== 已执行且本轮不再报告")
                 for cid in verified[:10]:
                     lines.append(f"- {cid}")
+            if r.get("reconciled_proposals"):
+                lines.append(f"== 提案结案补记 == {r['reconciled_proposals']} 条"
+                             "（文件已标已结案，为缺事件的条目补记 executed）")
             g = r["guard_stats"]
             lines.append(f"== 守卫统计 == 拒绝 {g['refused']} 次，force 越过 {g['forced']} 次，"
                          f"未覆盖拦截 {g['uncovered']} 次")

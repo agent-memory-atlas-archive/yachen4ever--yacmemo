@@ -106,7 +106,9 @@ Audit finds ──▶ Human judges ──▶ Agent executes ──▶ Audit veri
 
 Status is derived at read time, not stored: the latest execution event plus the latest audit report yield open / executing / executed-awaiting-recheck / verified / dismissed.
 
-**Proposals share the pipeline, plus automatic closure**: proposal findings (P-class) run the same state machine, but humans have no "Adopt" action — **dispatching is adopting** (copy the execution instruction); humans only dismiss. Finding states derive from execution events and dismissal records. Once every finding of a proposal is settled (executed / dismissed), a `> 状态：已结案` marker is stamped at the top of the file and `memory_search` no longer returns it by default (explicit `memory_read` still works) — dispatched work is never re-dispatched because an old report remains searchable. Legacy "adopted" rows do not count as settled: adoption was only an old-model dispatch intent and must be closed out by an execution event or an explicit dismissal.
+**Proposals share the pipeline, plus automatic closure**: proposal findings (P-class) run the same state machine, but humans have no "Adopt" action — **dispatching is adopting** (copy the execution instruction); humans only dismiss. Finding states derive from execution events and dismissal records. Once every finding of a proposal is settled (executed / dismissed), a `> 状态：已结案` marker is stamped at the top of the file and `memory_search` no longer returns it by default (explicit `memory_read` still works) — dispatched work is never re-dispatched because an old report remains searchable.
+
+**Settlement reconciliation** (added 2026-09-25): the closure marker works both ways — an agent may also stamp it by hand with `memory_edit` after confirming every finding is done (markdown is the source of truth); at audit time, findings of a marked proposal that lack execution events get `executed` backfilled (identity=reconcile, idempotent), covering work completed before the event mechanism existed and legacy "adopted" items. The "verified" closing event applies to D-class issues only; for proposals, done means executed.
 
 ## 5. Thresholds and tuning
 
