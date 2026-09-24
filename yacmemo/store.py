@@ -229,6 +229,14 @@ class Store:
             self.db.add_guard_event("forced", name, conflicts[0]["path"], forced=True)
 
         abs_path = self.root / rel
+        if is_agent_zone and abs_path.is_file():
+            # agents/ 区跳过标题守卫，覆盖不会像 topics/ 一样被近似同名拦截——
+            # 显式拒绝：必读等专属文件更新一律就地 edit（git 可恢复，但静默
+            # 覆盖是事故；WebUI 编辑器走 save() 不受影响）
+            raise StoreError(
+                f"写入被拦截: {rel} 已存在（agents/ 区 memory_write 只创建不覆盖）。\n"
+                "更新内容用 memory_edit / memory_edit_section 就地修改；"
+                "确要整篇重建请先 memory_delete 该路径（仅用户明确要求时）。")
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(content, encoding="utf-8")
 

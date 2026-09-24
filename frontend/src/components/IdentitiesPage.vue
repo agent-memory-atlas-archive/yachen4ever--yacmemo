@@ -31,12 +31,22 @@
           </n-space>
         </template>
         <n-text depth="3" style="font-size: 12px">
-          agent 层共享目录：agents/{{ row.agent }}/（每个设备一份必读：<n-code :code="`${row.agent}_${row.device}`" language="text" />）
+          agent 层共享目录：agents/{{ row.agent }}/（第一层平铺文件，所有设备共享）
         </n-text>
         <n-list v-if="row.devices.length" style="margin-top: 8px">
           <n-list-item v-for="d in row.devices" :key="d.device">
-            <n-thing :title="d.device"
-              :description="`agents/${row.agent}/${d.device}/ · ${d.notes} 个笔记`" />
+            <n-thing>
+              <template #header>
+                <n-space align="center">
+                  <n-text strong>{{ d.device }}</n-text>
+                  <n-tag v-if="!d.active" size="small" type="warning">未激活（尚无专属文件）</n-tag>
+                </n-space>
+              </template>
+              <template #description>
+                agents/{{ row.agent }}/{{ d.device }}/ · {{ d.notes }} 个笔记 · token：
+                <n-code :code="`${row.agent}_${d.device}`" language="text" />
+              </template>
+            </n-thing>
           </n-list-item>
         </n-list>
         <n-text v-else depth="3" style="font-size: 12px">（尚无设备子树）</n-text>

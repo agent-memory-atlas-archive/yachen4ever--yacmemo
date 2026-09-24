@@ -112,6 +112,10 @@ def _write_must_read(store: Store, ident: Identity):
     assert r["path"] == f"{ident.agent_prefix}必读.md"
 
 
+def r_path(store: Store, rel: str) -> bool:
+    return (store.root / rel).is_file()
+
+
 def test_write_anonymous_to_agents_refused(store: Store):
     # MCP 无 token → tools 层传 ANONYMOUS → 拒绝（消息给出配置方式）
     with pytest.raises(StoreError) as e:
@@ -131,11 +135,14 @@ def test_write_bad_token_error(store: Store):
 def test_identity_write_agent_flat_file_exempt_from_registry(store: Store):
     ident = Identity("teleagent", "r9000x")
     _write_must_read(store, ident)
-    # 同 agent 两台设备写同名必读——agent 层共享文件名冲突是合法场景，
-    # 免注册 + 免重名守卫（D1 审计侧同步排除）
-    r = store.write("agents/teleagent/必读", "# 必读\n- 更新内容\n",
+    # agent 层共享文件名跨设备同构是合法场景：免注册 + 免重名守卫
+    # （D1 审计侧同步排除）；但覆盖被显式拒绝——m5air 设备须走 memory_edit
+    with pytest.raises(StoreError):
+        store.write("agents/teleagent/必读", "# 必读\n- 更新内容\n",
                     identity=Identity("teleagent", "m5air"))
-    assert r["path"] == "agents/teleagent/必读.md"
+    store.edit("agents/teleagent/必读.md", "- 只写指针与纪律",
+               "- 更新内容", identity=Identity("teleagent", "m5air"))
+    assert r_path(store, "agents/teleagent/必读.md")
 
 
 def test_identity_write_device_subtree(store: Store):
@@ -162,6 +169,25 @@ def test_identity_write_shared_subdir_refused(store: Store):
     with pytest.raises(StoreError):
         store.write("agents/teleagent/共享/笔记.md", "内容",
                     identity=Identity("teleagent", "r9000x"))
+
+
+def test_write_refuses_overwrite_in_agents(store: Store):
+    """agents/ 区 memory_write 只创建不覆盖：跳过了标题守卫，必须显式拒绝
+    静默覆盖（更新一律 memory_edit；WebUI 编辑器走 save() 不受影响）。"""
+    ident = Identity("teleagent", "r9000x")
+    store.write("agents/teleagent/必读", "# v1\n", identity=ident)
+    with pytest.raises(StoreError) as e:
+        store.write("agents/teleagent/必读", "# v2\n", identity=ident)
+    assert "只创建不覆盖" in str(e.value)
+    # 人类入口同样受守卫（WebUI 新建表单语义与 MCP 一致；覆盖走编辑器）
+    with pytest.raises(StoreError):
+        store.write("agents/teleagent/必读", "# v3\n")
+    # 文件未被覆盖
+    assert (store.root / "agents/teleagent/必读.md").read_text(encoding="utf-8") == "# v1\n"
+    # 就地编辑仍然放行
+    store.edit("agents/teleagent/必读.md", "# v1", "# v1-edited", identity=ident)
+    # 其他路径不受影响
+    store.write("agents/teleagent/其他", "# 其他\n", identity=ident)
 
 
 def test_human_write_agents_allowed(store: Store):

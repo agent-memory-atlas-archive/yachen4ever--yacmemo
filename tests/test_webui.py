@@ -392,12 +392,19 @@ def test_identity_api_list_and_create(http_server):
     body = r.json()
     assert body["ok"] is False and "非法" in body["error"]
 
-    # 列表：扫描 agents/ 目录（device 子树为空、agent 层 1 文件）
+    # 列表：目录扫描 + 已创建登记合入——刚创建、尚无文件的 identity 也要可见
+    r = httpx.post(f"{base}/identities",
+                   json={"agent": "teleagent", "device": "m5air"})
+    assert r.json()["ok"] is True
     r = httpx.get(f"{base}/identities")
     rows = r.json()["identities"]
     hermes = next(x for x in rows if x["agent"] == "hermes")
     assert hermes["shared_files"] == 1
-    assert hermes["devices"] == []
+    assert hermes["devices"] == [
+        {"device": "r9000x", "notes": 0, "last_mtime": 0, "active": False}]
+    tele = next(x for x in rows if x["agent"] == "teleagent")
+    assert tele["devices"] == [
+        {"device": "m5air", "notes": 0, "last_mtime": 0, "active": False}]
 
 
 def test_webui_password_flow(http_server_auth):

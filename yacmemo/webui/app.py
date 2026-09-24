@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import shutil
 import subprocess
@@ -131,17 +132,45 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                         httponly=True, samesite="strict", path="/")
         return resp
 
-    # ---- identity 管理（确定性 token：列表扫 agents/ 目录，创建只做校验+发token）----
+    # ---- identity 管理（确定性 token：列表扫描 agents/ 目录 + 已创建登记；
+    #      登记持久化在 server data_dir，目录本身仍由 identity 首次写入时创建）----
+
+    def _id_registry_path(user_id: str) -> Path:
+        base = Path(config.server.data_dir) / "identities"
+        base.mkdir(parents=True, exist_ok=True)
+        return base / f"{user_id}.json"
+
+    def _load_registered(user_id: str) -> list[dict]:
+        p = _id_registry_path(user_id)
+        if not p.is_file():
+            return []
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        return data if isinstance(data, list) else []
+
+    def _register_identity(user_id: str, ident) -> None:
+        p = _id_registry_path(user_id)
+        rows = _load_registered(user_id)
+        key = (ident.agent, ident.device)
+        if any((r.get("agent"), r.get("device")) == key for r in rows):
+            return
+        rows.append({"agent": ident.agent, "device": ident.device,
+                     "created_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+        p.write_text(json.dumps(rows, ensure_ascii=False, indent=2),
+                     encoding="utf-8")
 
     async def identities_list(request: Request):
         try:
             c = _ctx(request.path_params["user"])
+            uid = request.path_params["user"]
         except KeyError:
             return _err("未知用户", 404)
 
-        def _scan():
+        def _collect():
             agents_dir = c["store"].root / "agents"
-            rows = []
+            rows: dict[str, dict] = {}
             if agents_dir.is_dir():
                 for agent_dir in sorted(agents_dir.iterdir()):
                     if not agent_dir.is_dir():
@@ -156,25 +185,40 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                             "device": d.name, "notes": len(notes),
                             "last_mtime": int(max((f.stat().st_mtime
                                                    for f in notes), default=0)),
+                            "active": True,
                         })
-                    rows.append({
+                    rows[agent_dir.name] = {
                         "agent": agent_dir.name,
                         "shared_files": len(shared),
                         "shared_mtime": int(max((f.stat().st_mtime
                                                  for f in shared), default=0)),
                         "devices": devices,
-                    })
-            return rows
+                    }
+            # 已创建登记合入：目录未出现（identity 尚未首写）的标记为未激活，
+            # 保证"新建后立即可见"（用户实测反馈的预期）
+            for r in _load_registered(uid):
+                row = rows.setdefault(r["agent"], {
+                    "agent": r["agent"], "shared_files": 0,
+                    "shared_mtime": 0, "devices": []})
+                if not any(d["device"] == r["device"] for d in row["devices"]):
+                    row["devices"].append({"device": r["device"], "notes": 0,
+                                           "last_mtime": 0, "active": False})
+            return sorted(rows.values(), key=lambda x: x["agent"])
 
-        return _ok({"identities": await run_in_threadpool(_scan)})
+        return _ok({"identities": await run_in_threadpool(_collect)})
 
     async def identity_create(request: Request):
+        try:
+            uid = request.path_params["user"]
+        except KeyError:
+            return _err("未知用户", 404)
         body = await _body(request)
         try:
             ident = make_identity(str(body.get("agent", "")),
                                   str(body.get("device", "")))
         except IdentityError as e:
             return _err(str(e))
+        _register_identity(uid, ident)
         return _ok({
             "token": ident.token,
             "agent": ident.agent,
@@ -182,7 +226,7 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             "agent_dir": ident.agent_prefix,
             "device_dir": ident.device_prefix,
             "note": "token 即 <device>_<agent> 确定性拼接，可随时在此页重建；"
-                    "目录在对应 identity 第一次写入时自动创建",
+                    "专属目录在对应 identity 第一次写入时自动创建",
         })
 
     async def index(request: Request):
