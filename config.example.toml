@@ -39,6 +39,20 @@ port = 9721
 # Server-level state (usage log); relative to the server's working directory.
 data_dir = "data"
 
+[webui]
+# WebUI/API 登录密码；空 = 不启用鉴权（LAN 信任模式）。
+# 启用后 /ui 与 /api 全部需要登录；MCP 端点不受影响（走 identity token）。
+# 建议：使用 identity 管理页（可铸 token）时务必配置密码。
+password = ""
+
+# ---- Identity（agent+设备双维度专属记忆）----
+# MCP 请求携带 token 即表明身份：Authorization: Bearer <device>_<agent>
+# （如 r9000x_teleagent；stdio 用环境变量 YACMEMO_TOKEN）。
+# token 是确定性拼接，无需注册存储；WebUI 身份页可校验名称并生成配置片段。
+# 层级：user 层共享；agents/<agent>/ 平铺文件 = agent 层（跨设备共享）；
+# agents/<agent>/<device>/ = 本机专属；不同 identity 互相不可见。
+# 未携带 token 的旧配置照常可用 user 层，但 agents/ 区不可见不可写。
+
 [curator]
 # Periodic quality review (proposal-only; never auto-applies).
 # Point it at your main-model endpoint; runs off-peak via systemd timer.

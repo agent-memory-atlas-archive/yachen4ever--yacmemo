@@ -100,6 +100,22 @@ memory 目录就是 git 仓库，每次写入/编辑/移动/删除/主题操作�
 | TeleAgent 桌面版 | 官方 JSON 仅 stdio 形态——先试 `url` 直连，不行用 mcp-proxy 桥接（见 2.1.1） |
 | 自研 runtime | 任意 MCP 客户端库连 streamable HTTP；或直接用 `mcp` SDK |
 
+#### 2.1.0 identity token（agent+设备专属记忆，2026-09-24 起）
+
+在 URL 后加请求头即可表明身份，启用 `agents/` 专属记忆区（层级模型见 [02-mcp-tools.md §0](02-mcp-tools.md)）：
+
+```
+Authorization: Bearer <device>_<agent>        # 如 r9000x_teleagent
+```
+
+| 客户端 | 配置方式 |
+|---|---|
+| Claude Code | `claude mcp add --transport http yacmemo <URL> --header "Authorization: Bearer r9000x_teleagent"` |
+| mcp.json 类客户端 | `"yacmemo": {"url": "...", "headers": {"Authorization": "Bearer r9000x_teleagent"}}` |
+| 同机 stdio | 环境变量 `YACMEMO_TOKEN=r9000x_teleagent` |
+
+token 为确定性拼接 `<device>_<agent>`（小写字母/数字/短横线），可在 WebUI「身份」页校验并生成配置片段。不携带 token 的旧配置照常可用 user 层，但专属区不可见不可写。同一 agent 换机/重装无需换 token——换个 device 名即新 identity。
+
 #### 2.1.1 TeleAgent 桌面版接入
 
 TeleAgent 的 MCP JSON（设置 → 工具设置 → 从 JSON 导入）文档化字段只有 `command/args/env`（stdio 形态）。两条路径：

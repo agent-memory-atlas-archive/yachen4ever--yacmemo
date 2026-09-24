@@ -74,6 +74,14 @@ class ServerConfig:
 
 
 @dataclass
+class WebUIConfig:
+    # WebUI/API 登录密码；空 = 不启用鉴权（LAN 信任模式，旧行为）。
+    # identity token 可由任何人从 WebUI 铸出（确定性拼接），一旦启用
+    # identity 管理页建议同时配置密码。
+    password: str = ""
+
+
+@dataclass
 class UserEntry:
     """One mounted memory root in the HTTP server; id must be URL-safe."""
     id: str
@@ -95,6 +103,7 @@ class Config:
     search: SearchConfig = field(default_factory=SearchConfig)
     guard: GuardConfig = field(default_factory=GuardConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    webui: WebUIConfig = field(default_factory=WebUIConfig)
     curator: CuratorConfig = field(default_factory=CuratorConfig)
     users: list[UserEntry] = field(default_factory=list)
     config_path: str | None = None  # set by load_config when a TOML file was used
@@ -138,6 +147,7 @@ def load_config(path: str | None = None) -> Config:
     search = data.get("search", {})
     guard = data.get("guard", {})
     srv = data.get("server", {})
+    web = data.get("webui", {})
     cur = data.get("curator", {})
     users_raw = data.get("users", [])
 
@@ -188,6 +198,9 @@ def load_config(path: str | None = None) -> Config:
             host=srv.get("host", ServerConfig.host),
             port=srv.get("port", ServerConfig.port),
             data_dir=srv.get("data_dir", ServerConfig.data_dir),
+        ),
+        webui=WebUIConfig(
+            password=str(web.get("password", "")),
         ),
         curator=CuratorConfig(
             enabled=cur.get("enabled", CuratorConfig.enabled),

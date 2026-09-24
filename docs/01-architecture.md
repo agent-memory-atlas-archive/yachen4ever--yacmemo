@@ -126,6 +126,9 @@ memory_root/
 │                     + agent 可按模块自由增设的详细 md——目录即归属
 ├── archive/<主题>/   已归档主题（免注册区，检索仍可用，context 不再注入）
 ├── journal/          时间线流水（免注册区，豁免重名拦截）
+├── agents/<agent>/          identity 专属区：第一层平铺文件 = agent 层（同 agent
+│                            跨设备共享，如 必读.md）；<device>/ 子树 = 本机专属；
+│                            不同 identity 互相不可见（2026-09-24 起，见 4.5）
 └── .index/           派生索引（SQLite + LanceDB，可随时删除重建，不进 git）
 ```
 
@@ -174,6 +177,16 @@ LanceDB 两张向量表（沿用现有 `vector.py`，三表改两表，维度 10
 - 降级语义：git 不可用/调用失败只跳过快照（warning 日志 + audit 输出 `== git ==` 行显示最近失败原因），**绝不阻塞记忆写入**；
 - 部署注意：systemd 服务默认无 HOME → git 读不到 global gitconfig 的 safe.directory 豁免 → dubious ownership 静默降级（2026-09-16 实测踩坑）；unit 需 `Environment=HOME=/root`，代码层另有 pwd 回填兑底；
 - 无远程：记忆仓库纯本地，远程备份（私有 remote / 定期 bundle）列为后续功能。
+
+### 4.5 identity 层级与专属记忆（2026-09-24）
+
+MCP 请求携带 identity token（`Authorization: Bearer <device>_<agent>`，stdio 走 `YACMEMO_TOKEN`）即表明"哪个 agent 在哪台机器"。token 是确定性拼接、无需注册存储；一个 user 下可挂多个 identity：
+
+- **user 层（共享）**：`topics/`、`journal/`、`TOPICS.md`、`PROFILE.md`——所有 identity 完全共享；
+- **agent 层**：`agents/<agent>/` 下第一层平铺文件——同 agent 跨设备共享（角色纪律、必读）；
+- **identity 层**：`agents/<agent>/<device>/` 子树——仅本 identity 可见（本机环境、设备差异）。
+
+专属隔离由服务端强制（`identity.py` 的 `visible`/`writable` 是唯一权威，store/search/tools 共用）：读、检索（scoped search）、列表、写全链路过滤，`memory_context` 冷启动自动注入自己 agent 层 + 本机层的 `必读.md`。约定：`agents/<agent>/` 第一层只能放平铺文件，子目录一律视为设备目录（可见性因此是纯字符串逻辑）；必读只放指针与纪律，事实进 `topics/` 与所有 agent 共享。未携带 token 的旧配置照常可用 user 层，`agents/` 区不可见不可写。WebUI 侧为人类管理员视角（全库可见），「身份」页提供 identity 清单与 token 生成；WebUI 本身的访问密码见 `[webui].password`。
 
 ---
 
@@ -345,9 +358,11 @@ memory_write / memory_edit 完成 embedding 后：
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
 主题：
 9. 主题的注册、注销与归档都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了" / "X 归档吧"）→ topic_register / topic_unregister / archive_topic；主题现状写入 abstract（topics/<主题>/abstract.md）并就地更新，目录内可按模块增设详细 md。
-10. 只在注册主题内写笔记（**已代码化为写路径硬拦截**，见 6.1）；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
+10. 只在注册主题内写笔记（**已代码化为写路径硬拦截**，见 6.1）；journal/、archive/、curator/、agents/ 之外发现游离文件时提示用户归位。
+11. 专属必读写自己的 identity 区：agents/<agent>/必读.md（同 agent 跨设备共享）或 agents/<agent>/<device>/必读.md（本机专属）；必读只放指针与纪律，事实一律进 topics/。携带 identity token 时 memory_context 自动注入，无需提示词提醒。
+12. memory_search 只返回 user 层 + 你的专属区——搜不到别人的专属内容是设计使然，不是索引坏了。
 删除：
-11. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
+13. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 ```
 
 约定仍会写进提示（第 1、2、4 条减少无效往返），但系统不再**依赖**模型守约——守卫与检测器兜底，这正是本设计与第一版的本质区别。

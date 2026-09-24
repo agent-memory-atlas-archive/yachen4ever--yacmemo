@@ -46,6 +46,8 @@ memory_root（git 仓库，每次变更自动 commit，永远 git-clean）
   ├── PROFILE.md                 画像与偏好（功能层，context 前置注入）
   ├── topics/<主题>/              abstract.md + agent 增设的模块 md
   ├── archive/ journal/ curator/  免注册区（归档主题 / 流水 / 提案）
+  ├── agents/<agent>/<device>/    identity 专属记忆（agent 层跨设备共享 + 本机专属，
+  │                               token = <device>_<agent>，不同 identity 互相不可见）
   └── .index/                    派生索引（可重建，不进 git）
 ```
 

@@ -129,8 +129,7 @@ def _free_port() -> int:
     return port
 
 
-@pytest.fixture
-def http_server(tmp_path):
+def _start_http_server(tmp_path, password: str = ""):
     """Two-user HTTP server (FTS-only: no embedding endpoint configured)."""
     config_file = tmp_path / "config.toml"
     config_file.write_text(
@@ -141,6 +140,9 @@ model = ""
 
 [server]
 data_dir = "{(tmp_path / "server-data").as_posix()}"
+
+[webui]
+password = "{password}"
 
 [[users]]
 id = "alice"
@@ -176,3 +178,14 @@ root = "{(tmp_path / "bob").as_posix()}"
 
     server.should_exit = True
     thread.join(timeout=5)
+
+
+@pytest.fixture
+def http_server(tmp_path):
+    yield from _start_http_server(tmp_path)
+
+
+@pytest.fixture
+def http_server_auth(tmp_path):
+    """同 http_server，但启用 [webui].password（WebUI 登录鉴权测试用）。"""
+    yield from _start_http_server(tmp_path, password="secret")

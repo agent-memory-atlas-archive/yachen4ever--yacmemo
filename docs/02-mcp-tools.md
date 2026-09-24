@@ -13,6 +13,27 @@
 - **失败语义**：文件永远是第一位。embedding 失败时内容照常写入、FTS 照常更新，仅向量/D2 缺失（下次写入或 `memory_audit` 自愈补齐）。
 - **守卫拒绝是正常返回**（不是错误）：agent 应读拒绝消息并改用建议的工具。
 
+## 0. 身份（identity）与专属记忆
+
+MCP 请求可携带 **identity token** 表明"哪个 agent 在哪台机器上"：
+
+- HTTP：请求头 `Authorization: Bearer <device>_<agent>`（如 `r9000x_teleagent`；兼容 `X-Yacmemo-Token` 头）；
+- stdio：环境变量 `YACMEMO_TOKEN=<device>_<agent>`。
+
+token 是确定性拼接（`<device>_<agent>`，小写字母/数字/短横线，不含下划线），无需注册存储；WebUI「身份」页可校验名称并生成各客户端配置片段。层级模型：
+
+| 层 | 路径 | 可见性 | 用途 |
+|---|---|---|---|
+| user 层 | `topics/`、`journal/`、`TOPICS.md`、`PROFILE.md` 等 | 所有 identity 共享 | 主题记忆、画像、流水账 |
+| agent 层 | `agents/<agent>/` 下平铺文件 | 同 agent 跨设备共享 | 角色纪律、必读 |
+| identity 层 | `agents/<agent>/<device>/` 子树 | 仅本 identity | 本机环境、设备差异 |
+
+- **专属隔离是服务端强制的**：读、检索、列表、写全链路过滤——任何 identity 只能看到 user 层 + 自己的 agent 层 + 自己的设备子树，其他 identity 的专属区不可见不可写；
+- **scoped search**：`memory_search` 只返回 user 层 + 本 identity 专属区；
+- **memory_context 自动注入**：携带 token 时追加 `agents/<agent>/必读.md`（跨设备共享）与 `agents/<agent>/<device>/必读.md`（本机专属）两节，未创建时给出写入模板；
+- **未携带 token 的旧配置照常可用** user 层，但 `agents/` 区不可见不可写（写入会被拦截并提示配置方式）；token 拼写错误按非法 token 拒绝并附约定说明；
+- 写入约定：**必读只放指针与纪律，事实一律进 `topics/`** 与所有 agent 共享；`agents/<agent>/` 第一层只能放平铺文件，子目录一律视为设备目录。
+
 ## 1. memory_search
 
 ```
@@ -77,7 +98,7 @@ memory_write(title: str, content: str, force: bool = False,
   之后把笔记写入 topics/<主题>/ 目录下；
 - 已有主题：写入该主题目录下的模块笔记，如 topics/<主题>/笔记名.md；
   abstract 是摘要卡（保持一句话现状），详细内容请写成模块笔记；
-- journal/、archive/、curator/ 免注册区不受限。
+- journal/、archive/、curator/、agents/ 免注册区不受限（agents/ 另有 identity 专属守卫）。
 当前活跃主题（共 9 个）: 《……》
 ```
 
@@ -231,7 +252,7 @@ topic_unregister(title: str) -> str
 memory_context() -> str
 ```
 
-**每次会话开始先调用**。返回核心记忆上下文 = 接入契约版本头 + `TOPICS.md` 注册表全文 + 各主题卡摘要头（前 12 行）。解决冷启动失忆：agent 不必"想到去搜什么"，主题体系直接在场。
+**每次会话开始先调用**。返回核心记忆上下文 = 接入契约版本头 + `TOPICS.md` 注册表全文 + 各主题卡摘要头（前 12 行）+ identity 专属必读（携带 token 时自动注入 `agents/<agent>/必读.md` 与 `agents/<agent>/<device>/必读.md`，未创建时给写入模板；见 §0）。解决冷启动失忆：agent 不必"想到去搜什么"，主题体系直接在场。
 
 **版本头**（2026-09-19 增补）：形如 `[yacmemo 接入契约 v0.1.3——与你本地记录的版本不一致时，调用 integration_check(onboarded_version="<你的版本>") 自主更新]`。agent 把接入时依据的契约版本记在本地接入提示词里，每次会话开始比对，落后即自主更新（见 §17）。
 

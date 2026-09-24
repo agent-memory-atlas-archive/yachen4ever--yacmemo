@@ -366,3 +366,57 @@ def test_deleting_last_snapshot_clears_audit_cache(http_server):
     assert r["ok"] is True
     r = httpx.get(f"{base}/audit/last", timeout=5).json()
     assert r["audit"] is None
+
+
+def test_identity_api_list_and_create(http_server):
+    """identity 页 API：确定性 token 生成 + agents/ 目录扫描。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+
+    # 人类经 WebUI（identity=None = 管理员）可直接写 agents/ 种子目录
+    r = httpx.post(f"{base}/notes", json={
+        "title": "agents/hermes/必读", "content": "# 必读\n- 指针与纪律\n"})
+    assert r.json()["ok"] is True
+
+    # 创建 identity：token = <device>_<agent> 确定性拼接
+    r = httpx.post(f"{base}/identities",
+                   json={"agent": "hermes", "device": "r9000x"})
+    body = r.json()
+    assert body["ok"] is True
+    assert body["token"] == "r9000x_hermes"
+    assert body["agent_dir"] == "agents/hermes/"
+    assert body["device_dir"] == "agents/hermes/r9000x/"
+
+    # 非法 slug 被拒（含下划线会被当成 token 分隔符）
+    r = httpx.post(f"{base}/identities",
+                   json={"agent": "her_agent", "device": "r9000x"})
+    body = r.json()
+    assert body["ok"] is False and "非法" in body["error"]
+
+    # 列表：扫描 agents/ 目录（device 子树为空、agent 层 1 文件）
+    r = httpx.get(f"{base}/identities")
+    rows = r.json()["identities"]
+    hermes = next(x for x in rows if x["agent"] == "hermes")
+    assert hermes["shared_files"] == 1
+    assert hermes["devices"] == []
+
+
+def test_webui_password_flow(http_server_auth):
+    """[webui].password 启用后：API 401、ui 回登录页、登录后放行。"""
+    base = f"http://127.0.0.1:{http_server_auth}"
+
+    # 未登录：API 401，ui 返回登录页
+    r = httpx.get(f"{base}/api/overview", timeout=5)
+    assert r.status_code == 401 and "未登录" in r.json()["error"]
+    r = httpx.get(f"{base}/ui/", timeout=5)
+    assert r.status_code == 200 and "doLogin" in r.text
+
+    # 错误密码
+    r = httpx.post(f"{base}/api/login", json={"password": "wrong"}, timeout=5)
+    assert r.status_code == 401
+
+    # 正确密码 → cookie → 后续请求放行
+    with httpx.Client() as c:
+        r = c.post(f"{base}/api/login", json={"password": "secret"}, timeout=5)
+        assert r.json()["ok"] is True
+        r = c.get(f"{base}/api/overview", timeout=5)
+        assert r.status_code == 200 and r.json()["ok"] is True

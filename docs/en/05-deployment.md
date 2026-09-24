@@ -100,6 +100,22 @@ Any client that supports remote MCP only needs a URL added — **no need to inst
 | TeleAgent desktop | the official JSON only covers the stdio form — try a direct `url` connection first; if that fails, bridge via mcp-proxy (see 2.1.1) |
 | In-house runtime | connect to streamable HTTP with any MCP client library; or use the `mcp` SDK directly |
 
+#### 2.1.0 Identity token (agent+device exclusive memory, since 2026-09-24)
+
+Add a request header to the URL to state the identity and unlock the `agents/` exclusive memory zone (tier model: [02-mcp-tools.md §0](02-mcp-tools.md)):
+
+```
+Authorization: Bearer <device>_<agent>        # e.g. r9000x_teleagent
+```
+
+| Client | Configuration |
+|---|---|
+| Claude Code | `claude mcp add --transport http yacmemo <URL> --header "Authorization: Bearer r9000x_teleagent"` |
+| mcp.json-style clients | `"yacmemo": {"url": "...", "headers": {"Authorization": "Bearer r9000x_teleagent"}}` |
+| same-machine stdio | environment variable `YACMEMO_TOKEN=r9000x_teleagent` |
+
+The token is a deterministic `<device>_<agent>` concatenation (lowercase letters/digits/dashes); the WebUI "Identities" page validates names and generates config snippets. Legacy setups without a token keep working on the user tier, but the exclusive zone is invisible and unwritable. Re-installing a machine does not mean a new token — a different device name is simply a new identity.
+
 #### 2.1.1 TeleAgent Desktop Integration
 
 TeleAgent's MCP JSON (Settings → Tool Settings → Import from JSON) documents only the `command/args/env` fields (stdio form). Two paths:

@@ -10,6 +10,7 @@ phrasing are identical across transports.
 from __future__ import annotations
 
 import logging
+import os
 import posixpath
 import time
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ from .agent_changes import (
     AGENT_CONTRACT_VERSION,
     contract_version_key,
 )
+from .identity import ANONYMOUS, Identity, parse_token
 from .search import Searcher
 from .store import Store, StoreError
 from .usage import UsageDB, summarize_args
@@ -42,6 +44,36 @@ def _client_from_ctx(ctx: Context | None) -> tuple[str, str]:
         return "", ""
 
 
+def _token_from_ctx(ctx: Context | None) -> str:
+    """identity token：HTTP 取 Authorization: Bearer（兼容 X-Yacmemo-Token 头），
+    stdio 取环境变量 YACMEMO_TOKEN。取不到返回空串。"""
+    try:
+        req = ctx.request_context.request if ctx else None
+        if req is None:
+            return os.environ.get("YACMEMO_TOKEN", "")
+        auth = req.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            return auth[7:]
+        return req.headers.get("x-yacmemo-token", "")
+    except Exception:
+        return ""
+
+
+def _identity_from_ctx(ctx: Context | None) -> Identity:
+    """当前调用身份：无 token → ANONYMOUS（user 层照常，agents/ 区不可见
+    不可写）；token 非法 → StoreError（消息直接可执行）。"""
+    token = _token_from_ctx(ctx).strip()
+    if not token:
+        return ANONYMOUS
+    try:
+        return parse_token(token)
+    except Exception as e:
+        raise StoreError(
+            f"identity token 非法: {token!r}（{e}）。"
+            "token 约定为 <device>_<agent>，如 r9000x_teleagent；"
+            "不确定就找用户核对 WebUI 身份页给出的 token。") from e
+
+
 def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                    usage: UsageDB | None = None, user_id: str = "local") -> None:
     """Register the 17 memory tools on an MCP server instance."""
@@ -50,6 +82,13 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
     def _logged(tool_name: str, ctx: Context | None, summary: str, out: dict):
         t0 = time.monotonic()
         client, ip = _client_from_ctx(ctx)
+        ident: Identity = ANONYMOUS
+        try:
+            ident = _identity_from_ctx(ctx)
+        except StoreError as e:
+            # token 非法：记为失败并让工具体提前返回错误（工具体读 out）
+            out["ok"], out["error"] = False, str(e)
+        out["identity"] = ident
         try:
             yield
         except Exception as e:
@@ -61,7 +100,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                                int((time.monotonic() - t0) * 1000),
                                ok=out["ok"], error=out["error"],
                                client=client, ip=ip,
-                               before_hash=out.get("before_hash", ""))
+                               before_hash=out.get("before_hash", ""),
+                               identity=out["identity"].token)
 
     def _fmt_search(results: list[dict]) -> str:
         if not results:
@@ -87,8 +127,11 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """
         out = {"ok": True, "error": ""}
         with _logged("memory_search", ctx, summarize_args("memory_search", locals()), out):
+            if out["error"]:
+                return out["error"]
             try:
-                results = searcher.search(query, limit=limit, kind=kind)
+                results = searcher.search(query, limit=limit, kind=kind,
+                                          identity=out["identity"])
                 text = _fmt_search(results)
                 # 降级/短查询提示：向量通道不可用等让 agent 知情，
                 # 避免"未找到相关笔记"被当成权威结论
@@ -113,8 +156,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """
         out = {"ok": True, "error": ""}
         with _logged("memory_read", ctx, summarize_args("memory_read", locals()), out):
+            if out["error"]:
+                return out["error"]
             try:
-                r = store.read(path_or_title)
+                r = store.read(path_or_title, identity=out["identity"])
             except StoreError as e:
                 return f"读取失败: {e}"
             except Exception as e:
@@ -143,8 +188,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """新建笔记（一篇一主题，标题即主题名）。近似标题会被拒绝；更新已有笔记请用 memory_edit。
 
         主题注册制硬约束：笔记必须属于已注册主题——写入 topics/<主题>/ 目录，
-        或注册主题卡/相关路径覆盖的范围；journal/、archive/、curator/ 免注册区
-        不受限。新主题先用 topic_register 注册（仅用户明确要求时），force 不豁免。
+        或注册主题卡/相关路径覆盖的范围；journal/、archive/、curator/、agents/
+        免注册区不受限（agents/ 另有 identity 专属守卫：只能写自己 agent 的
+        平铺文件与自己的设备子树）。新主题先用 topic_register 注册
+        （仅用户明确要求时），force 不豁免。
 
         Args:
             title: 笔记标题，可含目录前缀；主题目录内写作
@@ -156,9 +203,12 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """
         out = {"ok": True, "error": ""}
         with _logged("memory_write", ctx, summarize_args("memory_write", locals()), out):
+            if out["error"]:
+                return out["error"]
             try:
                 r = store.write(title, content, force=force,
-                                force_confirm=force_confirm)
+                                force_confirm=force_confirm,
+                                identity=out["identity"])
             except StoreError as e:
                 return f"{e}"
             except Exception as e:
@@ -179,8 +229,11 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """
         out = {"ok": True, "error": ""}
         with _logged("memory_edit", ctx, summarize_args("memory_edit", locals()), out):
+            if out["error"]:
+                return out["error"]
             try:
-                r = store.edit(path, old_string, new_string)
+                r = store.edit(path, old_string, new_string,
+                               identity=out["identity"])
                 out["before_hash"] = r.get("before_hash", "")
                 note = (f"（自动清除过期冲突对 {r['cleared_collisions']} 对）"
                         if r.get("cleared_collisions") else "")
@@ -204,8 +257,11 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         out = {"ok": True, "error": ""}
         with _logged("memory_edit_section", ctx,
                      summarize_args("memory_edit_section", locals()), out):
+            if out["error"]:
+                return out["error"]
             try:
-                r = store.edit_section(path, heading, new_content)
+                r = store.edit_section(path, heading, new_content,
+                                       identity=out["identity"])
                 out["before_hash"] = r.get("before_hash", "")
                 note = (f"（自动清除过期冲突对 {r['cleared_collisions']} 对）"
                         if r.get("cleared_collisions") else "")
@@ -228,8 +284,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """
         out = {"ok": True, "error": ""}
         with _logged("memory_move", ctx, summarize_args("memory_move", locals()), out):
+            if out["error"]:
+                return out["error"]
             try:
-                r = store.move(path, new_path)
+                r = store.move(path, new_path, identity=out["identity"])
                 return f"已移动: {r['old_path']} → {r['new_path']}"
             except StoreError as e:
                 return f"{e}"
@@ -246,8 +304,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """
         out = {"ok": True, "error": ""}
         with _logged("memory_delete", ctx, summarize_args("memory_delete", locals()), out):
+            if out["error"]:
+                return out["error"]
             try:
-                r = store.delete_note(path)
+                r = store.delete_note(path, identity=out["identity"])
                 out["before_hash"] = r.get("before_hash", "")
                 return f"已删除: {r['path']}（git 历史可恢复）"
             except StoreError as e:
@@ -330,8 +390,11 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """
         out = {"ok": True, "error": ""}
         with _logged("memory_list", ctx, summarize_args("memory_list", locals()), out):
+            if out["error"]:
+                return out["error"]
             try:
-                entries = store.list_notes(path, sort=sort)
+                entries = store.list_notes(path, sort=sort,
+                                           identity=out["identity"])
             except StoreError as e:
                 return f"{e}"
             except Exception as e:
@@ -363,7 +426,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 lines.append(f"\n已归档（{len(archived)} 个，检索仍可用、context 不再注入）：")
                 for t in archived:
                     lines.append(f"- {t['title']} — {t['status']}")
-            lines.append("（免注册区：journal/、archive/、curator/）")
+            lines.append("（免注册区：journal/、archive/、curator/、agents/"
+                         "——agents/ 另有 identity 专属守卫）")
             return "\n".join(lines)
 
     @mcp.tool()
@@ -482,14 +546,20 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
 
     @mcp.tool()
     def memory_context(ctx: Context = None) -> str:
-        """返回核心记忆上下文：主题注册表 + 各主题卡摘要头。每次会话开始时先调用一次。
+        """返回核心记忆上下文：主题注册表 + 各主题卡摘要头 + 你的专属必读。
+        每次会话开始时先调用一次。
+
+        携带 identity token 时自动注入 agents/<agent>/必读.md 与
+        agents/<agent>/<device>/必读.md（专属区，其他 identity 不可见）。
 
         返回头部带接入契约版本：与你本地记录的版本不一致时，调用
         integration_check 自主更新本地接入提示词。"""
         out = {"ok": True, "error": ""}
         with _logged("memory_context", ctx, "", out):
+            if out["error"]:
+                return out["error"]
             try:
-                body = store.memory_context()
+                body = store.memory_context(identity=out["identity"])
             except Exception as e:
                 out["ok"], out["error"] = False, str(e)
                 return f"读取失败: {e}"

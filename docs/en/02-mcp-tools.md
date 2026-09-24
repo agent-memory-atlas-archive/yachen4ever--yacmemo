@@ -13,6 +13,27 @@
 - **Failure semantics**: files always come first. If embedding fails, content is still written and FTS is still updated; only the vector/D2 side is missing (backfilled by the next write or by `memory_audit` self-healing).
 - **Guard rejections are normal returns** (not errors): the agent should read the rejection message and switch to the suggested tool.
 
+## 0. Identity and exclusive memory
+
+An MCP request may carry an **identity token** stating "which agent on which machine":
+
+- HTTP: request header `Authorization: Bearer <device>_<agent>` (e.g. `r9000x_teleagent`; the `X-Yacmemo-Token` header also works);
+- stdio: environment variable `YACMEMO_TOKEN=<device>_<agent>`.
+
+The token is a deterministic concatenation (`<device>_<agent>`; lowercase letters/digits/dashes, no underscores) with no registration or storage; the WebUI "Identities" page validates names and generates per-client config snippets. The tier model:
+
+| Tier | Paths | Visibility | Purpose |
+|---|---|---|---|
+| user tier | `topics/`, `journal/`, `TOPICS.md`, `PROFILE.md`, ... | shared by all identities | topic memory, profile, running logs |
+| agent tier | flat files under `agents/<agent>/` | shared across that agent's devices | role discipline, must-reads |
+| identity tier | `agents/<agent>/<device>/` subtree | this identity only | per-machine environment, device differences |
+
+- **Exclusive isolation is server-enforced**: reads, retrieval, listing and writes are all filtered end to end — an identity sees only the user tier + its own agent tier + its own device subtree; other identities' exclusive zones are invisible and unwritable;
+- **Scoped search**: `memory_search` returns only the user tier + this identity's exclusive zone;
+- **memory_context auto-injection**: with a token, the agent-tier `agents/<agent>/必读.md` and device-tier `agents/<agent>/<device>/必读.md` sections are appended (a write template is provided when they do not exist yet);
+- **Legacy setups without a token keep working** on the user tier, but the `agents/` zone is invisible and unwritable (writes are intercepted with configuration guidance); a misspelled token is rejected as an invalid token with the convention spelled out;
+- Write convention: **must-reads hold pointers and discipline only — facts always go into `topics/`** to be shared with every agent; the first level under `agents/<agent>/` holds flat files only, and any subdirectory is treated as a device directory.
+
 ## 1. memory_search
 
 ```
@@ -77,7 +98,7 @@ Write blocked: 女儿AI陪伴老师/abstract.md does not belong to any registere
   then write notes under the topics/<topic>/ directory;
 - Existing topic: write module notes under that topic's directory, e.g. topics/<topic>/<note-name>.md;
   abstract is the summary card (keep it a one-sentence status); write detailed content as module notes;
-- journal/, archive/, curator/ are registry-free zones and unrestricted.
+- journal/, archive/, curator/ and agents/ are registry-free zones and unrestricted (agents/ additionally has the identity-exclusive guard).
 Currently active topics (9 in total): 《……》
 ```
 
@@ -231,7 +252,7 @@ Unregisters a long-term memory topic: removes that topic's block from `TOPICS.md
 memory_context() -> str
 ```
 
-**Call first at the start of every session**. Returns the core memory context = integration contract version header + the full `TOPICS.md` registry + each topic card's summary header (first 12 lines). Solves cold-start amnesia: the agent does not have to "think of what to search for" — the topic system is directly present.
+**Call first at the start of every session**. Returns the core memory context = integration contract version header + the full `TOPICS.md` registry + each topic card's summary header (first 12 lines) + identity must-reads (with a token, `agents/<agent>/必读.md` and `agents/<agent>/<device>/必读.md` are injected automatically; a write template is provided when they do not exist yet — see §0). Solves cold-start amnesia: the agent does not have to "think of what to search for" — the topic system is directly present.
 
 **Version header** (added 2026-09-19): of the form `[yacmemo integration contract v0.1.3 — when it differs from the version you have recorded locally, call integration_check(onboarded_version="<your version>") to self-update]`. The agent records the contract version it onboarded with in its local onboarding prompt, compares at every session start, and self-updates when behind (see §17).
 

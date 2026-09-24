@@ -15,6 +15,7 @@ import logging
 
 from .config import Config
 from .embedding import EmbeddingClient
+from .identity import Identity, visible
 from .index_db import IndexDB
 from .vector import VectorStore
 
@@ -64,20 +65,28 @@ class Searcher:
     # ---------------------------------------------------------------- search
 
     def search(self, query: str, limit: int = 10,
-               kind: str = "hybrid") -> list[dict]:
+               kind: str = "hybrid",
+               identity: Identity | None = None) -> list[dict]:
         if kind not in ("hybrid", "fts", "vector"):
             raise ValueError(f"未知检索类型: {kind}")
         self.last_notice = None
+        # identity 过滤在融合后做：通道多取 3 倍候选，防止不可见结果挤占限额
+        fetch = limit * 3 if (identity is not None and identity.agent != "") else limit
         channels = []
         if kind in ("hybrid", "fts"):
-            channels.append(self.fts_channel(query, limit))
+            channels.append(self.fts_channel(query, fetch))
         if kind in ("hybrid", "vector"):
-            channels.append(self.vector_channel(query, limit))
+            channels.append(self.vector_channel(query, fetch))
 
         if len(channels) == 2:
-            merged = self._rrf(channels, limit)
+            merged = self._rrf(channels, fetch)
         else:
-            merged = self._take_first(channels, limit)
+            merged = self._take_first(channels, fetch)
+
+        if identity is not None and identity.agent != "":
+            # scoped search：user 层 + 本 identity 专属区（identity.py 的
+            # visible 是唯一权威；ANONYMOUS 即 user 层全网可见）
+            merged = [r for r in merged if visible(r["path"], identity)][:limit]
 
         if not merged and len(query.strip()) < 3 and not self.last_notice:
             # 短查询空结果：LIKE 兜底也没命中，提示换更长的关键词

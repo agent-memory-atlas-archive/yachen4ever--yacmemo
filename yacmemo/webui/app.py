@@ -13,6 +13,8 @@ build instructions while MCP/API remain fully functional.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import shutil
 import subprocess
@@ -23,16 +25,47 @@ from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from ..config import Config
+from ..identity import IdentityError, make_identity
 
 logger = logging.getLogger(__name__)
 
 # Vite 构建产物目录（scripts/build_webui.sh 生成；git 不跟踪，随部署同步）
 STATIC_DIR = Path(__file__).parent / "dist"
+
+_COOKIE = "yacmemo_session"
+
+# WebUI 未登录时 ui 路由返回的极简登录页（fetch POST /api/login → reload）
+_LOGIN_PAGE = """<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>yacmemo 登录</title>
+<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+form{background:#1c1c1c;padding:32px;border-radius:12px;width:280px}
+input{width:100%;box-sizing:border-box;padding:8px;margin:12px 0;
+background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#eee}
+button{width:100%;padding:8px;background:#18a058;color:#fff;border:0;
+border-radius:6px;cursor:pointer}p{color:#f33;font-size:13px;min-height:1em}</style>
+</head><body><form onsubmit="return doLogin(event)">
+<h3 style="margin:0 0 8px">yacmemo WebUI</h3>
+<input id="pw" type="password" placeholder="访问密码" autofocus>
+<p id="msg"></p><button>登录</button></form>
+<script>async function doLogin(e){e.preventDefault();
+const r=await fetch('/api/login',{method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({password:document.getElementById('pw').value})});
+if(r.ok){location.reload()}else{const d=await r.json();
+document.getElementById('msg').textContent=d.error||'登录失败'}return false}
+</script></body></html>"""
 
 
 def _ok(payload: dict) -> JSONResponse:
@@ -60,6 +93,97 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         if not ctx:
             raise KeyError(user_id)
         return ctx
+
+    # ---- WebUI 登录鉴权（[webui].password 为空 = LAN 信任模式，旧行为）----
+    # 会话 cookie 值由密码 HMAC 派生——重启不失效，无需服务端会话存储。
+    _webui_password = (config.webui.password or "").strip()
+    _session_value = (
+        hmac.new(_webui_password.encode("utf-8"),
+                 b"yacmemo-webui-session-v1", hashlib.sha256).hexdigest()
+        if _webui_password else "")
+
+    def _authed(request: Request) -> bool:
+        if not _webui_password:
+            return True
+        return hmac.compare_digest(
+            request.cookies.get(_COOKIE, ""), _session_value)
+
+    def _wrap(handler, *, html: bool = False):
+        """API 返回 401 JSON；ui 页面直接回登录页（静态 assets 不含数据，不拦）。"""
+        async def wrapped(request: Request):
+            if not _authed(request):
+                if html:
+                    return HTMLResponse(_LOGIN_PAGE)
+                return JSONResponse(
+                    {"ok": False, "error": "未登录：WebUI 已启用密码访问"},
+                    status_code=401)
+            return await handler(request)
+        return wrapped
+
+    async def login(request: Request):
+        if not _webui_password:
+            return _err("服务未配置 [webui].password，无需登录")
+        body = await _body(request)
+        if str(body.get("password", "")) != _webui_password:
+            return _err("密码不正确", 401)
+        resp = _ok({"login": True})
+        resp.set_cookie(_COOKIE, _session_value, max_age=60 * 60 * 24 * 30,
+                        httponly=True, samesite="strict", path="/")
+        return resp
+
+    # ---- identity 管理（确定性 token：列表扫 agents/ 目录，创建只做校验+发token）----
+
+    async def identities_list(request: Request):
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+
+        def _scan():
+            agents_dir = c["store"].root / "agents"
+            rows = []
+            if agents_dir.is_dir():
+                for agent_dir in sorted(agents_dir.iterdir()):
+                    if not agent_dir.is_dir():
+                        continue
+                    shared = list(agent_dir.glob("*.md"))
+                    devices = []
+                    for d in sorted(agent_dir.iterdir()):
+                        if not d.is_dir():
+                            continue
+                        notes = list(d.rglob("*.md"))
+                        devices.append({
+                            "device": d.name, "notes": len(notes),
+                            "last_mtime": int(max((f.stat().st_mtime
+                                                   for f in notes), default=0)),
+                        })
+                    rows.append({
+                        "agent": agent_dir.name,
+                        "shared_files": len(shared),
+                        "shared_mtime": int(max((f.stat().st_mtime
+                                                 for f in shared), default=0)),
+                        "devices": devices,
+                    })
+            return rows
+
+        return _ok({"identities": await run_in_threadpool(_scan)})
+
+    async def identity_create(request: Request):
+        body = await _body(request)
+        try:
+            ident = make_identity(str(body.get("agent", "")),
+                                  str(body.get("device", "")))
+        except IdentityError as e:
+            return _err(str(e))
+        return _ok({
+            "token": ident.token,
+            "agent": ident.agent,
+            "device": ident.device,
+            "agent_dir": ident.agent_prefix,
+            "device_dir": ident.device_prefix,
+            "note": "token 即 <device>_<agent> 确定性拼接，可随时在此页重建；"
+                    "目录在对应 identity 第一次写入时自动创建",
+        })
 
     async def index(request: Request):
         return RedirectResponse("/ui/", status_code=307)
@@ -524,35 +648,38 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         return _ok({"saved": True, "backup": backup, "restarting": restarting})
 
     return [
-        Route("/", index, methods=["GET"]),
-        Route("/ui", ui_index, methods=["GET"]),
-        Route("/ui/", ui_index, methods=["GET"]),
+        Route("/", _wrap(index, html=True), methods=["GET"]),
+        Route("/ui", _wrap(ui_index, html=True), methods=["GET"]),
+        Route("/ui/", _wrap(ui_index, html=True), methods=["GET"]),
         *((Mount("/ui/assets", app=StaticFiles(directory=STATIC_DIR / "assets"),
                  name="assets"),) if (STATIC_DIR / "assets").is_dir() else ()),
-        Route("/api/overview", overview, methods=["GET"]),
-        Route("/api/usage", usage_recent, methods=["GET"]),
-        Route("/api/usage/clients", usage_clients, methods=["GET"]),
-        Route("/api/usage/days", usage_days, methods=["GET"]),
-        Route("/api/{user}/notes", notes_list, methods=["GET"]),
-        Route("/api/{user}/notes", note_create, methods=["POST"]),
-        Route("/api/{user}/note", note_get, methods=["GET"]),
-        Route("/api/{user}/note", note_save, methods=["PUT"]),
-        Route("/api/{user}/note", note_delete, methods=["DELETE"]),
-        Route("/api/{user}/search", search, methods=["GET"]),
-        Route("/api/{user}/audit", audit, methods=["POST"]),
-        Route("/api/{user}/audit/last", audit_last, methods=["GET"]),
-        Route("/api/{user}/audit/runs", audit_runs, methods=["GET"]),
-        Route("/api/{user}/audit/actions", audit_actions_list, methods=["GET"]),
-        Route("/api/{user}/audit/action", audit_action, methods=["POST"]),
-        Route("/api/{user}/proposal/action", proposal_action, methods=["POST"]),
-        Route("/api/{user}/reindex", reindex, methods=["POST"]),
-        Route("/api/{user}/collision", collision_resolve, methods=["POST"]),
-        Route("/api/{user}/curator", curator_run, methods=["POST"]),
-        Route("/api/{user}/proposals", proposals_list, methods=["GET"]),
-        Route("/api/{user}/topics", topics_list, methods=["GET"]),
-        Route("/api/{user}/topics/archive", topic_archive, methods=["POST"]),
-        Route("/api/{user}/profile", profile_get, methods=["GET"]),
-        Route("/api/{user}/profile", profile_save, methods=["PUT"]),
-        Route("/api/config", config_get, methods=["GET"]),
-        Route("/api/config", config_save, methods=["POST"]),
+        Route("/api/login", login, methods=["POST"]),
+        Route("/api/overview", _wrap(overview), methods=["GET"]),
+        Route("/api/usage", _wrap(usage_recent), methods=["GET"]),
+        Route("/api/usage/clients", _wrap(usage_clients), methods=["GET"]),
+        Route("/api/usage/days", _wrap(usage_days), methods=["GET"]),
+        Route("/api/{user}/identities", _wrap(identity_create), methods=["POST"]),
+        Route("/api/{user}/identities", _wrap(identities_list), methods=["GET"]),
+        Route("/api/{user}/notes", _wrap(notes_list), methods=["GET"]),
+        Route("/api/{user}/notes", _wrap(note_create), methods=["POST"]),
+        Route("/api/{user}/note", _wrap(note_get), methods=["GET"]),
+        Route("/api/{user}/note", _wrap(note_save), methods=["PUT"]),
+        Route("/api/{user}/note", _wrap(note_delete), methods=["DELETE"]),
+        Route("/api/{user}/search", _wrap(search), methods=["GET"]),
+        Route("/api/{user}/audit", _wrap(audit), methods=["POST"]),
+        Route("/api/{user}/audit/last", _wrap(audit_last), methods=["GET"]),
+        Route("/api/{user}/audit/runs", _wrap(audit_runs), methods=["GET"]),
+        Route("/api/{user}/audit/actions", _wrap(audit_actions_list), methods=["GET"]),
+        Route("/api/{user}/audit/action", _wrap(audit_action), methods=["POST"]),
+        Route("/api/{user}/proposal/action", _wrap(proposal_action), methods=["POST"]),
+        Route("/api/{user}/reindex", _wrap(reindex), methods=["POST"]),
+        Route("/api/{user}/collision", _wrap(collision_resolve), methods=["POST"]),
+        Route("/api/{user}/curator", _wrap(curator_run), methods=["POST"]),
+        Route("/api/{user}/proposals", _wrap(proposals_list), methods=["GET"]),
+        Route("/api/{user}/topics", _wrap(topics_list), methods=["GET"]),
+        Route("/api/{user}/topics/archive", _wrap(topic_archive), methods=["POST"]),
+        Route("/api/{user}/profile", _wrap(profile_get), methods=["GET"]),
+        Route("/api/{user}/profile", _wrap(profile_save), methods=["PUT"]),
+        Route("/api/config", _wrap(config_get), methods=["GET"]),
+        Route("/api/config", _wrap(config_save), methods=["POST"]),
     ]

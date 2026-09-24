@@ -57,6 +57,7 @@
                     <SearchPage v-else-if="activePage === 'search'" :user="currentUser" />
                     <AuditPage v-else-if="activePage === 'audit'" :user="currentUser" />
                     <ProfilePage v-else-if="activePage === 'profile'" :user="currentUser" />
+                    <IdentitiesPage v-else-if="activePage === 'identities'" :user="currentUser" />
                     <SettingsPage v-else-if="activePage === 'settings'" :user="currentUser" />
                   </n-layout-content>
                 </n-layout>
@@ -65,6 +66,19 @@
           </n-notification-provider>
         </n-dialog-provider>
       </n-message-provider>
+
+      <n-modal :show="needLogin" preset="dialog" title="yacmemo 登录" :show-icon="false"
+               :mask-closable="false" :closable="false" style="width: 320px">
+        <n-input
+          v-model:value="loginPassword"
+          type="password" show-password-on="click"
+          placeholder="访问密码" @keyup.enter="doLogin"
+        />
+        <n-text v-if="loginError" type="error" style="font-size: 12px">{{ loginError }}</n-text>
+        <template #action>
+          <n-button type="primary" block :loading="loginBusy" @click="doLogin">登录</n-button>
+        </template>
+      </n-modal>
     </n-loading-bar-provider>
   </n-config-provider>
 </template>
@@ -75,6 +89,7 @@ import {
   NConfigProvider, NLayout, NLayoutSider, NLayoutHeader, NLayoutContent,
   NMenu, NSpace, NText, NTag, NSelect, NLoadingBarProvider,
   NMessageProvider, NDialogProvider, NNotificationProvider,
+  NModal, NInput, NButton,
   darkTheme, zhCN, dateZhCN,
   NIcon,
 } from 'naive-ui'
@@ -83,6 +98,7 @@ import TopicsPage from './components/TopicsPage.vue'
 import SearchPage from './components/SearchPage.vue'
 import AuditPage from './components/AuditPage.vue'
 import ProfilePage from './components/ProfilePage.vue'
+import IdentitiesPage from './components/IdentitiesPage.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import { api } from './composables/api.js'
 
@@ -92,19 +108,39 @@ const activePage = ref('topics')
 const collapsed = ref(false)
 const currentUser = ref('')
 const users = ref([])
+const needLogin = ref(false)
+const loginPassword = ref('')
+const loginBusy = ref(false)
+const loginError = ref('')
 
 const menuOptions = [
   { label: '主题', key: 'topics' },
   { label: '搜索', key: 'search' },
   { label: '审计', key: 'audit' },
   { label: '画像', key: 'profile' },
+  { label: '身份', key: 'identities' },
   { label: '设置', key: 'settings' },
 ]
 
 const pageTitle = computed(() => {
-  const m = { topics: '主题浏览', search: '搜索', audit: '审计', profile: '画像与偏好', settings: '设置' }
+  const m = { topics: '主题浏览', search: '搜索', audit: '审计', profile: '画像与偏好', identities: '身份管理', settings: '设置' }
   return m[activePage.value] || ''
 })
+
+async function doLogin() {
+  loginBusy.value = true
+  loginError.value = ''
+  try {
+    await api('/api/login', { method: 'POST', body: JSON.stringify({ password: loginPassword.value }) })
+    needLogin.value = false
+    loginPassword.value = ''
+    window.location.reload()
+  } catch (e) {
+    loginError.value = e.message || '登录失败'
+  } finally {
+    loginBusy.value = false
+  }
+}
 
 const userOptions = computed(() => users.value.map(u => ({ label: u, value: u })))
 
@@ -122,7 +158,8 @@ onMounted(async () => {
     users.value = data.users.map(u => u.id)
     if (users.value.length > 0) currentUser.value = users.value[0]
   } catch (e) {
-    console.error('Failed to load overview:', e)
+    if (String(e.message).includes('未登录')) needLogin.value = true
+    else console.error('Failed to load overview:', e)
   }
 })
 </script>

@@ -37,6 +37,7 @@ from .detectors import (
 from .embedding import EmbeddingClient
 from .fs_utils import content_hash
 from .git_snapshots import GitSnapshots
+from .identity import AGENTS_PREFIX, Identity, visible, writable
 from .index_db import IndexDB
 from .vector import VectorStore
 
@@ -47,8 +48,9 @@ _HEADING_RE = re.compile(r"^(#{2,6})\s+(.+?)\s*$")
 TOPICS_FILE = "TOPICS.md"
 # 用户画像与偏好：记忆层功能文件（不注册主题、不游离检测、memory_context 前置）
 PROFILE_FILE = "PROFILE.md"
-# 免注册区：不参与主题注册与游离检测的目录
-FREE_ZONES = ("journal/", "archive/", "curator/")
+# 免注册区：不参与主题注册与游离检测的目录（agents/ 另有 identity 写守卫，
+# 见 _require_agents_write——免注册 ≠ 任意可写）
+FREE_ZONES = ("journal/", "archive/", "curator/", AGENTS_PREFIX)
 _TOPIC_FIELD_RE = re.compile(r"^-\s*(卡|相关|现状|注册|状态):\s*(.*)$")
 
 # memory_read 返回值里的附加信息标记：agent 把它们当文件内容抄进 old_string
@@ -180,16 +182,21 @@ class Store:
     # ------------------------------------------------------------------ write
 
     def write(self, title: str, content: str, force: bool = False,
-              force_confirm: bool = False) -> dict:
+              force_confirm: bool = False,
+              identity: Identity | None = None) -> dict:
         rel = self.title_to_path(title)
+        self._require_agents_write(rel, identity)
         self._require_covered(rel)
         _, name = self._split_title(title)
         is_journal = rel.startswith(self.config.journal_prefix)
+        # agents/ 专属区的标题是文件名语义（必读/环境……），跨 identity 同构，
+        # 与 journal 一样跳过全局唯一标题守卫（D1 审计侧同步排除）
+        is_agent_zone = rel.startswith(AGENTS_PREFIX)
 
         # The stored title is the topic name without any directory prefix —
         # directories are filing, not part of the note's identity.
         conflicts: list[dict] = []
-        if not is_journal:
+        if not (is_journal or is_agent_zone):
             conflicts = self.check_title_conflicts(name, exclude_path=rel)
             if conflicts and not force:
                 self.db.add_guard_event("refused", name,
@@ -231,8 +238,10 @@ class Store:
 
     # ------------------------------------------------------------------ read
 
-    def read(self, path_or_title: str) -> dict:
+    def read(self, path_or_title: str,
+             identity: Identity | None = None) -> dict:
         rel = self.resolve(path_or_title)
+        self._require_agents_visible(rel, identity)
         content = (self.root / rel).read_text(encoding="utf-8")
         row = self.db.get_note(rel)
         title = row["title"] if row else self._title_from_content(rel, content)
@@ -254,6 +263,9 @@ class Store:
                 qv = self._embed_cached(f"{title}\n{content}")
                 for hit in self.vectors.search_note_vectors(qv, 3):
                     if hit["id"] not in seen_paths:
+                        # 相关笔记同样遵守 identity 边界：其他专属区的笔记不出现
+                        if not visible(hit["id"], identity):
+                            continue
                         related.append({"title": self._title_of(hit["id"]),
                                         "path": hit["id"], "via": "vector",
                                         "score": round(1 - hit["_distance"] / 2, 3)})
@@ -265,8 +277,10 @@ class Store:
 
     # ------------------------------------------------------------------ edit
 
-    def edit(self, path: str, old_string: str, new_string: str) -> dict:
+    def edit(self, path: str, old_string: str, new_string: str,
+             identity: Identity | None = None) -> dict:
         rel = self.resolve(path)
+        self._require_agents_write(rel, identity)
         abs_path = self.root / rel
         content = abs_path.read_text(encoding="utf-8")
 
@@ -350,9 +364,11 @@ class Store:
                     f"{best_score}%）：\n{best_line}\n请先 memory_read 核对实际内容再重试。")
         return "文件中无相似内容——该段可能尚不存在，请 memory_read 核对后决定改法。"
 
-    def edit_section(self, path: str, heading: str, new_content: str) -> dict:
+    def edit_section(self, path: str, heading: str, new_content: str,
+                     identity: Identity | None = None) -> dict:
         """Replace the body of one `##`-level (or deeper) section, keeping the heading."""
         rel = self.resolve(path)
+        self._require_agents_write(rel, identity)
         abs_path = self.root / rel
         content = abs_path.read_text(encoding="utf-8")
         lines = content.splitlines()
@@ -429,12 +445,14 @@ class Store:
         self.snapshots.commit(f"save: {rel}")
         return {"path": rel, "title": title, "before_hash": before_hash}
 
-    def delete_note(self, path: str) -> dict:
+    def delete_note(self, path: str,
+                    identity: Identity | None = None) -> dict:
         """User-instructed deletion (WebUI / memory_delete tool): remove the
         file and all index rows. The store never deletes on its own
         initiative — this is an explicit human/agent action, equivalent to
         deleting the file in Obsidian. Git history keeps it recoverable."""
         rel = self.resolve(path)
+        self._require_agents_write(rel, identity)
         abs_path = self.root / rel
         title = self._title_of(rel)
         before_hash = ""
@@ -456,8 +474,10 @@ class Store:
 
     # ------------------------------------------------------------------ move
 
-    def move(self, path: str, new_path: str) -> dict:
+    def move(self, path: str, new_path: str,
+             identity: Identity | None = None) -> dict:
         old_rel = self.resolve(path)
+        self._require_agents_write(old_rel, identity)
         new_rel = new_path.strip().replace("\\", "/").strip("/")
         if ".." in new_rel.split("/"):
             raise StoreError(f"目标路径不允许路径穿越: {new_path}")
@@ -470,6 +490,7 @@ class Store:
             raise StoreError(f"目标已存在: {new_rel}")
         # A move that lands outside every registered topic is stray creation
         # by another name; archive_topic() lands in archive/ and is exempt.
+        self._require_agents_write(new_rel, identity)
         self._require_covered(new_rel)
 
         old_abs = self.root / old_rel
@@ -491,7 +512,8 @@ class Store:
 
     # ------------------------------------------------------------------ list
 
-    def list_notes(self, sub: str = "", sort: str = "name") -> list[str]:
+    def list_notes(self, sub: str = "", sort: str = "name",
+                   identity: Identity | None = None) -> list[str]:
         base = self.root / sub.strip("/").replace("\\", "/") if sub.strip() else self.root
         if not base.is_dir():
             raise StoreError(f"目录不存在: {sub}")
@@ -499,6 +521,8 @@ class Store:
         for p in base.rglob("*.md"):
             rel = p.relative_to(self.root).as_posix()
             if "/.index/" in f"/{rel}" or rel.startswith(".index"):
+                continue
+            if not visible(rel, identity):
                 continue
             mtime = p.stat().st_mtime
             entries.append((rel, mtime))
@@ -689,13 +713,18 @@ class Store:
                 self.snapshots.commit(f"topic: archive {title}")
         return {"title": title, "card": new_card, "archived": True}
 
-    def memory_context(self, card_lines: int = 12) -> str:
-        """Cold-start context: user profile first, then registry + active abstracts."""
+    def memory_context(self, card_lines: int = 12,
+                       identity: Identity | None = None) -> str:
+        """Cold-start context: user profile first, then registry + active
+        abstracts; identity 专属必读追加在最后（agent 层 + 本机层）。"""
         topics = self.load_topics()
         tf = self.topics_file()
         profile = self.root / PROFILE_FILE
         active = [t for t in topics if not t.get("archived")]
-        if not topics and not tf.is_file() and not profile.is_file():
+        identity_parts = (self._identity_context(identity)
+                          if identity and identity.agent else [])
+        if (not topics and not tf.is_file() and not profile.is_file()
+                and not identity_parts):
             return "（尚无主题记忆——用 topic_register 注册第一个主题）"
         parts = []
         if profile.is_file():
@@ -710,7 +739,34 @@ class Store:
                 cards.append(f"### {t['title']}（{t['card']}）\n{head}")
         if cards:
             parts.append("\n# 主题摘要（abstract）\n" + "\n\n".join(cards))
+        parts.extend(identity_parts)
         return "\n\n".join(parts)
+
+    def _identity_context(self, identity: Identity) -> list[str]:
+        """专属必读注入：agent 层（agents/<agent>/必读.md，同 agent 跨设备
+        共享）+ identity 层（agents/<agent>/<device>/必读.md，本机专属）。
+        必读按约定是指针型短文——全量注入，单文件 80 行兜底。"""
+        parts = []
+        found = False
+        for label, prefix in (
+                (f"{identity.agent}（同 agent 跨设备共享）", identity.agent_prefix),
+                (f"{identity.agent}@{identity.device}（本机专属）", identity.device_prefix)):
+            rel = f"{prefix}必读.md"
+            p = self.root / rel
+            if not p.is_file():
+                continue
+            found = True
+            head = "\n".join(p.read_text(encoding="utf-8").splitlines()[:80])
+            parts.append(f"# 专属必读·{label}｜{rel}\n{head}")
+        if not found:
+            parts.append(
+                "# 专属必读（尚未创建）\n"
+                f"- agent 层（同 agent 跨设备共享）："
+                f"memory_write(title=\"{identity.agent_prefix}必读\", …)\n"
+                f"- identity 层（本机专属）："
+                f"memory_write(title=\"{identity.device_prefix}必读\", …)\n"
+                "- 必读只放指针与纪律，事实一律进 topics/（与 user 层共享）")
+        return parts
 
     # -------------------------------------------------------------- profile
 
@@ -792,6 +848,42 @@ class Store:
             return True
         return any(rel.startswith(d + "/") for d in covered_dirs)
 
+    # ------------------------------------------------- identity (agents/ 执法)
+
+    def _require_agents_write(self, rel: str, identity: Identity | None) -> None:
+        """agents/ 专属区的写守卫。identity=None（人类/WebUI/服务端内部）
+        不受限；identity 为空 agent（MCP 无 token，ANONYMOUS）与其他 agent /
+        其他设备的专属区一律拒绝。user 层路径不经过本守卫。"""
+        if not rel.startswith(AGENTS_PREFIX):
+            return
+        if identity is None:  # 人类入口（WebUI/内部）：全库管理员
+            return
+        if not identity.agent:
+            raise StoreError(
+                f"写入被拦截: {rel} 属于 identity 专属区（agents/），当前连接"
+                "未携带 identity token。\n请在 MCP 配置里加请求头 "
+                "Authorization: Bearer <device>_<agent>（stdio 用环境变量 "
+                "YACMEMO_TOKEN）；user 层（topics/、journal/）不受影响。")
+        if not writable(rel, identity):
+            raise StoreError(
+                f"写入被拦截: {rel} 不在你的 identity 专属范围内。\n"
+                f"你的身份: {identity.token}——可写 {identity.agent_prefix}"
+                "（第一层平铺文件，同 agent 跨设备共享）与 "
+                f"{identity.device_prefix}（本机专属）子树；"
+                "其他 agent / 其他设备的专属区互相不可见。")
+
+    def _require_agents_visible(self, rel: str, identity: Identity | None) -> None:
+        """agents/ 专属区的读守卫：其他 identity 的专属区不可见。
+        identity=None（人类）恒可见；ANONYMOUS 对 agents/ 全部不可见。"""
+        if visible(rel, identity):
+            return
+        if identity is None or not identity.agent:  # None 不会走到这（visible 恒 True）
+            raise StoreError(
+                f"读取被拦截: {rel} 属于 identity 专属区（agents/），当前连接"
+                "未携带 identity token。配置方式见拦截消息与 docs/05。")
+        raise StoreError(
+            f"读取被拦截: {rel} 属于其他 identity 的专属区，互相不可见。")
+
     def _require_covered(self, rel: str, attempted_title: str = "") -> None:
         """Write-time enforcement of the topic registry: tool-created notes
         must belong to a registered topic. Non-bypassable — force only
@@ -827,7 +919,8 @@ class Store:
             "  之后把笔记写入 topics/<主题>/ 目录下；\n"
             "- 已有主题：写入该主题目录下的模块笔记，如 topics/<主题>/笔记名.md；\n"
             "  abstract 是摘要卡（保持一句话现状），详细内容请写成模块笔记；\n"
-            "- journal/、archive/、curator/ 免注册区不受限。",
+            "- journal/、archive/、curator/、agents/ 免注册区不受限"
+            "（agents/ 另有 identity 专属守卫）。",
         ]
         titles = [t["title"] for t in active]
         if not titles:
@@ -920,10 +1013,14 @@ class Store:
         stray = self._stray_files(topics)
 
         # 机器产物不参与 D1（归一化剥日期后标题互相近似，必然假阳性：
-        # 快照标题同构、提案-0916 与 提案-0917 都归一为"提案"）
+        # 快照标题同构、提案-0916 与 提案-0917 都归一为"提案"）。
+        # agents/ 专属区同样不参与：标题是文件名语义（必读/环境……），
+        # 跨 identity 同构，D1 只会产出噪音
         d1 = [c for c in d1
               if not (c["a_path"].startswith(self._machine_zones)
-                      or c["b_path"].startswith(self._machine_zones))]
+                      or c["b_path"].startswith(self._machine_zones))
+              and not (c["a_path"].startswith(AGENTS_PREFIX)
+                       or c["b_path"].startswith(AGENTS_PREFIX))]
 
         # 机器产物区同样不参与 D3：审计快照会引用上一轮悬空链接的原文，
         # 源笔记删除后快照自己被点名——审计追自己的尾巴（2026-09-18 实测）

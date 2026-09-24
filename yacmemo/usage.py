@@ -57,18 +57,25 @@ class UsageDB:
         if "before_hash" not in cols:
             self.conn.execute(
                 "ALTER TABLE call_log ADD COLUMN before_hash TEXT NOT NULL DEFAULT ''")
+        # 旧库迁移：identity 列（2026-09-24 增补——identity 机制上线，
+        # 调用归属从 user 精确到 <device>_<agent>）
+        if "identity" not in cols:
+            self.conn.execute(
+                "ALTER TABLE call_log ADD COLUMN identity TEXT NOT NULL DEFAULT ''")
         self.conn.commit()
 
     def log_call(self, user_id: str, tool: str, summary: str = "",
                  duration_ms: int = 0, ok: bool = True, error: str = "",
-                 client: str = "", ip: str = "", before_hash: str = ""):
+                 client: str = "", ip: str = "", before_hash: str = "",
+                 identity: str = ""):
         with self._lock:
             self.conn.execute(
                 "INSERT INTO call_log (id, ts, user_id, client, ip, tool, summary, "
-                "duration_ms, ok, error, before_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "duration_ms, ok, error, before_hash, identity) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex, _now(), user_id, client[:120], ip, tool,
                  summary[:200], duration_ms, 1 if ok else 0, error[:200],
-                 before_hash[:64]),
+                 before_hash[:64], identity[:80]),
             )
             self._trim()
             self.conn.commit()

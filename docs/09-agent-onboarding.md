@@ -27,6 +27,10 @@ codex mcp add yacmemo --url http://debsvc.local:9721/<用户ID>/mcp
 
 1. **会话开始**：先调 `memory_context` 冷启动回顾，然后向用户展示一行接入摘要，例如：
 
+   > ✅ 已接入 yacmemo 记忆层（用户：yachen，契约 v0.3.0）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；专属必读 2 份已注入；最近审计无待处理问题。
+
+   携带 identity token（`Authorization: Bearer <device>_<agent>`，stdio 用环境变量 `YACMEMO_TOKEN`，token 由 WebUI「身份」页生成）的 agent 会自动获得 `agents/` 专属记忆区：`memory_context` 注入你的专属必读，`memory_search` 范围限定为 user 层 + 你的专属区。未配置 token 不影响 user 层使用。
+
    > ✅ 已接入 yacmemo 记忆层（用户：yachen，契约 v0.1.3）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；最近审计无待处理问题。
 
 2. **日常遵循记忆纪律**（完整约定见 [01-architecture.md §八](01-architecture.md)，工具规格见 [02-mcp-tools.md](02-mcp-tools.md)）：
