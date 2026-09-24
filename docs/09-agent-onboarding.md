@@ -27,7 +27,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/<用户ID>/mcp
 
 1. **会话开始**：先调 `memory_context` 冷启动回顾，然后向用户展示一行接入摘要，例如：
 
-   > ✅ 已接入 yacmemo 记忆层（用户：yachen，契约 v0.3.0）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；专属必读 2 份已注入；最近审计无待处理问题。
+   > ✅ 已接入 yacmemo 记忆层（用户：yachen，契约 v0.3.1）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；专属必读 2 份已注入；最近审计无待处理问题。
 
    携带 identity token（`Authorization: Bearer <device>_<agent>`，stdio 用环境变量 `YACMEMO_TOKEN`，token 由 WebUI「身份」页生成）的 agent 会自动获得 `agents/` 专属记忆区：`memory_context` 注入你的专属必读，`memory_search` 范围限定为 user 层 + 你的专属区。未配置 token 不影响 user 层使用。
 
@@ -38,6 +38,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/<用户ID>/mcp
    - 回答事实性问题前先 `memory_search`；结果带 ⚠ 时先读两篇、用 `memory_edit` 合并，然后再回答；
    - 写入先查重：已有同主题笔记用 `memory_edit` / `memory_edit_section` **就地更新**，不新建重复笔记；
    - **长期记忆只写注册主题目录内**——路径必须带 `topics/` 前缀：`topics/<主题>/<笔记名>`。写 `女儿AI陪伴老师/abstract` 会被拦截，写 `topics/女儿AI陪伴老师/abstract` 才对（2026-09-19 TeleAgent 实测：漏前缀被拦后 agent 空转了一轮才自纠；现在拦截消息会直接给出可重试的 title，但别依赖拦截——先写对）；新主题须请用户明确授权后 `topic_register`（越界写入硬拦截，`force` 不豁免）；流水账放 `journal/`；
+   - **专属必读写自己的 identity 区**：`agents/<agent>/必读.md`（同 agent 跨设备共享）或 `agents/<agent>/<device>/必读.md`（本机专属）；只放指针与纪律，事实一律进 topics/；引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
    - **abstract 是摘要卡**（`topics/<主题>/abstract.md`）：保持一句话现状，现状变化用 `memory_edit` 就地更新；详细内容写成模块笔记 `topics/<主题>/<笔记名>`，不要把长文塞进 abstract；
    - 事实行用 observation 语法：`- [配置] 服务端口为 9721`；
    - 注册 / 注销 / 归档主题、删除笔记：**仅在用户明确要求时执行**。

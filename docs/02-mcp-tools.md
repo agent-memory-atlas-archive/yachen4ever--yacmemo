@@ -30,9 +30,9 @@ token 是确定性拼接（`<device>_<agent>`，小写字母/数字/短横线，
 
 - **专属隔离是服务端强制的**：读、检索、列表、写全链路过滤——任何 identity 只能看到 user 层 + 自己的 agent 层 + 自己的设备子树，其他 identity 的专属区不可见不可写；
 - **scoped search**：`memory_search` 只返回 user 层 + 本 identity 专属区；
-- **memory_context 自动注入**：携带 token 时追加 `agents/<agent>/必读.md`（跨设备共享）与 `agents/<agent>/<device>/必读.md`（本机专属）两节，未创建时给出写入模板；
+- **memory_context 自动注入**：携带 token 时追加 `agents/<agent>/必读.md`（跨设备共享）与 `agents/<agent>/<device>/必读.md`（本机专属）两节——加上画像即会话必读三件套，注入即视为已读；未创建时给出写入模板；
 - **未携带 token 的旧配置照常可用** user 层，但 `agents/` 区不可见不可写（写入会被拦截并提示配置方式）；token 拼写错误按非法 token 拒绝并附约定说明；
-- 写入约定：**必读只放指针与纪律，事实一律进 `topics/`** 与所有 agent 共享；`agents/<agent>/` 第一层只能放平铺文件，子目录一律视为设备目录。
+- 写入约定：**必读只放指针与纪律，事实一律进 `topics/`** 与所有 agent 共享；`agents/<agent>/` 第一层只能放平铺文件，子目录一律视为设备目录。引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
 
 ## 1. memory_search
 

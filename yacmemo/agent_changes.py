@@ -12,10 +12,19 @@ integration_check(onboarded_version=...) 获取增量变更与最新写入约定
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.3.0"
+AGENT_CONTRACT_VERSION = "0.3.1"
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.1": (
+        "- 会话必读口径明确：memory_context 注入的画像 + agent 层必读 + "
+        "本机层必读三件套即会话必读内容，注入即视为已读，无需再单独读文件；\n"
+        "- 专属区指针路径卫生：引用其他层的必读/笔记必须代入真实设备名"
+        "（agents/teleagent/r9000x/必读.md）；模板占位一律写尖括号形式"
+        "（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md "
+        "会被当成真实路径、检索必然失败（2026-09-24 TeleAgent 实例）；\n"
+        "- 工具语义无变化。"
+    ),
     "0.3.0": (
         "- 新增 identity（身份）机制：MCP 请求可携带 token 标明 agent+设备——"
         "HTTP 请求头 Authorization: Bearer <device>_<agent>（如 r9000x_teleagent，"
@@ -50,6 +59,8 @@ AGENT_CHANGELOG: dict[str, str] = {
 # 最新写入约定速览：integration_check 返回全文，agent 据此刷新本地提示词
 AGENT_CONTRACT_DIGEST = (
     "## 写入约定速览\n"
+    "- 会话必读三件套：memory_context 自动注入用户画像 + agent 层必读 + "
+    "本机层必读，注入即视为已读，无需再单独读文件；\n"
     "- 长期记忆只写注册主题目录内：topics/<主题>/<笔记名>"
     "（缺 topics/ 前缀会被硬拦截，force 不豁免）；\n"
     "- abstract（topics/<主题>/abstract.md）是摘要卡，保持一句话现状；"
@@ -57,7 +68,9 @@ AGENT_CONTRACT_DIGEST = (
     "- 更新事实用 memory_edit / memory_edit_section 就地改，不新建重复笔记；\n"
     "- 专属必读：写 agents/<agent>/必读.md（同 agent 跨设备共享，第一层只放"
     "平铺文件）或 agents/<agent>/<device>/必读.md（本机专属）；只放指针与纪律，"
-    "事实进 topics/；\n"
+    "事实进 topics/；引用其他层路径必须代入真实设备名，模板占位一律用尖括号"
+    "（agents/<agent>/<device>/…），禁止留空段（agents/x//必读.md 会被当成"
+    "真实路径、检索必然失败）；\n"
     "- journal/、archive/、curator/、agents/ 免注册区不受限"
     "（agents/ 另有 identity 专属守卫）；\n"
     "- topic_register / topic_unregister / archive_topic / memory_delete"

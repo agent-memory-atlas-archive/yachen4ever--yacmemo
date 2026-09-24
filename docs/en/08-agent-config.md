@@ -22,7 +22,7 @@ Desktop agents such as TeleAgent ship their own local memory mechanisms: `USER.m
 ```markdown
 ## 长期记忆（yacmemo）
 - 长期记忆统一存 yacmemo（MCP，主题注册制），多终端多 agent 共享；本地文件只存指针、不存事实副本
-- 接入契约版本: 0.3.0（每次会话开始与 memory_context 头部比对；落后即调 integration_check 自主更新本节，见 docs/09 §四）
+- 接入契约版本: 0.3.1（每次会话开始与 memory_context 头部比对；落后即调 integration_check 自主更新本节，见 docs/09 §四）
 - identity token: <device>_<agent>（MCP 配置 Authorization: Bearer 头 / stdio 环境变量 YACMEMO_TOKEN；WebUI 身份页生成；专属必读随 memory_context 自动注入）
 - 会话开始先 memory_context 回顾主题体系；写入前先 memory_search 查重，已有同主题笔记用 memory_edit / memory_edit_section 就地更新
 - 画像/偏好存 PROFILE.md 功能层：get_user_preference / update_user_preference 读写；SSH 别名、项目、设备、网络等背景一律 memory_search / memory_read 检索

@@ -32,7 +32,7 @@ The token is a deterministic concatenation (`<device>_<agent>`; lowercase letter
 - **Scoped search**: `memory_search` returns only the user tier + this identity's exclusive zone;
 - **memory_context auto-injection**: with a token, the agent-tier `agents/<agent>/必读.md` and device-tier `agents/<agent>/<device>/必读.md` sections are appended (a write template is provided when they do not exist yet);
 - **Legacy setups without a token keep working** on the user tier, but the `agents/` zone is invisible and unwritable (writes are intercepted with configuration guidance); a misspelled token is rejected as an invalid token with the convention spelled out;
-- Write convention: **must-reads hold pointers and discipline only — facts always go into `topics/`** to be shared with every agent; the first level under `agents/<agent>/` holds flat files only, and any subdirectory is treated as a device directory.
+- Write convention: **must-reads hold pointers and discipline only — facts always go into `topics/`** to be shared with every agent; the first level under `agents/<agent>/` holds flat files only, and any subdirectory is treated as a device directory. When referencing another tier's file, substitute the real device name (`agents/teleagent/r9000x/必读.md`); template placeholders always use angle brackets (`agents/<agent>/<device>/…`) and empty segments are forbidden — `agents/teleagent//必读.md` is treated as a literal path and retrieval will always fail.
 
 ## 1. memory_search
 

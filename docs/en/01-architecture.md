@@ -359,7 +359,7 @@ A list of `[[链接]]` pointing to nonexistent notes, output by audit. `memory_m
 主题：
 9. 主题的注册、注销与归档都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了" / "X 归档吧"）→ topic_register / topic_unregister / archive_topic；主题现状写入 abstract（topics/<主题>/abstract.md）并就地更新，目录内可按模块增设详细 md。
 10. 只在注册主题内写笔记（**已代码化为写路径硬拦截**，见 6.1）；journal/、archive/、curator/、agents/ 之外发现游离文件时提示用户归位。
-11. 专属必读写自己的 identity 区：agents/<agent>/必读.md（同 agent 跨设备共享）或 agents/<agent>/<device>/必读.md（本机专属）；必读只放指针与纪律，事实一律进 topics/。携带 identity token 时 memory_context 自动注入，无需提示词提醒。
+11. 专属必读写自己的 identity 区：agents/<agent>/必读.md（同 agent 跨设备共享）或 agents/<agent>/<device>/必读.md（本机专属）；必读只放指针与纪律，事实一律进 topics/。携带 identity token 时 memory_context 自动注入，注入即视为已读，无需提示词提醒。引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
 12. memory_search 只返回 user 层 + 你的专属区——搜不到别人的专属内容是设计使然，不是索引坏了。
 删除：
 13. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
