@@ -496,9 +496,18 @@ function parseFindings(markdown) {
   let cur = null
   for (const line of lines.slice(start + 1)) {
     if (line.startsWith('## ') || line.startsWith('> ')) break
-    const m = line.match(/^(\d+)\.\s+\*\*\[(\w+)\]\s+(\w+)\*\*\s+—\s+(.*)$/)
+    // 类型名可含连字符（stale-card 等）——与后端 d3/条目解析同口径，
+    // 只要求 "N. **[" 前缀，severity/type 尽力提取
+    const m = line.match(/^(\d+)\.\s+\*\*\[(\w+)\]\s+([\w-]+)\*\*\s*[—-]\s*(.*)$/)
+      || line.match(/^(\d+)\.\s+\*\*(.+?)\*\*\s*[—-]\s*(.*)$/)
     if (m) {
-      cur = { index: Number(m[1]), severity: m[2], type: m[3], reason: m[4], paths: [], proposal: '' }
+      if (m.length === 5) {
+        cur = { index: Number(m[1]), severity: m[2], type: m[3], reason: m[4], paths: [], proposal: '' }
+      } else {
+        const inner = m[2].match(/\[(\w+)\]\s*([\w-]+)/)
+        cur = { index: Number(m[1]), severity: inner?.[1] || 'other', type: inner?.[2] || 'other',
+                reason: m[3], paths: [], proposal: '' }
+      }
       findings.push(cur)
       continue
     }
