@@ -58,7 +58,7 @@
                   <n-space vertical size="small">
                     <n-space justify="space-between" align="center">
                       <n-text>{{ o.desc }}</n-text>
-                      <n-tag size="tiny" type="info">{{ lastEvent(o.id)?.event }}</n-tag>
+                      <n-tag size="tiny" type="info">{{ eventLabel(lastEvent(o.id)?.event) }}</n-tag>
                     </n-space>
                     <n-text depth="3" style="font-size: 12px" v-if="lastEvent(o.id)?.note">
                       {{ lastEvent(o.id)?.identity || 'agent' }}：{{ lastEvent(o.id)?.note }}
@@ -328,9 +328,14 @@ const attentionGroups = computed(() => {
 const hasOpenIssues = computed(() => openItems.value.length > 0)
 
 // ---- 执行状态机（读取端派生，不落库）----
-// 执行中的最新事件来自 agent 的 memory_audit_update；
-// 复审通过 = 事件表里最新事件为 verified 的全部问题（系统在审计确认消除时追加）
-const execLastMap = computed(() => auditData.value?.exec_status || {})
+// 状态直接从事件表（/audit/exec）派生——agent 一汇报，页面刷新即生效，
+// 不用等下次审计；audit/last 里的 exec_status 只是服务端给 MCP 输出的镜像
+const execLastMap = computed(() => {
+  const last = {}
+  for (const e of execEvents.value || [])
+    if (!(e.issue_id in last)) last[e.issue_id] = e
+  return last
+})
 const verifiedIds = computed(() => {
   const last = new Map()
   for (const e of execEvents.value || [])
