@@ -85,7 +85,7 @@ _LOCKED_METHODS = (
     "add_collision", "collisions_for", "list_collisions",
     "remove_collisions_involving", "prune_stale_collisions",
     "record_audit_action", "list_audit_actions",
-    "add_exec_event", "list_exec_events", "exec_last_status",
+    "add_exec_event", "list_exec_events", "exec_last_status", "fts_body",
     "get_cached_vector", "put_cached_vector", "close",
 )
 
@@ -149,6 +149,11 @@ class IndexDB:
     def get_note_by_title(self, title: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM notes WHERE title=?", (title,)).fetchone()
         return dict(row) if row else None
+
+    def fts_body(self, path: str) -> str | None:
+        """Indexed FTS body for a path (kept in sync with disk by save/resync)."""
+        row = self.conn.execute("SELECT body FROM fts WHERE path=?", (path,)).fetchone()
+        return row["body"] if row else None
 
     def all_titles(self) -> list[dict]:
         rows = self.conn.execute("SELECT path, title FROM notes").fetchall()

@@ -51,6 +51,7 @@ Dual-channel retrieval + Reciprocal Rank Fusion (k=60, using only ranks, never s
 - **Query wording advice**: feed the FTS channel keywords ("port 9721", "restic backup"), and leave natural sentences to the vector channel. For mixed queries ("yacmemo port"), both channels work at once.
 - **Short-query fallback**: queries shorter than 3 characters cannot be hit by trigram; the tool automatically falls back to a LIKE substring scan; when LIKE also misses, it outputs the hint "please switch to longer keywords".
 - **Degradation notice**: when the vector channel fails, the tool outputs `⚠ vector channel unavailable (reason); this round's results are FTS only` — "no relevant notes found" is no longer treated as an authoritative conclusion (the silent-degradation problem observed in the real 2026-09-18 endpoint outage).
+- **Settled proposals hidden** (added 2026-09-25): once every finding of a curator/ proposal report is executed or dismissed, a `> 状态：已结案` (settled) marker is stamped at the top of the file and search results no longer return it by default (with the notice "N settled proposal(s) hidden"); explicit `memory_read` still works — that is deliberate lookup. Never execute findings from a settled proposal.
 
 Return format:
 

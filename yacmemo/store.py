@@ -47,6 +47,10 @@ logger = logging.getLogger(__name__)
 _ILLEGAL_FILENAME = re.compile(r'[\\/:*?"<>|]')
 _HEADING_RE = re.compile(r"^(#{2,6})\s+(.+?)\s*$")
 TOPICS_FILE = "TOPICS.md"
+# 已结案提案的规范标记（引用行，search 据此把已结案提案从检索结果隐去；
+# 显式 memory_read 仍可读——那是明确查阅）。打标时同步把「**状态：待裁决**」
+# 行改为「**状态：已结案**」，人读机读一致。
+PROPOSAL_SETTLED_MARKER = "> 状态：已结案"
 # 用户画像与偏好：记忆层功能文件（不注册主题、不游离检测、memory_context 前置）
 PROFILE_FILE = "PROFILE.md"
 # 免注册区：不参与主题注册与游离检测的目录（agents/ 另有 identity 写守卫，
@@ -1294,6 +1298,8 @@ class Store:
             content = content.rstrip() + f"\n\n{marker}\n\n{line}\n"
         self.db.record_audit_action(issue_id, "P", "", "", action, note or reason)
         self.save(rel, content)
+        if action == "dismissed":
+            self._mark_proposal_settled(rel)
         return {"path": rel, "issue_id": issue_id, "action": action}
 
     _EXEC_EVENTS = ("executing", "progress", "executed", "blocked")
@@ -1318,7 +1324,65 @@ class Store:
                 f"event 非法: {event!r}（可用：{'/'.join(self._EXEC_EVENTS)}）")
         e = self.db.add_exec_event(issue_id, kind, event, (note or "").strip(),
                                    identity or "")
+        if kind == "P":
+            # P 类事件可能补全结案条件——汇报后顺手检查是否全部条目已结案
+            self._mark_proposal_settled(issue_id[2:].rsplit(":", 1)[0])
         return {"event": e, "timeline": self.db.list_exec_events(issue_id)}
+
+    # ---- proposal settlement（提案全部条目执行/忽略后对 agent 隐去）----
+
+    def _proposal_findings_indices(self, rel: str) -> list[int]:
+        """提案文件里的条目序号（1..N）；文件缺失或无提案节返回空表。"""
+        p = self.root / rel
+        if not p.is_file():
+            return []
+        indices, in_section = [], False
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.startswith("## "):
+                in_section = line.startswith("## 提案")
+                continue
+            if in_section:
+                m = re.match(r"^(\d+)\.\s+\*\*\[", line)
+                if m:
+                    indices.append(int(m.group(1)))
+        return indices
+
+    def _mark_proposal_settled(self, rel: str) -> bool:
+        """全部条目已执行或忽略 → 文件头部打已结案标记（幂等，单向）。
+
+        条目结案 = 对应 P 条目被人类忽略，或执行事件最新状态为
+        executed/verified（复审封口由审计负责，P 类无自动复审）。
+        历史「已采纳」行不算结案——采纳只是旧口径的派发意图，必须
+        由执行事件或显式忽略收口。"""
+        indices = self._proposal_findings_indices(rel)
+        if not indices:
+            return False
+        abs_path = self.root / rel
+        if not abs_path.is_file():
+            return False
+        content = abs_path.read_text(encoding="utf-8")
+        if PROPOSAL_SETTLED_MARKER in content:
+            return False
+        prefix = f"P:{rel}:"
+        done = {a["id"] for a in self.db.list_audit_actions()
+                if a["id"].startswith(prefix) and a["action"] == "dismissed"}
+        for iid, st in self.db.exec_last_status().items():
+            if iid.startswith(prefix) and st["event"] in ("executed", "verified"):
+                done.add(iid)
+        if not all(f"{prefix}{i}" in done for i in indices):
+            return False
+        marker = (f"{PROPOSAL_SETTLED_MARKER}（{datetime.now(UTC).strftime('%Y-%m-%d')}）"
+                  f"—— 全部 {len(indices)} 条提案已执行或忽略，agent 无需重复处理")
+        lines = content.splitlines()
+        if lines and lines[0].lstrip().startswith("#"):
+            body = [lines[0], "", marker, *lines[1:]]
+        else:
+            body = [marker, *lines]
+        content = "\n".join(body) + "\n"
+        content = content.replace("**状态：待裁决**", "**状态：已结案**", 1)
+        self.save(rel, content)
+        logger.info("proposal settled: %s (%d findings)", rel, len(indices))
+        return True
 
     def _sync_new_files(self) -> list[str]:
         """Index .md files that exist on disk but were never ingested

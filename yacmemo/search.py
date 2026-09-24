@@ -17,6 +17,7 @@ from .config import Config
 from .embedding import EmbeddingClient
 from .identity import Identity, visible
 from .index_db import IndexDB
+from .store import PROPOSAL_SETTLED_MARKER
 from .vector import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -29,8 +30,9 @@ class Searcher:
         self.db = db
         self.emb = emb
         self.vectors = vectors
-        # 最近一次 search() 的补充说明（向量通道降级 / 短查询提示），
-        # MCP memory_search 与 WebUI 搜索页读取展示
+        # 已结案提案只翻一次方向（单向状态），正结果可安全缓存
+        self._settled_cache: set[str] = set()
+        # 最近一次 search() 的补充说明（向量通道降级 / 短查询提示）
         self.last_notice: str | None = None
 
     # ---------------------------------------------------------------- channels
@@ -88,6 +90,8 @@ class Searcher:
             # visible 是唯一权威；ANONYMOUS 即 user 层全网可见）
             merged = [r for r in merged if visible(r["path"], identity)][:limit]
 
+        merged = self._drop_settled_proposals(merged)
+
         if not merged and len(query.strip()) < 3 and not self.last_notice:
             # 短查询空结果：LIKE 兜底也没命中，提示换更长的关键词
             self.last_notice = "短于 3 字的查询无法被 FTS trigram 命中，请换更长的关键词"
@@ -95,6 +99,30 @@ class Searcher:
         for r in merged:
             r["warnings"] = self._warnings_for(r["path"])
         return merged
+
+    def _drop_settled_proposals(self, results: list[dict]) -> list[dict]:
+        """已结案提案（全部条目执行/忽略）默认不对 agent 可见：
+        文件头部有已结案标记的 curator/ 报告从结果中隐去——执行类工作
+        不该被重复派发；显式 memory_read 仍可读（那是明确查阅）。"""
+        kept, dropped = [], 0
+        for r in results:
+            if r["path"].startswith("curator/") and self._is_settled(r["path"]):
+                dropped += 1
+                continue
+            kept.append(r)
+        if dropped:
+            self.last_notice = (f"已隐去 {dropped} 条已结案提案"
+                                "（全部条目已执行/忽略，无需重复处理）")
+        return kept
+
+    def _is_settled(self, path: str) -> bool:
+        if path in self._settled_cache:
+            return True
+        body = self.db.fts_body(path)
+        if body and PROPOSAL_SETTLED_MARKER in body:
+            self._settled_cache.add(path)
+            return True
+        return False
 
     def _rrf(self, channels: list[list[dict]], limit: int) -> list[dict]:
         k = self.config.search.rrf_k

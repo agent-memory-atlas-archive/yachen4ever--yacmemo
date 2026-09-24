@@ -431,3 +431,47 @@ def test_audit_auto_verifies_executed_issue(store: Store):
     # 复审通过只确认一次：再跑审计不重放
     r3 = store.audit()
     assert r3["verified"] == []
+
+
+def _proposal_markdown() -> str:
+    return (
+        "# 记忆质量提案（测试，2026-09-25）\n\n"
+        "**状态：待裁决** —— 本报告由 curator 生成，仅含提案。\n\n"
+        "## 提案（2 条）\n"
+        "1. **[medium] outdated** — 条目一\n"
+        "   - 涉及: notes/a.md\n"
+        "   - 建议: 处理条目一\n"
+        "2. **[low] other** — 条目二\n"
+        "   - 涉及: notes/b.md\n"
+    )
+
+
+def test_proposal_settled_marker_and_search_hiding(store: Store, searcher):
+    """全部条目执行/忽略 → 提案自动打已结案标记并从检索结果隐去；
+    显式 memory_read 仍可读（明确查阅不受限）。"""
+    from yacmemo.store import PROPOSAL_SETTLED_MARKER
+
+    rel = "curator/提案-20260925测试.md"
+    store.save(rel, _proposal_markdown())
+    assert any(h["path"] == rel for h in searcher.search("提案"))
+
+    store.record_proposal_action(rel, 1, "dismissed", type_="outdated", reason="条目一")
+    store.audit_exec_report(f"P:{rel}:2", "executed", note="done")
+    content = (store.root / rel).read_text(encoding="utf-8")
+    assert PROPOSAL_SETTLED_MARKER in content
+    assert "**状态：已结案**" in content
+
+    # 检索隐去（FTS 仍命中，被 search 主动过滤）；显式读取不受限
+    assert not any(h["path"] == rel for h in searcher.search("提案"))
+    assert "已结案" in store.read(rel)["content"]
+
+
+def test_proposal_not_settled_until_all_findings_done(store: Store):
+    from yacmemo.store import PROPOSAL_SETTLED_MARKER
+
+    rel = "curator/提案-20260925b.md"
+    store.save(rel, _proposal_markdown())
+    store.record_proposal_action(rel, 1, "dismissed", type_="outdated", reason="条目一")
+    assert PROPOSAL_SETTLED_MARKER not in (store.root / rel).read_text(encoding="utf-8")
+    store.audit_exec_report(f"P:{rel}:2", "executing")  # 执行中不算结案
+    assert PROPOSAL_SETTLED_MARKER not in (store.root / rel).read_text(encoding="utf-8")
