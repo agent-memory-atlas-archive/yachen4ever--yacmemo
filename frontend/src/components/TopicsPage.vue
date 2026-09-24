@@ -132,10 +132,40 @@ const treeData = computed(() => {
       .filter(n => n.path.startsWith('curator/'))
       .map(noteNode) },
   ]})
-  // 游离文件：与后端 D4 同口径（免注册区 + 系统文件 + 注册覆盖之外）
+  // 专属记忆（agents/）：agent 层平铺文件 + 各设备子树（与后端 identity 分层同构）
+  const agentNotes = notes.value.filter(n => n.path.startsWith('agents/'))
+  if (agentNotes.length) {
+    const byAgent = {}
+    for (const n of agentNotes) {
+      const seg = n.path.split('/')
+      const agent = seg[1] || '（未分组）'
+      const g = (byAgent[agent] = byAgent[agent] || { shared: [], devices: {} })
+      if (seg.length === 3) g.shared.push(n)
+      else if (seg.length >= 4) {
+        (g.devices[seg[2]] = g.devices[seg[2]] || []).push(n)
+      }
+    }
+    result.push({
+      key: 'agents',
+      label: `专属记忆 (${agentNotes.length})`,
+      children: Object.entries(byAgent).map(([agent, g]) => ({
+        key: `agent:${agent}`,
+        label: agent,
+        children: [
+          ...g.shared.map(noteNode),
+          ...Object.entries(g.devices).map(([dev, ns]) => ({
+            key: `agent:${agent}:${dev}`,
+            label: `${dev} (${ns.length})`,
+            children: ns.map(noteNode),
+          })),
+        ],
+      })),
+    })
+  }
+  // 游离文件：与后端 D4 同口径（免注册区 + 系统文件 + 专属区 + 注册覆盖之外）
   const strays = notes.value.filter(n =>
     !n.path.startsWith('journal/') && !n.path.startsWith('archive/') &&
-    !n.path.startsWith('curator/') &&
+    !n.path.startsWith('curator/') && !n.path.startsWith('agents/') &&
     n.path !== 'TOPICS.md' && n.path !== 'PROFILE.md' &&
     !isCovered(n.path))
   result.push({ key: 'stray', label: `游离文件 (${strays.length})`,

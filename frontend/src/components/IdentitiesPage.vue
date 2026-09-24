@@ -10,7 +10,7 @@
     </n-alert>
 
     <n-space justify="space-between" align="center" style="margin-bottom: 12px">
-      <n-text strong style="font-size: 15px">已有 identity（扫描 agents/ 目录）</n-text>
+      <n-text strong style="font-size: 15px">已有 identity（扫描 agents/ 目录 + 创建登记）</n-text>
       <n-space>
         <n-button size="small" @click="load" :loading="loading">刷新</n-button>
         <n-button size="small" type="primary" @click="showCreate = true">新建 identity</n-button>
@@ -19,7 +19,7 @@
 
     <n-spin v-if="loading" size="small" />
     <n-empty v-else-if="!rows.length" description="尚无 identity——agents/ 目录为空。点「新建 identity」生成第一个 token" />
-    <n-collapse v-else>
+    <n-collapse v-else v-model:expanded-names="expanded">
       <n-collapse-item v-for="row in rows" :key="row.agent" :name="row.agent">
         <template #header>
           <n-space align="center">
@@ -33,6 +33,12 @@
         <n-text depth="3" style="font-size: 12px">
           agent 层共享目录：agents/{{ row.agent }}/（第一层平铺文件，所有设备共享）
         </n-text>
+        <n-space vertical size="small" style="margin-top: 6px">
+          <n-button v-for="f in filesOf(row.agent).shared" :key="f.path"
+                    text type="primary" size="small" @click="preview(f)">
+            {{ fileName(f) }}
+          </n-button>
+        </n-space>
         <n-list v-if="row.devices.length" style="margin-top: 8px">
           <n-list-item v-for="d in row.devices" :key="d.device">
             <n-thing>
@@ -46,6 +52,12 @@
                 agents/{{ row.agent }}/{{ d.device }}/ · {{ d.notes }} 个笔记 · token：
                 <n-code :code="`${d.device}_${row.agent}`" language="text" />
               </template>
+              <n-space vertical size="small" style="margin-top: 6px">
+                <n-button v-for="f in (filesOf(row.agent).devices[d.device] || [])" :key="f.path"
+                          text type="primary" size="small" @click="preview(f)">
+                  {{ fileName(f) }}
+                </n-button>
+              </n-space>
             </n-thing>
           </n-list-item>
         </n-list>
@@ -79,6 +91,12 @@
         </n-space>
       </template>
     </n-modal>
+
+    <n-modal :show="!!previewPath" preset="card" :title="previewPath"
+             style="width: 760px" @close="previewPath = ''">
+      <n-spin v-if="previewLoading" size="small" />
+      <div v-else class="markdown-body" v-html="previewHtml" />
+    </n-modal>
   </div>
 </template>
 
@@ -88,6 +106,7 @@ import {
   NAlert, NButton, NCollapse, NCollapseItem, NCode, NEmpty, NInput,
   NList, NListItem, NModal, NSpace, NSpin, NTag, NText, NThing, useMessage,
 } from 'naive-ui'
+import { marked } from 'marked'
 import { api } from '../composables/api.js'
 
 const props = defineProps({ user: String })
@@ -95,11 +114,18 @@ const message = useMessage()
 
 const loading = ref(false)
 const rows = ref([])
+const agentFiles = ref([])
+const expanded = ref([])
 const showCreate = ref(false)
 const creating = ref(false)
 const newAgent = ref('')
 const newDevice = ref('')
 const created = ref(null)
+const previewPath = ref('')
+const previewContent = ref('')
+const previewLoading = ref(false)
+
+const previewHtml = computed(() => marked.parse(previewContent.value || ''))
 
 const claudeSnippet = computed(() => created.value
   ? `claude mcp add --transport http yacmemo http://<服务器>:9721/${props.user}/mcp --header "Authorization: Bearer ${created.value.token}"`
@@ -115,12 +141,51 @@ const jsonSnippet = computed(() => created.value
     }, null, 2)
   : '')
 
+function fileName(f) {
+  return f.title || f.path.split('/').pop().replace(/\.md$/, '')
+}
+
+// agents/ 下按 agent 分组：第一层平铺文件 = agent 层共享，更深层 = 设备子树
+function filesOf(agent) {
+  const shared = []
+  const devices = {}
+  for (const f of agentFiles.value) {
+    const seg = f.path.split('/')
+    if (seg[1] !== agent) continue
+    if (seg.length === 3) shared.push(f)
+    else if (seg.length >= 4) (devices[seg[2]] = devices[seg[2]] || []).push(f)
+  }
+  return { shared, devices }
+}
+
+async function preview(f) {
+  previewPath.value = f.path
+  previewContent.value = ''
+  previewLoading.value = true
+  try {
+    const data = await api(`/api/${props.user}/note?path=${encodeURIComponent(f.path)}`)
+    previewContent.value = data.content
+  } catch (e) {
+    previewContent.value = `（加载失败：${e.message}）`
+  } finally {
+    previewLoading.value = false
+  }
+}
+
 async function load() {
   if (!props.user) return
   loading.value = true
   try {
     const data = await api(`/api/${props.user}/identities`)
     rows.value = data.identities
+    // 人类 = 管理员视角，全量预览专属区；agents/ 目录尚不存在时降级为空
+    try {
+      const noteData = await api(`/api/${props.user}/notes?path=agents`)
+      agentFiles.value = noteData.notes
+    } catch {
+      agentFiles.value = []
+    }
+    if (rows.value.length && !expanded.value.length) expanded.value = [rows.value[0].agent]
   } catch (e) {
     message.error(e.message)
   } finally {
@@ -152,7 +217,7 @@ function closeCreate() {
   newDevice.value = ''
 }
 
-watch(() => props.user, load, { immediate: true })
+watch(() => props.user, () => { expanded.value = []; load() }, { immediate: true })
 </script>
 
 <style>

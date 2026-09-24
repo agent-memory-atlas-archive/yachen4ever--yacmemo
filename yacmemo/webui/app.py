@@ -38,6 +38,7 @@ from starlette.staticfiles import StaticFiles
 
 from ..config import Config
 from ..identity import IdentityError, make_identity
+from ..store import StoreError
 
 logger = logging.getLogger(__name__)
 
@@ -317,9 +318,12 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             c = _ctx(request.path_params["user"])
         except KeyError:
             return _err("未知用户", 404)
-        rows = await run_in_threadpool(c["store"].list_notes,
-                                       request.query_params.get("path", ""),
-                                       request.query_params.get("sort", "name"))
+        try:
+            rows = await run_in_threadpool(c["store"].list_notes,
+                                           request.query_params.get("path", ""),
+                                           request.query_params.get("sort", "name"))
+        except StoreError as e:
+            return _err(str(e))
         items = []
         for rel in rows:
             p = c["store"].root / rel
