@@ -129,6 +129,24 @@ def test_read_returns_related_by_link(store: Store):
     assert by_title["不存在的笔记"]["missing"] is True
 
 
+def test_read_related_resolves_path_form_links(store: Store):
+    store.topic_register("m2ultra本地大模型", description="M2 推理端现状")
+    store.write(
+        "notes/yacmemo部署",
+        "# yacmemo部署\n\n- [[topics/m2ultra本地大模型/abstract.md]] — 推理端\n"
+        "- [[topics/ghost/abstract.md]] — 不存在\n")
+
+    r = store.read("yacmemo部署")
+    rel = {x["title"]: x for x in r["related"]}
+    # 路径形式解析到目标笔记（卡标题从 H1 提取会与主题名漂移，
+    # 路径是 agent 唯一能从 memory_list 拿到的确定形式）
+    assert rel["topics/m2ultra本地大模型/abstract.md"]["via"] == "link"
+    assert rel["topics/m2ultra本地大模型/abstract.md"]["path"] == \
+        "topics/m2ultra本地大模型/abstract.md"
+    # 真不存在的路径仍报 missing
+    assert rel["topics/ghost/abstract.md"]["missing"] is True
+
+
 def test_list_notes_sort_modes(store: Store):
     store.write("notes/a笔记", "# a笔记\nA")
     store.write("notes/b笔记", "# b笔记\nB")

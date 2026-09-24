@@ -106,17 +106,35 @@ def parse_links(content: str) -> list[str]:
     return seen
 
 
+def canonical_link_target(link: str) -> str:
+    """Normalize a [[link]] target for path-form resolution（与 resolve() 同规则）."""
+    return link.strip().replace("\\", "/").lstrip("/")
+
+
 def d3_scan(contents: dict[str, str], valid_titles: set[str]) -> list[dict]:
-    """Dangling [[links]]: targets that match no existing note title.
+    """Dangling [[links]]: targets that resolve to no existing note.
+
+    两种合法形式，标题优先：
+    - 标题形式：精确命中某笔记的标题（memory_move 保留的形式）
+    - 路径形式：相对记忆根的路径，带不带 .md 都行——agent 从 memory_list
+      拿到的就是路径，主题卡互链只能用它（标题从 H1 提取，会与主题名漂移）
 
     Citation-like targets with no letters/CJK (e.g. `[[1,28,28]]`, `[[...]]`)
     are not note references and are ignored.
     """
+    path_forms = set()
+    for p in contents:
+        path_forms.add(p)
+        if p.endswith(".md"):
+            path_forms.add(p[:-3])
     out = []
     for path, content in contents.items():
         for link in parse_links(content):
             if not re.search(r"[\u4e00-\u9fffA-Za-z]", link):
                 continue
-            if link not in valid_titles:
-                out.append({"path": path, "link": link})
+            if link in valid_titles:
+                continue
+            if canonical_link_target(link) in path_forms:
+                continue
+            out.append({"path": path, "link": link})
     return out

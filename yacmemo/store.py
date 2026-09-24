@@ -28,6 +28,7 @@ from rapidfuzz import fuzz
 
 from .config import Config
 from .detectors import (
+    canonical_link_target,
     d1_scan,
     d3_scan,
     find_title_conflicts,
@@ -258,6 +259,12 @@ class Store:
         seen_paths = {rel}
         for link in parse_links(content):
             target = self.db.get_note_by_title(link)
+            if not target:
+                # 路径形式兜底（与 d3_scan 同规则）：agent 从 memory_list
+                # 拿到的是路径，[[topics/x/abstract.md]] 这类引用按路径解析
+                tpath = canonical_link_target(link)
+                target = (self.db.get_note(tpath)
+                          or self.db.get_note(tpath + ".md"))
             if target and target["path"] not in seen_paths:
                 first_obs = self._first_observation(target["path"])
                 related.append({"title": link, "path": target["path"],

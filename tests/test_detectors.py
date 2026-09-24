@@ -97,3 +97,16 @@ def test_d3_scan_dangling_only():
     }
     dangling = d3_scan(contents, {"b"})
     assert dangling == [{"path": "a.md", "link": "ghost"}]
+
+
+def test_d3_scan_accepts_path_form_links():
+    # 主题卡互链用路径形式（标题从 H1 提取会与主题名漂移），带不带 .md 都解析
+    contents = {
+        "topics/youbuddy/abstract.md":
+            "关联 [[topics/m2ultra 本地大模型/abstract.md]]"
+            " 和 [[topics/debsvc 服务器/abstract]] 和 [[ghost]]",
+        "topics/m2ultra 本地大模型/abstract.md": "# m2ultra 本地大模型",
+        "topics/debsvc 服务器/abstract.md": "# debsvc",
+    }
+    dangling = d3_scan(contents, {"youbuddy"})
+    assert dangling == [{"path": "topics/youbuddy/abstract.md", "link": "ghost"}]
