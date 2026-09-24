@@ -186,6 +186,22 @@ memory_audit() -> str
 
 修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行与当次审计快照路径 `journal/audit/<日期>.md`——每日一份、同日复审追加；过期快照由 curator 按 `audit_retention_days` 清理）。
 
+2026-09-25 增补两节输出：`== 执行进度 ==`（agent 经 `memory_audit_update` 汇报的执行中问题与最新动态）与 `== 复审通过 ==`（已执行且本轮不再报告的问题——审计自动确认，无需人工）。
+
+## 7.5 memory_audit_update
+
+```
+memory_audit_update(issue_id: str, event: str, note: str = "") -> str
+```
+
+汇报审计问题的**执行进度**（契约 0.3.3 新增）。判断与执行分离的 agent 侧入口：WebUI「复制执行指令」派下的问题、或 `memory_audit` 自己发现的问题，执行修复时向 server 留痕。
+
+- `issue_id`：审计报告/执行指令里的 id（`D3:<path>|<link>`、`P:<file>:<index>` 等）；
+- `event`：`executing` 开始执行 / `progress` 过程汇报 / `executed` 执行完成 / `blocked` 受阻需人工；
+- `note`：一句话说明（做了什么/卡在哪）；
+- identity 自动记录（哪个 agent 哪台设备汇报的）；时间线只追加不改写，WebUI 审计页逐条展示；
+- **复审不归 agent 管**：完成后重跑 `memory_audit`，问题不再被报告即为复审通过（系统自动追加封口事件）；不要声称"已验证"，也不要代替人做忽略。
+
 ## 8. memory_list
 
 ```
@@ -202,6 +218,7 @@ memory_list(path: str = "", sort: str = "name") -> str
 要找"某件事记在哪"？    → memory_search（关键词式 query）
 要梳理一个主题全貌？    → memory_read（看相关笔记链路）
 定期体检？              → memory_audit
+执行审计问题修复？      → memory_audit_update 汇报进度（executing → progress → executed）
 ```
 
 

@@ -118,3 +118,20 @@ def test_clear_all_keeps_guard_events_and_cache(db: IndexDB):
     assert db.list_notes() == []
     assert db.guard_stats()["forced"] == 1
     assert db.get_cached_vector("h") is not None
+
+
+def test_exec_events_timeline_and_last_status(db: IndexDB):
+    """agent 执行时间线：追加式，新在前；exec_last_status 给每问题最后一条。"""
+    db.add_exec_event("D3:x.md|[[g]]", "D3", "executing", "开始", "r9000x_teleagent")
+    db.add_exec_event("D3:x.md|[[g]]", "D3", "progress", "改了一半", "r9000x_teleagent")
+    db.add_exec_event("P:f.md:1", "P", "executed", "完成")
+
+    tl = db.list_exec_events("D3:x.md|[[g]]")
+    assert [e["event"] for e in tl] == ["progress", "executing"]
+    assert tl[0]["identity"] == "r9000x_teleagent"
+
+    last = db.exec_last_status()
+    assert last["D3:x.md|[[g]]"]["event"] == "progress"
+    assert last["D3:x.md|[[g]]"]["updates"] == 2
+    assert last["P:f.md:1"]["event"] == "executed"
+    assert len(db.list_exec_events()) == 3

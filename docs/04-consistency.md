@@ -81,9 +81,32 @@ collisions(id, kind,           -- obs / title
 
 guard_events(id, ts, kind,     -- refused / forced / uncovered（clear_all 与 reindex 不清除）
              attempted_title, matched_path)
+
+audit_actions(id, kind,        -- 人的处置：D1-D5 / P（提案裁决），重跑不重放
+              action)            -- dismissed（D 类）；adopted / dismissed（P 类）
+
+audit_exec_events(seq, issue_id, kind,
+                  event,       -- agent 汇报：executing / progress / executed / blocked
+                  note, identity, ts)  -- 追加式时间线；verified 由 audit() 自动追加
 ```
 
-## 四、阈值与调参
+## 四、审计问题的执行工作流（2026-09-25 增补）
+
+判断、执行、验证三种角色分离，谁都不越界：
+
+```
+审计发现 ──▶ 人判断 ──▶ agent 执行 ──▶ 审计验证
+          忽略（误报）   memory_audit_update    已执行且不再报告
+          派发（复制执行指令）  汇报过程          = 复审通过（自动）
+```
+
+- **人**（WebUI）：忽略误报；把真问题用「复制执行指令」派给任意 agent（指令内嵌汇报约定）；
+- **agent**（MCP `memory_audit_update`）：`executing` 接手 → `progress` 过程 → `executed` 完成 / `blocked` 受阻；identity 自动入时间线；复审不归 agent 管；
+- **系统**（`memory_audit`）：唯一验证者——上轮有执行记录、本轮不再报告的问题自动追加 `verified` 封口事件（派生验证，无需人工点头）；再次出现则标「复发」。
+
+状态是读取端派生，不落库：最新执行事件 + 最新审计报告即可推出 待处理 / 执行中 / 已执行待复审 / 复审通过 / 已忽略。
+
+## 五、阈值与调参
 
 | 参数 | 默认 | 含义 | 调整依据 |
 |---|---|---|---|
@@ -91,7 +114,7 @@ guard_events(id, ts, kind,     -- refused / forced / uncovered（clear_all 与 r
 | `collision_cosine_threshold` | 0.86 | D2 撞车 cosine 线 | audit 误报多 → 升；漏报 → 降 |
 | `force_confirm_threshold` | 3 | 24h 内 force 免确认次数 | 模型守约能力强可放宽 |
 
-## 五、与 v1 一致性层的对照
+## 六、与 v1 一致性层的对照
 
 | | v1（已退役） | v2 |
 |---|---|---|

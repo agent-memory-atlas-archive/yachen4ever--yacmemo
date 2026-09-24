@@ -142,4 +142,6 @@ def summarize_args(tool: str, kwargs: dict) -> str:
         return f"query={q[:80]}"
     if tool == "memory_list":
         return f"path={kwargs.get('path', '')}"
+    if tool == "memory_audit_update":
+        return f"{kwargs.get('issue_id', '')} → {kwargs.get('event', '')}"
     return ""

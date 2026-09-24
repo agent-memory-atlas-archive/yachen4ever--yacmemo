@@ -39,15 +39,19 @@ A page for manually verifying retrieval quality. Switch between the `hybrid` (de
 
 ### 2.3 Audit
 
-The audit page has a **two-tab** structure; each of the two audit engines gets one complete workflow:
+The audit page has a **two-tab** structure; each of the two audit engines gets one complete workflow. The role split is the core of the design: **humans only judge (dismiss false positives / dispatch issues to agents), agents only execute (reporting progress via `memory_audit_update`), the system only verifies (re-checks are confirmed by the audit automatically)** — the WebUI is a judgment desk and an observation board, not an executor.
 
 **Tab 1 "Deterministic Audit"** — fast, zero LLM, includes self-healing; equivalent to `memory_audit`:
 
 - "Audit Now" at the top; on page load the most recent audit result is shown (the in-memory cache hangs off the Store and is shared with MCP memory_audit; after a service restart a re-audit is needed; when a snapshot is deleted — manually or by curator expiry cleanup — the cache is cleared in step, and the page degrades to a notice for the missing snapshot file instead of an error);
-- Pending issues are grouped into cards by D1–D5 (duplicate title (D1) / semantic collision (D2) / dangling link (D3) / dangling topic card (D5) / stray file (D4)), each with "Handled" / "Ignore" actions: the disposition line is appended to that day's snapshot's 处置记录 (Disposition Record) section and persisted to the `audit_actions` table (reruns do not replay; D2 syncs collision status);
+- **Workflow strip**: pending → executing → executed-awaiting-recheck → verified, with live counters per stage — at a glance, which issues are stuck with whom;
+- **In progress**: issues currently being executed by agents are pinned at the top (the latest report plus the full timeline);
+- Issues needing attention are grouped into cards by D1–D5 (duplicate title (D1) / semantic collision (D2) / dangling link (D3) / dangling topic card (D5) / stray file (D4)), each with a status tag and two actions: **"Copy Execution Instruction"** (embeds the `memory_audit_update` reporting convention; paste it to any agent to start work) and **"Ignore"** (false positive / won't fix — a human judgment; the disposition line is appended to that day's snapshot's 处置记录 (Disposition Record) section and persisted to the `audit_actions` table, reruns do not replay; D2 syncs collision status);
+- Each issue can expand its **execution timeline**: every agent report (started / progress / done / blocked) is listed with identity and time;
+- **Verified on re-audit**: issues the agent executed and this round's audit no longer reports move here automatically (the system appends a `verified` closing event) — verification is deterministic and needs no human sign-off; a verified issue that reappears is flagged as regressed;
 - Self-healing cards (new file / external modification / external deletion / **notes missing vectors**) are display-only, with no disposition buttons — notes missing vectors were written while the embedding endpoint was down, and the audit has already retried and filled them in automatically;
 - When audit snapshot files are deleted (manually or by curator expiry cleanup), the most-recent-audit cache is cleared in step, and the page degrades to a notice rather than an error;
-- **Disposition history**: read in full from the `audit_actions` table (including proposal adjudication records) — the table is the authoritative data source for dispositions; the section embedded in the snapshot is only that day's trail;
+- **Judgment & execution log**: human dispositions (`audit_actions` table) and agent execution reports (`audit_exec_events` table) merged in reverse chronological order — both lines leave a trail;
 - **Historical audit snapshots**: `journal/audit/<date>.md`, one per day; same-day reruns append under a 复审 (Re-review) subsection; listed newest-first and clickable for review; expiry cleanup is handled by the curator timer according to `audit_retention_days` (default 7 days).
 
 Disposition guidance per issue type:
@@ -55,21 +59,22 @@ Disposition guidance per issue type:
 | Output | Meaning | Disposition |
 |---|---|---|
 | New file / external modification / external deletion | self-healing results | no action needed |
-| Duplicate title (D1) | two notes with near-duplicate titles after normalization | merge manually, then "Handled"; or "Ignore" |
-| Semantic collision (D2) | similar observation pairs across notes (with both texts and the score) | **human adjudication**: merge, then "Handled"; or "Ignore" (syncs collision status) |
-| Dangling link (D3) | the `[[target]]` does not exist | "Handled" after fixing/removing it; "Ignore" if it is not a note reference |
-| Dangling topic card (D5) | the abstract the registry points to does not exist | "Handled" after fixing the registry or rebuilding the card |
-| Stray file (D4) | loose notes not filed under any registered topic | "Handled" after filing into place; or "Ignore" |
+| Duplicate title (D1) | two notes with near-duplicate titles after normalization | merge manually, then have the agent report `executed`; or "Ignore" |
+| Semantic collision (D2) | similar observation pairs across notes (with both texts and the score) | **human adjudication**: dispatch the merge to an agent; "Ignore" if a false positive (syncs collision status) |
+| Dangling link (D3) | the `[[target]]` resolves to neither a title nor a path | "Copy Execution Instruction" to dispatch an agent to fix it; "Ignore" if it is not a note reference |
+| Dangling topic card (D5) | the abstract the registry points to does not exist | dispatch an agent to fix the registry or rebuild the card |
+| Stray file (D4) | loose notes not filed under any registered topic | dispatch an agent to file it into place; or "Ignore" |
 
 > Registry-free zones (journal/archive/curator) are never judged stray. Guard statistics (refused / forced counts) sit at the bottom of the cards.
 
-**Judging semantic collisions**: 1) the two notes are two copies of the same topic → merge the content into the keeper, delete the other, click "Handled"; 2) the two notes cover different topics and merely both happen to contain this fact → click "Ignore"; 3) one note is an older version of the other → merge the new content into the keeper, click "Handled". Collision detection only applies to observation lines in the `- [类别] 内容` (`- [category] content`) form; GFM task lists (`- [x]`) are checkboxes and do not participate (see [03-storage-and-search.md](03-storage-and-search.md)).
+**Judging semantic collisions**: 1) the two notes are two copies of the same topic → merge the content into the keeper, delete the other (the agent reports `executed` afterwards); 2) the two notes cover different topics and merely both happen to contain this fact → click "Ignore"; 3) one note is an older version of the other → merge the new content into the keeper. Collision detection only applies to observation lines in the `- [类别] 内容` (`- [category] content`) form; GFM task lists (`- [x]`) are checkboxes and do not participate (see [03-storage-and-search.md](03-storage-and-search.md)).
 
 **Tab 2 "Quality Proposals"** — the curator deep-review workflow:
 
 - "Deep Review Now" hands the registry, the topic cards, and the audit results to the LLM configured under `[curator]` (about 1–3 minutes; the weekly timer runs it automatically); the report lands at `curator/提案-<日期>.md` (proposal-<date>.md), and same-day reruns append under a 复审 (Re-review) subsection (the title stays unique per day, so D1 is not triggered);
 - Proposals are displayed **structurally** per item (severity / type / notes involved / suggestion), with counters at the top for pending / adopted / ignored;
-- **Adjudication belongs to humans**: each item can be "Adopt" or "Ignore" — the decision is persisted (`audit_actions` table, P-class entries) and appended to the proposal note's 裁决记录 (Adjudication Record) section (git auto-snapshot); **after adopting, click "Copy Execution Instructions"** and paste a complete instruction to any agent to execute via the MCP tools; after execution the agent leaves a trace in the proposal file. The system and the WebUI only record decisions and never modify note content directly — an extension of the iron rule "curator only proposes": changes always go through the guarded, git-snapshotted store tool semantics.
+- **Adjudication belongs to humans**: each item can be "Adopt" or "Ignore" — the decision is persisted (`audit_actions` table, P-class entries) and appended to the proposal note's 裁决记录 (Adjudication Record) section (git auto-snapshot); **after adopting, click "Copy Execution Instructions"** and paste a complete instruction to any agent to execute via the MCP tools;
+- Adoption is not the end of the line: adopted items join the same execution pipeline as the deterministic audit (executing / executed / blocked tags plus a timeline), with the agent reporting progress under the `P:<file>:<index>` id; proposals are re-verified by the next deep review — when a new report no longer contains a similar finding, the old proposal's execution is confirmed in passing. The system and the WebUI only record decisions and never modify note content directly — an extension of the iron rule "curator only proposes": changes always go through the guarded, git-snapshotted store tool semantics.
 
 "Full Index Rebuild" is a dangerous maintenance operation (it also zeroes the run metrics); it lives in the **Settings → Health Overview → Maintenance** card, not on the audit page.
 
@@ -105,7 +110,8 @@ All responses are JSON; business failures return `{"ok": false, "error": "..."}`
 | GET | `/api/{user}/audit/last` | — | most recent audit result (in-memory cache, lost on restart) |
 | GET | `/api/{user}/audit/runs` | — | historical audit snapshot list (journal/audit/*.md, newest first) |
 | GET | `/api/{user}/audit/actions` | — | full disposition/adjudication history (audit_actions table) |
-| POST | `/api/{user}/audit/action` | `{file, id, action, label, note?}` | record a disposition (appends to the snapshot's disposition record; D2 syncs collision status) |
+| GET | `/api/{user}/audit/exec` | — | full agent execution timeline (audit_exec_events table, newest first) |
+| POST | `/api/{user}/audit/action` | `{file, id, action, label, note?}` | record a human disposition (appends to the snapshot's disposition record; D2 syncs collision status) |
 | POST | `/api/{user}/proposal/action` | `{file, index, action, type?, reason?, note?}` | adjudicate a proposal item (persisted in the table + traced in the proposal note's 裁决记录 (Adjudication Record) section) |
 | POST | `/api/{user}/collision` | `{id, status}` | collision adjudication: `resolved` / `dismissed` |
 | POST | `/api/{user}/curator` | — | trigger a deep review (synchronous wait, about 1–2 minutes); returns the report markdown |

@@ -493,6 +493,16 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err("未知用户", 404)
         return _ok({"actions": c["db"].list_audit_actions()})
 
+    async def audit_exec_events(request: Request):
+        """agent 执行时间线（audit_exec_events 全量，倒序）——
+        汇报方是 agent（memory_audit_update），本端点只读。"""
+        try:
+            c = _ctx(request.path_params["user"])
+        except KeyError:
+            return _err("未知用户", 404)
+        events = await run_in_threadpool(c["db"].list_exec_events)
+        return _ok({"events": events})
+
     async def proposal_action(request: Request):
         """裁决 curator 提案条目：持久化 + 提案笔记留痕；执行仍由 agent 按留痕进行。"""
         try:
@@ -740,6 +750,7 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         Route("/api/{user}/audit/last", _wrap(audit_last), methods=["GET"]),
         Route("/api/{user}/audit/runs", _wrap(audit_runs), methods=["GET"]),
         Route("/api/{user}/audit/actions", _wrap(audit_actions_list), methods=["GET"]),
+        Route("/api/{user}/audit/exec", _wrap(audit_exec_events), methods=["GET"]),
         Route("/api/{user}/audit/action", _wrap(audit_action), methods=["POST"]),
         Route("/api/{user}/proposal/action", _wrap(proposal_action), methods=["POST"]),
         Route("/api/{user}/reindex", _wrap(reindex), methods=["POST"]),

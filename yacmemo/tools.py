@@ -372,6 +372,18 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             lines.append(f"== 缺向量笔记（{len(mv)}，已重试自愈）==")
             for p in mv[:10]:
                 lines.append(f"- {p}")
+            ex = r.get("exec_status") or {}
+            if ex:
+                lines.append(f"== 执行进度（{len(ex)}）== agent 经 memory_audit_update 汇报")
+                for iid, st in list(ex.items())[:10]:
+                    who = f" · {st['identity']}" if st["identity"] else ""
+                    note = f" — {st['note']}" if st["note"] else ""
+                    lines.append(f"- {iid}: {st['event']}{who}{note}")
+            verified = r.get("verified") or []
+            if verified:
+                lines.append(f"== 复审通过（{len(verified)}）== 已执行且本轮不再报告")
+                for cid in verified[:10]:
+                    lines.append(f"- {cid}")
             g = r["guard_stats"]
             lines.append(f"== 守卫统计 == 拒绝 {g['refused']} 次，force 越过 {g['forced']} 次，"
                          f"未覆盖拦截 {g['uncovered']} 次")
@@ -379,6 +391,37 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             if r.get("audit_file"):
                 lines.append(f"== 审计快照 == {r['audit_file']}")
             return "\n".join(lines)
+
+    @mcp.tool()
+    def memory_audit_update(issue_id: str, event: str, note: str = "",
+                            ctx: Context = None) -> str:
+        """汇报审计问题的执行进度：执行记忆修复时向 server 留痕。
+
+        处理 WebUI「复制执行指令」派下的问题（或 memory_audit 发现的）时，
+        开始执行 event="executing"；关键动作 event="progress"；
+        完成 event="executed"；受阻需人工 event="blocked"。
+        复审由审计自动确认——完成后重跑 memory_audit，问题不再报告即
+        复审通过，无需（也无法）人工代为确认。
+        """
+        out = {"ok": True, "error": ""}
+        ident = _identity_from_ctx(ctx)
+        with _logged("memory_audit_update", ctx,
+                     summarize_args("memory_audit_update", locals()), out):
+            try:
+                r = store.audit_exec_report(issue_id, event, note=note,
+                                            identity=ident.token)
+            except StoreError as e:
+                return f"{e}"
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"汇报失败: {e}"
+        lines = [f"已记录：{issue_id} → {event}"
+                 + (f"（{ident.token}）" if ident.token else "")]
+        if note:
+            lines.append(f"备注：{note}")
+        lines.append(f"该问题时间线现共 {len(r['timeline'])} 条事件。"
+                     "完成后下次 memory_audit 不再报告此问题即复审通过。")
+        return "\n".join(lines)
 
     @mcp.tool()
     def memory_list(path: str = "", sort: str = "name", ctx: Context = None) -> str:

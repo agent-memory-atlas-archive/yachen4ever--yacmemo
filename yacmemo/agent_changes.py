@@ -12,10 +12,22 @@ integration_check(onboarded_version=...) 获取增量变更与最新写入约定
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.3.2"
+AGENT_CONTRACT_VERSION = "0.3.3"
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.3": (
+        "- 新增 memory_audit_update(issue_id, event, note) 工具：执行审计"
+        "问题修复时向 server 汇报进度——executing 开始 / progress 过程 / "
+        "executed 完成 / blocked 受阻需人工；issue_id 用审计报告或 WebUI "
+        "执行指令里的 id（D3:.../P:... 形式），identity 自动记录；\n"
+        "- 执行与判断分离：修复由 agent 执行并汇报，人只做忽略/派发判断，"
+        "复审由审计自动确认（已执行且下轮不再报告即复审通过）——不要在"
+        "汇报里声称\"已验证\"，也不要代替人做忽略；\n"
+        "- memory_audit 输出新增「== 执行进度 ==」「== 复审通过 ==」两节，"
+        "执行中的问题会带 agent 汇报的最新动态；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.2": (
         "- agent 层共享区路径变更：共享内容（必读等）迁入 "
         "agents/<agent>/shared/ 子树；本机层不变（agents/<agent>/<device>/）。"
@@ -83,6 +95,8 @@ AGENT_CONTRACT_DIGEST = (
     "真实路径、检索必然失败）；\n"
     "- journal/、archive/、curator/、agents/ 免注册区不受限"
     "（agents/ 另有 identity 专属守卫）；\n"
+    "- 审计问题执行：修复时用 memory_audit_update 汇报进度"
+    "（executing / progress / executed / blocked），复审由审计自动确认；\n"
     "- topic_register / topic_unregister / archive_topic / memory_delete"
     " 仅在用户明确要求时调用。\n"
     "完整规格：docs/09-agent-onboarding.md 与 docs/02-mcp-tools.md。"

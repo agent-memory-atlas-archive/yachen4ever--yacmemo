@@ -396,3 +396,38 @@ def test_audit_records_last_result_for_webui(store: Store):
     assert store.last_audit is not None
     assert store.last_audit["audit"]["audit_file"] == r["audit_file"]
     assert store.last_audit["ts"] > 0
+
+
+def test_audit_exec_report_validates(store: Store):
+    with pytest.raises(Exception, match="issue_id 非法"):
+        store.audit_exec_report("随便写", "executing")
+    with pytest.raises(Exception, match="event 非法"):
+        store.audit_exec_report("D3:notes/a笔记.md|ghost", "done")
+    r = store.audit_exec_report("D3:notes/a笔记.md|ghost", "executing",
+                                note="开始", identity="r9000x_teleagent")
+    assert r["timeline"][0]["identity"] == "r9000x_teleagent"
+    assert r["timeline"][0]["kind"] == "D3"
+
+
+def test_audit_auto_verifies_executed_issue(store: Store):
+    """判断与执行分离的闭环：agent 汇报执行 → 问题消除 → 审计自动追加
+    verified 封口事件（复审通过），且只确认一次不重放。"""
+    store.write("notes/a笔记", "# a笔记\n引用 [[ghost]]。\n")
+    r1 = store.audit()
+    assert len(r1["dangling_links"]) == 1
+    d3 = "D3:notes/a笔记.md|ghost"
+    store.audit_exec_report(d3, "executing")
+    store.audit_exec_report(d3, "executed", note="已补目标笔记")
+    # 执行中的问题在审计输出里带最新动态
+    r_mid = store.audit()
+    assert r_mid["exec_status"][d3]["event"] == "executed"
+
+    store.write("notes/ghost", "# ghost\n目标出现了。\n")
+    r2 = store.audit()
+    assert r2["dangling_links"] == []
+    assert r2["verified"] == [d3]
+    assert store.db.exec_last_status()[d3]["event"] == "verified"
+
+    # 复审通过只确认一次：再跑审计不重放
+    r3 = store.audit()
+    assert r3["verified"] == []

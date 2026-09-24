@@ -15,6 +15,27 @@
             </n-space>
           </n-card>
 
+          <!-- 工作流条：人判断 → agent 执行 → 审计验证 -->
+          <n-card size="small">
+            <n-space align="center" justify="space-between">
+              <n-space align="center" :size="6">
+                <n-tag size="small" :type="attentionItems.length ? 'warning' : 'default'">待处理 {{ attentionItems.length }}</n-tag>
+                <n-text depth="3">→</n-text>
+                <n-tag size="small" :type="inProgressItems.length ? 'info' : 'default'">执行中 {{ inProgressItems.length }}</n-tag>
+                <n-text depth="3">→</n-text>
+                <n-tag size="small" :type="recheckItems.length ? 'warning' : 'default'">已执行待复审 {{ recheckItems.length }}</n-tag>
+                <n-text depth="3">→</n-text>
+                <n-tag size="small" :type="verifiedIds.size ? 'success' : 'default'">复审通过 {{ verifiedIds.size }}</n-tag>
+                <n-text depth="3">·</n-text>
+                <n-tag size="small" type="default">已处置 {{ humanActions.length }}</n-tag>
+              </n-space>
+            </n-space>
+            <n-text depth="3" style="font-size: 12px; display: block; margin-top: 6px">
+              人只做判断（误报忽略 / 派发给 agent）；agent 执行修复并经 memory_audit_update
+              汇报过程；复审由审计自动确认——已执行且下轮不再报告即为通过。
+            </n-text>
+          </n-card>
+
           <template v-if="auditData">
             <n-card v-if="auditData.git" size="small">
               <n-space align="center">
@@ -30,76 +51,48 @@
             <AuditSection title="外部删除（已清理索引）" :items="auditData.missing" />
             <AuditSection title="缺向量笔记（已重试自愈）" :items="auditData.missing_vectors" />
 
-            <n-card v-if="openD1.length" size="small" title="标题重复（D1）">
+            <!-- 进行中：agent 正在执行的问题（观测板） -->
+            <n-card v-if="inProgressItems.length" size="small" title="进行中">
               <n-list>
-                <n-list-item v-for="(c, i) in openD1" :key="i">
-                  <n-space justify="space-between" align="center">
-                    <n-text>{{ c.a_path }} ↔ {{ c.b_path }} (score {{ c.score }})</n-text>
-                    <n-space>
-                      <n-button size="tiny" type="success" @click="dispose(d1Id(c), 'resolved', '合并标题重复')">已处理</n-button>
-                      <n-button size="tiny" @click="dispose(d1Id(c), 'dismissed', '标题重复误报')">忽略</n-button>
-                    </n-space>
-                  </n-space>
-                </n-list-item>
-              </n-list>
-            </n-card>
-
-            <n-card v-if="openD2.length" size="small" title="语义撞车（D2）">
-              <n-list>
-                <n-list-item v-for="(c, i) in openD2" :key="i">
+                <n-list-item v-for="o in inProgressItems" :key="o.id">
                   <n-space vertical size="small">
-                    <n-text>{{ c.a_path }} ↔ {{ c.b_path }} (score {{ c.score }})</n-text>
-                    <n-text depth="3">A: {{ c.a_text?.slice(0, 60) }}</n-text>
-                    <n-text depth="3">B: {{ c.b_text?.slice(0, 60) }}</n-text>
-                    <n-space>
-                      <n-button size="tiny" @click="dispose(`D2:${c.id}`, 'resolved', '合并撞车内容')">已处理</n-button>
-                      <n-button size="tiny" @click="dispose(`D2:${c.id}`, 'dismissed', '撞车误报')">忽略</n-button>
+                    <n-space justify="space-between" align="center">
+                      <n-text>{{ o.desc }}</n-text>
+                      <n-tag size="tiny" type="info">{{ lastEvent(o.id)?.event }}</n-tag>
                     </n-space>
+                    <n-text depth="3" style="font-size: 12px" v-if="lastEvent(o.id)?.note">
+                      {{ lastEvent(o.id)?.identity || 'agent' }}：{{ lastEvent(o.id)?.note }}
+                    </n-text>
+                    <exec-timeline :issue-id="o.id" />
                   </n-space>
                 </n-list-item>
               </n-list>
             </n-card>
 
-            <n-card v-if="openD3.length" size="small" title="悬空链接（D3）">
+            <!-- 待处理（含复审未过/受阻/复发），按检查类型分组 -->
+            <n-card v-for="g in attentionGroups" :key="g.kind" size="small" :title="g.title">
               <n-list>
-                <n-list-item v-for="(c, i) in openD3" :key="i">
-                  <n-space justify="space-between" align="center">
-                    <n-text>{{ c.path }}: [[{{ c.link }}]]</n-text>
-                    <n-space>
-                      <n-button size="tiny" @click="dispose(d3Id(c), 'resolved', '链接已补齐')">已处理</n-button>
-                      <n-button size="tiny" @click="dispose(d3Id(c), 'dismissed', '非笔记引用')">忽略</n-button>
+                <n-list-item v-for="o in g.items" :key="o.id">
+                  <n-space vertical size="small">
+                    <n-space justify="space-between" align="center">
+                      <n-text>{{ o.desc }}</n-text>
+                      <n-space :size="4">
+                        <n-tag v-if="o.state.label !== '待处理'" size="tiny" :type="o.state.type">{{ o.state.label }}</n-tag>
+                        <n-button size="tiny" type="primary" secondary @click="copyIssueInstruction(o)">复制执行指令</n-button>
+                        <n-button size="tiny" @click="dispose(o.id, 'dismissed', o.dismissLabel)">忽略</n-button>
+                      </n-space>
                     </n-space>
+                    <exec-timeline :issue-id="o.id" />
                   </n-space>
                 </n-list-item>
               </n-list>
             </n-card>
 
-            <n-card v-if="openD5.length" size="small" title="悬空主题卡（D5）">
-              <n-list>
-                <n-list-item v-for="(c, i) in openD5" :key="i">
-                  <n-space justify="space-between" align="center">
-                    <n-text>{{ d5Parts(c).title }}：卡路径不存在（{{ d5Parts(c).card }}）</n-text>
-                    <n-space>
-                      <n-button size="tiny" @click="dispose(c, 'resolved', '注册表已修正')">已处理</n-button>
-                      <n-button size="tiny" @click="dispose(c, 'dismissed', '暂不处理')">忽略</n-button>
-                    </n-space>
-                  </n-space>
-                </n-list-item>
-              </n-list>
-            </n-card>
-
-            <n-card v-if="openStray.length" size="small" title="游离文件（D4）">
-              <n-list>
-                <n-list-item v-for="(p, i) in openStray" :key="i">
-                  <n-space justify="space-between" align="center">
-                    <n-text>{{ p }}</n-text>
-                    <n-space>
-                      <n-button size="tiny" @click="dispose(d4Id(p), 'resolved', '已归位')">已处理</n-button>
-                      <n-button size="tiny" @click="dispose(d4Id(p), 'dismissed', '无需归位')">忽略</n-button>
-                    </n-space>
-                  </n-space>
-                </n-list-item>
-              </n-list>
+            <!-- 复审通过：agent 已执行、本轮审计确认消除 -->
+            <n-card v-if="verifiedIds.size" size="small" title="复审通过（本轮审计确认消除）">
+              <n-text depth="2" style="font-size: 13px">
+                <n-tag v-for="id in [...verifiedIds]" :key="id" size="tiny" type="success" style="margin: 2px">{{ id }}</n-tag>
+              </n-text>
             </n-card>
 
             <n-card v-if="!hasOpenIssues" size="small">
@@ -118,19 +111,17 @@
             <n-empty description="还没有审计结果——点上方「立即审计」开始" />
           </n-card>
 
-          <!-- 处置历史：权威数据源是 audit_actions 表，不是快照文件 -->
-          <n-card size="small" title="处置历史">
-            <n-empty v-if="!actions.length" description="暂无处置记录" />
+          <!-- 判断与执行记录：人的处置（audit_actions）+ agent 的执行汇报 -->
+          <n-card size="small" title="判断与执行记录">
+            <n-empty v-if="!combinedLog.length" description="暂无记录" />
             <n-list v-else>
-              <n-list-item v-for="a in actions.slice(0, 50)" :key="a.id + a.acted_at">
+              <n-list-item v-for="(e, i) in combinedLog.slice(0, 50)" :key="i">
                 <n-space justify="space-between" align="center">
                   <n-text :depth="2" style="font-size: 13px">
-                    <n-tag size="tiny" :type="a.action === 'resolved' || a.action === 'adopted' ? 'success' : 'default'">
-                      {{ actionVerb(a) }}
-                    </n-tag>
-                    {{ a.id }}
+                    <n-tag size="tiny" :type="e.tagType">{{ e.verb }}</n-tag>
+                    {{ e.actor }} · {{ e.id }}
                   </n-text>
-                  <n-text depth="3" style="font-size: 12px">{{ a.acted_at }}{{ a.note ? ` · ${a.note}` : '' }}</n-text>
+                  <n-text depth="3" style="font-size: 12px">{{ e.ts }}{{ e.note ? ` · ${e.note}` : '' }}</n-text>
                 </n-space>
               </n-list-item>
             </n-list>
@@ -190,6 +181,9 @@
                       <n-text v-if="findingAction(p, f)" depth="3">
                         （{{ findingAction(p, f) === 'adopted' ? '已采纳' : '已忽略' }}）
                       </n-text>
+                      <n-tag v-if="findingExecState(p, f)" size="tiny" :type="findingExecState(p, f).type">
+                        {{ findingExecState(p, f).label }}
+                      </n-tag>
                     </n-space>
                     <n-space v-if="!findingAction(p, f)">
                       <n-button size="tiny" type="success" @click="judge(p, f, 'adopted')">采纳</n-button>
@@ -204,6 +198,7 @@
                     涉及：{{ f.paths.join('、') }}
                   </n-text>
                   <n-text v-if="f.proposal" depth="3" style="font-size: 12px">建议：{{ f.proposal }}</n-text>
+                  <exec-timeline v-if="findingExecState(p, f)" :issue-id="`P:${p.path}:${f.index}`" />
                 </n-space>
               </n-card>
               <n-text v-if="!p.findings.length" depth="3">本次提案无发现条目。</n-text>
@@ -221,7 +216,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, h } from 'vue'
+import { ref, computed, watch, onMounted, defineComponent, h } from 'vue'
 import {
   NSpace, NCard, NButton, NList, NListItem, NText, NTag, NTabs, NTabPane,
   NStatistic, NEmpty, NCollapse, NCollapseItem, useMessage,
@@ -243,11 +238,12 @@ const runs = ref([])
 const currentRun = ref('')
 const snapshotMarkdown = ref('')
 const snapshotTitle = ref('')
-const actions = ref([])               // audit_actions 表全量（处置 + 提案裁决）
+const actions = ref([])               // audit_actions 全量（人的判断）
+const execEvents = ref([])            // audit_exec_events 全量（agent 的执行汇报，新在前）
 
 // ---- 提案 ----
 const proposals = ref([])             // [{file, path, content, findings}]
-const disposed = ref(new Set())       // 本会话内已处置的审计问题 id（即时反馈）
+const disposed = ref(new Set())       // 已处置（忽略）过的审计问题 id——loadActions 填充
 
 const AuditSection = {
   props: ['title', 'items'],
@@ -259,6 +255,24 @@ const AuditSection = {
   },
 }
 
+// 执行时间线（agent 汇报逐条展示，新在前）
+const ExecTimeline = defineComponent({
+  name: 'ExecTimeline',
+  props: { issueId: String },
+  setup(p) {
+    return () => {
+      const events = (execEvents.value || []).filter(e => e.issue_id === p.issueId)
+      if (!events.length) return null
+      return h('div', { class: 'exec-timeline' }, events.map(e => h('div', { class: 'exec-line', key: e.seq }, [
+        h('span', { class: 'exec-ev' }, eventLabel(e.event)),
+        h('span', { class: 'exec-meta' },
+          `${e.ts.replace('T', ' ').slice(0, 16)}${e.identity ? ' · ' + e.identity : ''}`),
+        e.note ? h('span', { class: 'exec-note' }, e.note) : null,
+      ])))
+    }
+  },
+})
+
 const d1Id = c => 'D1:' + [c.a_title, c.b_title].sort().join('|')
 const d3Id = c => `D3:${c.path}|${c.link}`
 const d4Id = p => `D4:${p}`
@@ -268,19 +282,85 @@ const d5Parts = c => {
   return i === -1 ? { title: rest, card: '' } : { title: rest.slice(0, i), card: rest.slice(i + 1) }
 }
 
-const openD1 = computed(() => (auditData.value?.title_duplicates || []).filter(c => !disposed.value.has(d1Id(c))))
-const openD2 = computed(() => (auditData.value?.collisions || []).filter(c => !disposed.value.has(`D2:${c.id}`)))
-const openD3 = computed(() => (auditData.value?.dangling_links || []).filter(c => !disposed.value.has(d3Id(c))))
-const openStray = computed(() => (auditData.value?.stray || []).filter(p => !disposed.value.has(d4Id(p))))
-const openD5 = computed(() => (auditData.value?.dangling_cards || []).filter(c => !disposed.value.has(c)))
-const hasOpenIssues = computed(() =>
-  openD1.value.length || openD2.value.length || openD3.value.length ||
-  openD5.value.length || openStray.value.length)
+// ---- 扁平化当前报告的全部待关注问题（执行状态机在这里落位）----
+// 已忽略（audit_actions 有行）直接剔除；执行中(executing/progress)进「进行中」，
+// 其余（无汇报/已执行复审未过/受阻/复发）留在分组卡片里
+const openItems = computed(() => {
+  const a = auditData.value
+  if (!a) return []
+  const disposedIds = disposed.value
+  const items = []
+  const push = (id, kind, desc, dismissLabel) => {
+    if (disposedIds.has(id)) return
+    items.push({ id, kind, desc, dismissLabel, state: issueState(id) })
+  }
+  for (const c of a.title_duplicates || [])
+    push(d1Id(c), 'D1', `${c.a_path} ↔ ${c.b_path} (score ${c.score})`, '标题重复误报')
+  for (const c of a.collisions || [])
+    push(`D2:${c.id}`, 'D2', `${c.a_path} ↔ ${c.b_path} (score ${c.score}) — A: ${c.a_text?.slice(0, 50)} / B: ${c.b_text?.slice(0, 50)}`, '撞车误报')
+  for (const c of a.dangling_links || [])
+    push(d3Id(c), 'D3', `${c.path}: [[${c.link}]]`, '非笔记引用')
+  for (const p of a.stray || [])
+    push(d4Id(p), 'D4', p, '无需归位')
+  for (const c of a.dangling_cards || []) {
+    const t = d5Parts(c)
+    push(c, 'D5', `${t.title}：卡路径不存在（${t.card}）`, '暂不处理')
+  }
+  return items
+})
 
-const lastAuditTime = computed(() => lastAuditTs.value
-  ? new Date(lastAuditTs.value * 1000).toLocaleString('zh-CN', { hour12: false }) : '')
+const inProgressItems = computed(() =>
+  openItems.value.filter(o => o.state.key === 'executing'))
+const recheckItems = computed(() =>
+  openItems.value.filter(o => o.state.key === 'executed'))
+const attentionItems = computed(() =>
+  openItems.value.filter(o => o.state.key !== 'executing'))
+const attentionGroups = computed(() => {
+  const meta = {
+    D1: '标题重复（D1）', D2: '语义撞车（D2）', D3: '悬空链接（D3）',
+    D4: '游离文件（D4）', D5: '悬空主题卡（D5）',
+  }
+  return Object.entries(meta).map(([kind, title]) => ({
+    kind, title,
+    items: attentionItems.value.filter(o => o.kind === kind),
+  })).filter(g => g.items.length)
+})
+const hasOpenIssues = computed(() => openItems.value.length > 0)
+
+// ---- 执行状态机（读取端派生，不落库）----
+// 执行中的最新事件来自 agent 的 memory_audit_update；
+// 复审通过 = 事件表里最新事件为 verified 的全部问题（系统在审计确认消除时追加）
+const execLastMap = computed(() => auditData.value?.exec_status || {})
+const verifiedIds = computed(() => {
+  const last = new Map()
+  for (const e of execEvents.value || [])
+    if (!last.has(e.issue_id)) last.set(e.issue_id, e.event)
+  return new Set([...last.entries()].filter(([, ev]) => ev === 'verified').map(([id]) => id))
+})
+
+function issueState(id) {
+  const st = execLastMap.value[id]
+  if (!st) return { key: 'open', label: '待处理', type: 'default' }
+  if (st.event === 'executing' || st.event === 'progress')
+    return { key: 'executing', label: '执行中', type: 'info' }
+  if (st.event === 'executed')
+    return { key: 'executed', label: '已执行·复审未过', type: 'warning' }
+  if (st.event === 'blocked')
+    return { key: 'blocked', label: '受阻', type: 'error' }
+  if (st.event === 'verified')
+    return { key: 'regressed', label: '复发', type: 'warning' }
+  return { key: 'open', label: '待处理', type: 'default' }
+}
+function lastEvent(id) {
+  return (execEvents.value || []).find(e => e.issue_id === id) || null
+}
+function eventLabel(ev) {
+  return { executing: '开始执行', progress: '过程汇报', executed: '执行完成',
+           blocked: '受阻', verified: '复审通过' }[ev] || ev
+}
 
 // ---- 提案裁决状态（audit_actions 中 kind=P 的行） ----
+const humanActions = computed(() => actions.value.filter(a => a.kind !== 'P'))
 const pActions = computed(() => {
   const m = new Map()
   for (const a of actions.value) {
@@ -293,6 +373,15 @@ function findingAction(p, f) {
   const a = pActions.value.get(`P:${p.path}:${f.index}`)
   return a?.action || ''
 }
+function findingExecState(p, f) {
+  const st = execLastMap.value[`P:${p.path}:${f.index}`]
+  if (!st) return null
+  if (st.event === 'executing' || st.event === 'progress')
+    return { label: '执行中', type: 'info' }
+  if (st.event === 'executed') return { label: '已执行', type: 'success' }
+  if (st.event === 'blocked') return { label: '受阻', type: 'error' }
+  return null
+}
 const adoptedCount = computed(() =>
   [...pActions.value.values()].filter(a => a.action === 'adopted').length)
 const dismissedCount = computed(() =>
@@ -301,6 +390,35 @@ const pendingCount = computed(() => {
   const total = proposals.value.reduce((n, p) => n + p.findings.length, 0)
   return total - adoptedCount.value - dismissedCount.value
 })
+
+// ---- 判断与执行记录：人的处置 + agent 汇报合并按时间倒序 ----
+const combinedLog = computed(() => {
+  const rows = []
+  for (const a of actions.value) {
+    rows.push({
+      ts: a.acted_at, id: a.id, note: a.note,
+      verb: a.kind === 'P'
+        ? (a.action === 'adopted' ? '提案已采纳' : '提案已忽略')
+        : (a.action === 'resolved' ? '人·已处理' : '人·忽略'),
+      tagType: a.action === 'resolved' || a.action === 'adopted' ? 'success' : 'default',
+      actor: '人',
+    })
+  }
+  for (const e of execEvents.value || []) {
+    rows.push({
+      ts: e.ts, id: e.issue_id, note: e.note,
+      verb: `agent·${eventLabel(e.event)}`,
+      tagType: e.event === 'executed' || e.event === 'verified' ? 'success'
+        : e.event === 'blocked' ? 'error' : 'info',
+      actor: e.identity || 'agent',
+    })
+  }
+  rows.sort((x, y) => (x.ts < y.ts ? 1 : -1))
+  return rows
+})
+
+const lastAuditTime = computed(() => lastAuditTs.value
+  ? new Date(lastAuditTs.value * 1000).toLocaleString('zh-CN', { hour12: false }) : '')
 
 function parseFindings(markdown) {
   const lines = (markdown || '').split('\n')
@@ -333,10 +451,6 @@ function fmtRunName(file) {
   return m[4] ? `${base} ${m[4]}:${m[5]}` : base
 }
 function renderMarkdown(text) { return marked.parse(text || '') }
-function actionVerb(a) {
-  if (a.kind === 'P') return a.action === 'adopted' ? '提案已采纳' : '提案已忽略'
-  return a.action === 'resolved' ? '已处理' : '已忽略'
-}
 
 // ---- 数据加载 ----
 async function loadAuditState() {
@@ -353,6 +467,13 @@ async function loadActions() {
   try {
     const data = await api(`/api/${props.user}/audit/actions`)
     actions.value = data.actions || []
+    disposed.value = new Set(actions.value.map(a => a.id))
+  } catch (e) { /* */ }
+}
+async function loadExecEvents() {
+  try {
+    const data = await api(`/api/${props.user}/audit/exec`)
+    execEvents.value = data.events || []
   } catch (e) { /* */ }
 }
 async function loadRuns() {
@@ -391,7 +512,7 @@ async function loadProposals() {
 }
 async function reloadAll() {
   if (!props.user) return
-  await Promise.all([loadAuditState(), loadActions(), loadRuns(), loadProposals()])
+  await Promise.all([loadAuditState(), loadActions(), loadExecEvents(), loadRuns(), loadProposals()])
 }
 
 // ---- 动作 ----
@@ -402,7 +523,7 @@ async function runAudit() {
     auditData.value = data.audit
     lastAuditTs.value = Math.floor(Date.now() / 1000)
     message.success('审计完成')
-    await Promise.all([loadRuns(), loadActions()])
+    await Promise.all([loadRuns(), loadActions(), loadExecEvents()])
     if (auditData.value.audit_file) {
       await viewRun({ path: auditData.value.audit_file, file: auditData.value.audit_file.split('/').pop() })
     }
@@ -423,10 +544,46 @@ async function dispose(issueId, action, label) {
     disposed.value.add(issueId)
     if (data.content) snapshotMarkdown.value = data.content
     await loadActions()
-    message.success(action === 'resolved' ? '已标记处理' : '已忽略')
+    message.success('已忽略——该问题不再重放')
   } catch (e) {
     message.error(e.message)
   }
+}
+
+// ---- 执行指令：复制给任意 agent，内嵌 memory_audit_update 汇报约定 ----
+async function copyText(text) {
+  // navigator.clipboard 仅在 secure context（HTTPS/localhost）可用——
+  // LAN 上纯 IP 的 HTTP 访问是 insecure context，必须走 execCommand 兜底
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  try {
+    if (!document.execCommand('copy')) throw new Error('浏览器拒绝了复制')
+  } finally {
+    document.body.removeChild(ta)
+  }
+}
+
+const REPORT_PROTOCOL = (id) => (
+  `执行要求：开始时调 memory_audit_update(issue_id="${id}", event="executing")；` +
+  `关键动作用 event="progress" 汇报；完成后 event="executed" 附改动摘要；` +
+  `受阻需要人工时 event="blocked" 说明卡点。` +
+  `若属 yacmemo 系统缺陷而非记忆内容问题，直接向用户说明，勿强行修改记忆内容。` +
+  `完成后重跑 memory_audit，该问题不再被报告即为复审通过。`)
+
+function copyIssueInstruction(o) {
+  const text = `请处理记忆审计问题 ${o.id}（${o.kind}）：${o.desc}。\n${REPORT_PROTOCOL(o.id)}`
+  copyText(text).then(
+    () => message.success('执行指令已复制，粘贴给任意 agent 即可'),
+    e => message.error('复制失败：' + e.message))
 }
 
 async function runCurator() {
@@ -463,31 +620,12 @@ async function judge(p, f, action) {
   }
 }
 
-async function copyText(text) {
-  // navigator.clipboard 仅在 secure context（HTTPS/localhost）可用——
-  // LAN 上纯 IP 的 HTTP 访问是 insecure context，必须走 execCommand 兜底
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-  const ta = document.createElement('textarea')
-  ta.value = text
-  ta.style.position = 'fixed'
-  ta.style.opacity = '0'
-  document.body.appendChild(ta)
-  ta.focus()
-  ta.select()
-  try {
-    if (!document.execCommand('copy')) throw new Error('浏览器拒绝了复制')
-  } finally {
-    document.body.removeChild(ta)
-  }
-}
-
 async function copyExecInstruction(p, f) {
+  const id = `P:${p.path}:${f.index}`
   const text = (`请执行记忆质量提案 ${p.file} 第${f.index}条（[${f.severity}] ${f.type}）：`
-    + `${f.reason} 涉及：${f.paths.join('、') || '—'} 建议：${f.proposal || '—'}。`
-    + `执行完成后在提案文件的「裁决记录」下留痕。`)
+    + `${f.reason} 涉及：${f.paths.join('、') || '—'} 建议：${f.proposal || '—'}。\n`
+    + REPORT_PROTOCOL(id)
+    + `完成后请在提案文件的「裁决记录」下留痕。`)
   try {
     await copyText(text)
     message.success('执行指令已复制，粘贴给任意 agent 即可')
@@ -505,4 +643,15 @@ onMounted(reloadAll)
 .markdown-body { line-height: 1.7; }
 .run-active { background: rgba(51, 153, 255, 0.08); }
 .finding-done { opacity: 0.55; }
+.exec-timeline {
+  border-left: 2px solid rgba(51, 153, 255, 0.35);
+  padding-left: 10px;
+  margin: 2px 0 2px 4px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.exec-line { color: rgba(0, 0, 0, 0.65); }
+.exec-ev { font-weight: 600; margin-right: 6px; }
+.exec-meta { color: rgba(0, 0, 0, 0.45); margin-right: 6px; }
+.exec-note { color: rgba(0, 0, 0, 0.75); }
 </style>

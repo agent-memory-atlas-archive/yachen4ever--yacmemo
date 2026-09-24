@@ -1060,6 +1060,25 @@ class Store:
                           if t["card"] and not (self.root / t["card"]).is_file()
                           and _d5_id(t["title"], t["card"]) not in disposed]
 
+        # 执行进度派生（判断与执行分离：人在 WebUI 判断，agent 经
+        # memory_audit_update 汇报执行，审计只做最终验证——已执行且本轮
+        # 不再报即复审通过，追加系统事件封口，下轮不再重放）
+        exec_last = self.db.exec_last_status()
+        current_ids = ({_d1_id(c) for c in d1}
+                       | {f"D2:{c['id']}" for c in collisions}
+                       | {_d3_id(c) for c in dangling}
+                       | {_d4_id(p) for p in stray}
+                       | set(dangling_cards))
+        verified = []
+        for iid, st in exec_last.items():
+            if iid in current_ids or st["event"] == "verified":
+                continue
+            self.db.add_exec_event(iid, st["kind"], "verified",
+                                   note="复审通过：本轮审计不再报告此问题")
+            verified.append(iid)
+        verified.sort()
+        exec_status = {i: s for i, s in exec_last.items() if i in current_ids}
+
         # Out-of-band changes just healed (externally added/edited/deleted
         # files): snapshot them so the repo stays git-clean.
         healed = len(resynced) + len(missing) + len(added)
@@ -1070,7 +1089,8 @@ class Store:
         # 审计快照落盘（journal/audit/ 免注册区，markdown 审计轨迹 + git 快照）
         audit_file = self._write_audit_snapshot(
             resynced, missing, added, d1, collisions, dangling, stray,
-            dangling_cards, missing_vectors, pruned_blank, pruned_stale)
+            dangling_cards, missing_vectors, pruned_blank, pruned_stale,
+            verified)
 
         res = {"title_duplicates": d1,
                "collisions": collisions,
@@ -1083,6 +1103,8 @@ class Store:
                "missing_vectors": missing_vectors,
                "pruned_blank_actions": pruned_blank,
                "pruned_stale_collisions": pruned_stale,
+               "exec_status": exec_status,
+               "verified": verified,
                "git": self.snapshots.status_line(),
                "guard_stats": self.db.guard_stats(),
                "audit_file": audit_file}
@@ -1108,13 +1130,14 @@ class Store:
     def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
                               dangling, stray, dangling_cards=(),
                               missing_vectors=None, pruned_blank=0,
-                              pruned_stale=0) -> str:
+                              pruned_stale=0, verified=()) -> str:
         """每日一份审计快照（journal/audit/<YYYYMMDD>.md），同日重跑以"复审"
         小节追加进当天文件——对齐 curator 的同日合并，标题天然唯一不撞 D1，
         且 journal/audit/ 不会随审计频率无界膨胀（过期文件由 curator 清理）。"""
         body = self._audit_body(resynced, missing, added, d1, collisions,
                                 dangling, stray, dangling_cards,
-                                missing_vectors, pruned_blank, pruned_stale)
+                                missing_vectors, pruned_blank, pruned_stale,
+                                verified)
         day = datetime.now().strftime("%Y%m%d")
         rel = f"{self._audit_dir}{day}.md"
         abs_path = self.root / rel
@@ -1139,7 +1162,8 @@ class Store:
 
     def _audit_body(self, resynced, missing, added, d1, collisions,
                     dangling, stray, dangling_cards,
-                    missing_vectors=None, pruned_blank=0, pruned_stale=0) -> str:
+                    missing_vectors=None, pruned_blank=0, pruned_stale=0,
+                    verified=()) -> str:
         guard = self.db.guard_stats()
 
         def _sec(title, items):
@@ -1159,6 +1183,8 @@ class Store:
                  f"- 缺向量笔记（已重试自愈）：{len(missing_vectors or [])}",
                  f"- 守卫：拒绝 {guard['refused']} / force {guard['forced']}"
                  f" / 未覆盖拦截 {guard['uncovered']}"]
+        if verified:
+            lines.append(f"- 复审通过（agent 已执行、本轮不再报告）：{len(verified)}")
         if pruned_blank:
             lines.append(f"- 已清理空白处置行：{pruned_blank}")
         if pruned_stale:
@@ -1190,6 +1216,9 @@ class Store:
         if missing_vectors:
             lines += _sec("缺向量笔记（已重试自愈）",
                           [f"`{p}`" for p in missing_vectors])
+        if verified:
+            lines += _sec("复审通过（agent 已执行，本轮审计确认消除）",
+                          [f"`{cid}`" for cid in verified])
         return "\n".join(lines) + "\n"
 
     def record_audit_action(self, audit_file: str, issue_id: str, action: str,
@@ -1266,6 +1295,30 @@ class Store:
         self.db.record_audit_action(issue_id, "P", "", "", action, note or reason)
         self.save(rel, content)
         return {"path": rel, "issue_id": issue_id, "action": action}
+
+    _EXEC_EVENTS = ("executing", "progress", "executed", "blocked")
+    _EXEC_KINDS = ("D1", "D2", "D3", "D4", "D5", "P")
+
+    def audit_exec_report(self, issue_id: str, event: str,
+                          note: str = "", identity: str = "") -> dict:
+        """agent 汇报审计问题的执行进度（追加事件时间线，只增不改）。
+
+        issue_id 与审计报告、WebUI 处置表共用同一命名（D3:<path>|<link> /
+        P:<file>:<index> 等）；时间线在 audit_exec_events 表，复审通过由
+        audit() 在问题消除时自动追加系统事件，agent 不代劳。
+        """
+        issue_id = (issue_id or "").strip()
+        kind = issue_id.split(":", 1)[0].upper()
+        if kind not in self._EXEC_KINDS or ":" not in issue_id:
+            raise StoreError(
+                f"issue_id 非法: {issue_id!r}——应为审计报告里的 id，"
+                "形如 D3:topics/x/abstract.md|[[link]] 或 P:journal/curator/x.md:1")
+        if event not in self._EXEC_EVENTS:
+            raise StoreError(
+                f"event 非法: {event!r}（可用：{'/'.join(self._EXEC_EVENTS)}）")
+        e = self.db.add_exec_event(issue_id, kind, event, (note or "").strip(),
+                                   identity or "")
+        return {"event": e, "timeline": self.db.list_exec_events(issue_id)}
 
     def _sync_new_files(self) -> list[str]:
         """Index .md files that exist on disk but were never ingested

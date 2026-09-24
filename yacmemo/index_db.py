@@ -59,6 +59,17 @@ CREATE TABLE IF NOT EXISTS audit_actions (
     note     TEXT NOT NULL DEFAULT '',
     acted_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS audit_exec_events (
+    seq      INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id TEXT NOT NULL,           -- D1:..../D5:.... / P:<file>:<index>
+    kind     TEXT NOT NULL,           -- D1 / D2 / ... / P
+    event    TEXT NOT NULL,           -- executing / progress / executed / blocked
+    note     TEXT NOT NULL DEFAULT '',
+    identity TEXT NOT NULL DEFAULT '',-- 汇报方（agent+设备，匿名留空）
+    ts       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_exec_events_issue
+    ON audit_exec_events(issue_id, seq);
 CREATE TABLE IF NOT EXISTS vec_cache (
     content_hash TEXT PRIMARY KEY,
     vector       BLOB NOT NULL
@@ -74,6 +85,7 @@ _LOCKED_METHODS = (
     "add_collision", "collisions_for", "list_collisions",
     "remove_collisions_involving", "prune_stale_collisions",
     "record_audit_action", "list_audit_actions",
+    "add_exec_event", "list_exec_events", "exec_last_status",
     "get_cached_vector", "put_cached_vector", "close",
 )
 
@@ -340,6 +352,49 @@ class IndexDB:
             "DELETE FROM audit_actions WHERE id='' AND kind='' AND action=''")
         self.conn.commit()
         return cur.rowcount
+
+    # ---- agent execution events (append-only timeline per issue) ----
+
+    def add_exec_event(self, issue_id: str, kind: str, event: str,
+                       note: str = "", identity: str = "") -> dict:
+        """Append one execution-progress event; the log is the authority."""
+        ts = _now()
+        cur = self.conn.execute(
+            "INSERT INTO audit_exec_events (issue_id, kind, event, note, identity, ts) "
+            "VALUES (?,?,?,?,?,?)", (issue_id, kind, event, note, identity, ts))
+        self.conn.commit()
+        return {"seq": cur.lastrowid, "issue_id": issue_id, "kind": kind,
+                "event": event, "note": note, "identity": identity, "ts": ts}
+
+    def list_exec_events(self, issue_id: str | None = None,
+                         limit: int = 1000) -> list[dict]:
+        """Timeline (newest first); scoped to one issue when given."""
+        if issue_id:
+            rows = self.conn.execute(
+                "SELECT * FROM audit_exec_events WHERE issue_id=? "
+                "ORDER BY seq DESC LIMIT ?", (issue_id, limit)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM audit_exec_events "
+                "ORDER BY seq DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def exec_last_status(self) -> dict[str, dict]:
+        """Latest event per issue_id: {issue_id: {event, note, identity, ts, updates}}."""
+        rows = self.conn.execute(
+            "SELECT e.* FROM audit_exec_events e "
+            "JOIN (SELECT issue_id, MAX(seq) AS mseq FROM audit_exec_events "
+            "      GROUP BY issue_id) t ON e.issue_id=t.issue_id AND e.seq=t.mseq"
+        ).fetchall()
+        counts = {r["issue_id"]: r["n"] for r in self.conn.execute(
+            "SELECT issue_id, COUNT(*) AS n FROM audit_exec_events GROUP BY issue_id"
+        ).fetchall()}
+        out = {}
+        for r in rows:
+            d = dict(r)
+            d["updates"] = counts.get(d["issue_id"], 1)
+            out[d["issue_id"]] = d
+        return out
 
     # ---- vector cache ----
 

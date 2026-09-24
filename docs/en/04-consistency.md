@@ -81,9 +81,32 @@ collisions(id, kind,           -- obs / title
 
 guard_events(id, ts, kind,     -- refused / forced / uncovered (not cleared by clear_all or reindex)
              attempted_title, matched_path)
+
+audit_actions(id, kind,        -- human dispositions: D1-D5 / P (proposal rulings), not replayed on re-audit
+              action)            -- dismissed (D-kind); adopted / dismissed (P-kind)
+
+audit_exec_events(seq, issue_id, kind,
+                  event,       -- agent reports: executing / progress / executed / blocked
+                  note, identity, ts)  -- append-only timeline; verified is appended automatically by audit()
 ```
 
-## 4. Thresholds and tuning
+## 4. Execution workflow for audit issues (added 2026-09-25)
+
+Judgment, execution and verification are three separate roles; none oversteps:
+
+```
+Audit finds ──▶ Human judges ──▶ Agent executes ──▶ Audit verifies
+             dismiss (false positive)  memory_audit_update    executed & no longer
+             dispatch (copy instruction)  reports progress    reported = verified (auto)
+```
+
+- **Human** (WebUI): dismisses false positives; dispatches real issues to any agent via "copy execution instruction" (the instruction embeds the reporting convention);
+- **Agent** (MCP `memory_audit_update`): `executing` take over → `progress` updates → `executed` done / `blocked` stuck; identity is recorded into the timeline automatically; re-verification is not the agent's job;
+- **System** (`memory_audit`): the sole verifier — an issue with execution history that is no longer reported this round gets an automatic `verified` closing event (derived verification, no human sign-off); if it reappears it is flagged as regressed.
+
+Status is derived at read time, not stored: the latest execution event plus the latest audit report yield open / executing / executed-awaiting-recheck / verified / dismissed.
+
+## 5. Thresholds and tuning
 
 | Parameter | Default | Meaning | Tuning basis |
 |---|---|---|---|
@@ -91,7 +114,7 @@ guard_events(id, ts, kind,     -- refused / forced / uncovered (not cleared by c
 | `collision_cosine_threshold` | 0.86 | D2 collision cosine line | Many audit false positives → raise; false negatives → lower |
 | `force_confirm_threshold` | 3 | Number of force uses without confirmation within 24h | Relaxable when the model is good at keeping conventions |
 
-## 5. Comparison with the v1 consistency layer
+## 6. Comparison with the v1 consistency layer
 
 | | v1 (retired) | v2 |
 |---|---|---|

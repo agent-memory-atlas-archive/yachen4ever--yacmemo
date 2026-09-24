@@ -186,6 +186,22 @@ Full consistency audit that also **self-heals**:
 
 Fix suggestions are inlined throughout the output. Findings are shown as soon as discovered; **the system never auto-deletes or auto-invalidates anything**. External changes involved in self-healing are snapshotted into the repo uniformly as `external: self-healed N note(s)`, preserving the git-clean invariant (the end of the output carries a git snapshot status line and the current audit snapshot path `journal/audit/<date>.md` — one per day, with same-day re-audits appending; stale snapshots are cleaned up by curator according to `audit_retention_days`).
 
+Two output sections added 2026-09-25: `== execution progress ==` (issues currently being worked on by agents, as reported via `memory_audit_update`, with the latest updates) and `== verified on re-audit ==` (issues already executed and no longer reported this round — confirmed automatically by the audit, no human sign-off needed).
+
+## 7.5 memory_audit_update
+
+```
+memory_audit_update(issue_id: str, event: str, note: str = "") -> str
+```
+
+Reports **execution progress** for an audit issue (new in contract 0.3.3). This is the agent-side entry point of the judgment/execution split: for issues dispatched via the WebUI's "copy execution instruction" or discovered through `memory_audit`, report progress to the server while fixing them.
+
+- `issue_id`: the id from the audit report / execution instruction (`D3:<path>|<link>`, `P:<file>:<index>`, etc.);
+- `event`: `executing` started / `progress` update / `executed` done / `blocked` stuck, needs a human;
+- `note`: one-line explanation (what was done / what is blocking);
+- identity is recorded automatically (which agent on which device reported); the timeline is append-only and rendered item by item on the WebUI audit page;
+- **re-verification is not the agent's job**: when done, re-run `memory_audit` — an issue no longer reported is verified automatically (the system appends the closing event); never claim "already verified" and never dismiss issues on a human's behalf.
+
 ## 8. memory_list
 
 ```
@@ -202,6 +218,7 @@ Update an existing fact?     → memory_edit (unique anchor) / memory_edit_secti
 Find "where was X recorded?" → memory_search (keyword-style query)
 Get the full picture of a topic? → memory_read (follow the related-note links)
 Periodic checkup?            → memory_audit
+Fixing an audit issue?       → memory_audit_update to report progress (executing → progress → executed)
 ```
 
 
