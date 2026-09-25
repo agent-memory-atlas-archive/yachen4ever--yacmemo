@@ -215,6 +215,14 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"写入失败: {e}"
             note = "（注意：本次为 force 越过近似标题守卫，已记录）" if r["forced"] else ""
+            cols = r.get("new_collisions") or []
+            if cols:
+                # 写时撞车即时回显：别让 agent 等到审计才知道制造了语义撞车
+                det = "\n".join(
+                    f"  - ⚠ 与 [[{c['with_path']}]] 的 observation 疑似撞车"
+                    f"（相似度 {c['score']}）：{c['text'][:60]}" for c in cols)
+                note += ("\n⚠ 本次写入触发了语义撞车（D2），将在审计中点名：\n" + det
+                         + "\n建议与对方笔记合并（memory_edit），或确认为不同事实时留给审计裁决。")
             return f"已写入并索引: {r['path']}{note}"
 
     @mcp.tool()

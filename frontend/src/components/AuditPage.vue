@@ -117,7 +117,7 @@
                     <n-tag size="tiny" :type="e.tagType">{{ e.verb }}</n-tag>
                     {{ e.actor }} · {{ e.id }}
                   </n-text>
-                  <n-text depth="3" style="font-size: 12px">{{ e.ts }}{{ e.note ? ` · ${e.note}` : '' }}</n-text>
+                  <n-text depth="3" style="font-size: 12px">{{ fmtTs(e.ts) }}{{ e.note ? ` · ${e.note}` : '' }}</n-text>
                 </n-space>
               </n-list-item>
             </n-list>
@@ -284,7 +284,7 @@ const ExecTimeline = defineComponent({
       return h('div', { class: 'exec-timeline' }, events.map(e => h('div', { class: 'exec-line', key: e.seq }, [
         h('span', { class: 'exec-ev' }, eventLabel(e.event)),
         h('span', { class: 'exec-meta' },
-          `${e.ts.replace('T', ' ').slice(0, 16)}${e.identity ? ' · ' + e.identity : ''}`),
+          `${fmtTs(e.ts)}${e.identity ? ' · ' + e.identity : ''}`),
         e.note ? h('span', { class: 'exec-note' }, e.note) : null,
       ])))
     }
@@ -612,6 +612,14 @@ function fmtRunName(file) {
   return m[4] ? `${base} ${m[4]}:${m[5]}` : base
 }
 function renderMarkdown(text) { return marked.parse(text || '') }
+// 事件时间统一转本地时区显示（后端存 UTC ISO，新手看 04:02 会懵）
+function fmtTs(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return isNaN(d)
+    ? String(ts).replace('T', ' ').slice(0, 16)
+    : d.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 // ---- 数据加载 ----
 async function loadAuditState() {

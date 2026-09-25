@@ -246,8 +246,15 @@ class Store:
         abs_path.write_text(content, encoding="utf-8")
 
         self._index_note(rel, name, content)
+        # 写时撞车即时回显：D2 在 _index_note 里增量检出，若不在此处
+        # 带回，agent 要等到下次审计才知道自己制造了语义撞车
+        new_cols = [c for c in self.db.collisions_for(rel, "open")
+                    if c["b_path"] == rel]
         self.snapshots.commit(f"write: {rel}")
-        return {"path": rel, "forced": bool(conflicts and force)}
+        return {"path": rel, "forced": bool(conflicts and force),
+                "new_collisions": [{"with_path": c["a_path"],
+                                    "score": c["score"],
+                                    "text": c["b_text"]} for c in new_cols]}
 
     # ------------------------------------------------------------------ read
 
