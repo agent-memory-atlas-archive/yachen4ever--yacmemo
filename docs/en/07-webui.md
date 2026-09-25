@@ -14,7 +14,7 @@
 
 ## 2. Page Guide
 
-A selector at the top switches the memory user (the `[[users]]` in config.toml); the left menu has five pages: **Topics / Search / Audit / Profile / Settings**.
+A selector at the top switches the memory user (the `[[users]]` in config.toml); the left menu has seven pages: **Dashboard (default landing) / Topics / Search / Audit / Profile / Identity / Settings**.
 
 ### 2.1 Topic Browsing
 
@@ -83,9 +83,23 @@ Disposition guidance per issue type:
 
 Visual editing of PROFILE.md: the left side lists all sections (identity / communication style / materials & document preferences …), click to view, `编辑` (Edit) then saves the whole section; `+ 新建小节` (+ New Section) creates one by entering a section name. Equivalent to MCP's `get_user_preference` / `update_user_preference`, and likewise goes through the write path (automatic git snapshot).
 
-### 2.5 Settings
+### 2.5 Identity
 
-Three blocks on one page:
+Managing the `agents/<agent>/` exclusive memory zone: minting deterministic identity tokens per agent+device, and managing the agent-layer shared subtree (shared/必读.md) and per-device subtrees; see [09-agent-onboarding.md](09-agent-onboarding.md). Creating an identity pre-creates the shared/必读.md placeholder template.
+
+### 2.6 Dashboard (default landing)
+
+- **System status card**: service status, embedding configuration and model, curator status and model, today's call count;
+- **User cards**: per-user note count / active topics / audit backlog / proposal count, with "Audit" and "Notes" shortcuts (switching the user and jumping to the page); "Last audit" honestly shows "not audited since restart" after a service restart;
+- **Recent activity**: the last 8 MCP calls across users (tool / summary / status / time).
+
+### 2.7 Settings
+
+Four tabs: **Users** (structured add/edit/delete), **Service Config** (embedding/curator forms), **config.toml (advanced)**, **Usage Log**.
+
+- **Users**: the user list (id / memory root / git identity / mount status) plus add / edit / delete — applied programmatically to the `[[users]]` blocks of config.toml (full validation before an annotated backup; comments and ordering preserved). Adding auto-creates the memory directory; a new user or a root change needs a restart before MCP mounts (the page says so); deletion requires typing the user id to confirm, and by default only removes the config entry while keeping the memory directory and git history, with an optional "also delete the memory directory" checkbox (irreversible);
+- **Service Config**: [embedding] and [curator] as forms (endpoint / model / key / dimensions / timeout / retention days) with a **"Test connection" button that actually calls the endpoint** (embedding reports dimensions and latency, curator reports the model reply) — mistakes surface immediately; saving only touches the form fields (text surgery keeps comments), and the raw config.toml editor remains as the "advanced" mode;
+- Usage log / maintenance (full index rebuild) unchanged;
 
 - **Usage log**: a trace of every MCP tool call — top cards (calls/errors/clients over the last 14 days) + a table (time/user/tool/summary/client UA/IP/duration), filterable by tool; guard refusals count as normal business results and are not logged as errors;
 - **Health overview**: embedding configuration status (unconfigured = FTS-only mode), plus per-user note counts / open collision counts / guard statistics / topic counts;
