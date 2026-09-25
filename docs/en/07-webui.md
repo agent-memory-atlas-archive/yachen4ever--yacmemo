@@ -52,7 +52,7 @@ The audit page has a **two-tab** structure; each of the two audit engines gets o
 - Self-healing cards (new file / external modification / external deletion / **notes missing vectors**) are display-only, with no disposition buttons — notes missing vectors were written while the embedding endpoint was down, and the audit has already retried and filled them in automatically;
 - When audit snapshot files are deleted (manually or by curator expiry cleanup), the most-recent-audit cache is cleared in step, and the page degrades to a notice rather than an error;
 - **Judgment & execution log**: human dispositions (`audit_actions` table) and agent execution reports (`audit_exec_events` table) merged in reverse chronological order — both lines leave a trail;
-- **Historical audit snapshots**: `journal/audit/<date>.md`, one per day; same-day reruns append under a 复审 (Re-review) subsection; listed newest-first and clickable for review; expiry cleanup is handled by the curator timer according to `audit_retention_days` (default 7 days).
+- **Historical audit snapshots**: two columns — the left holds the snapshot list (`journal/audit/<date>.md`, one per day, same-day reruns appending under a 复审 (Re-review) subsection, newest first) and the right renders the selected snapshot's markdown side by side instead of stacking it below; expiry cleanup is handled by the curator timer according to `audit_retention_days` (default 7 days).
 
 Disposition guidance per issue type:
 

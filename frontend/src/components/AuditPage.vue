@@ -123,22 +123,24 @@
             </n-list>
           </n-card>
 
-          <!-- 历史快照 -->
+          <!-- 历史快照：左列清单 + 右列内容，不做上下堆叠 -->
           <n-card size="small" title="历史审计快照">
             <n-empty v-if="!runs.length" description="还没有审计记录" />
-            <n-list v-else hoverable clickable>
-              <n-list-item v-for="r in runs" :key="r.file"
-                :class="{ 'run-active': r.path === currentRun }" @click="viewRun(r)">
-                <n-space justify="space-between" align="center">
-                  <n-text :depth="r.path === currentRun ? 1 : 2">{{ fmtRunName(r.file) }}</n-text>
-                  <n-text depth="3">{{ fmtSize(r.size) }}</n-text>
-                </n-space>
-              </n-list-item>
-            </n-list>
-            <n-card v-if="snapshotMarkdown" size="small" :title="snapshotTitle"
-              style="margin-top: 12px">
-              <div class="markdown-body" v-html="renderMarkdown(snapshotMarkdown)" />
-            </n-card>
+            <div v-else class="snapshot-layout">
+              <div class="snapshot-list">
+                <div v-for="r in runs" :key="r.file"
+                  class="snapshot-item" :class="{ 'run-active': r.path === currentRun }"
+                  @click="viewRun(r)">
+                  <n-text :depth="r.path === currentRun ? 1 : 2" style="font-size: 13px">{{ fmtRunName(r.file) }}</n-text>
+                  <n-text depth="3" style="font-size: 11px">{{ fmtSize(r.size) }}</n-text>
+                </div>
+              </div>
+              <div class="snapshot-content">
+                <n-text depth="3" style="font-size: 12px; display: block; margin-bottom: 6px">{{ snapshotTitle }}</n-text>
+                <div v-if="snapshotMarkdown" class="markdown-body" v-html="renderMarkdown(snapshotMarkdown)" />
+                <n-text v-else depth="3">左侧选择一份快照查看内容。</n-text>
+              </div>
+            </div>
           </n-card>
         </n-space>
       </n-tab-pane>
@@ -788,9 +790,11 @@ onMounted(reloadAll)
 </script>
 
 <style scoped>
-.audit-page { max-width: 900px; margin: 0 auto; }
+.audit-page { max-width: 1080px; margin: 0 auto; }
 .markdown-body { line-height: 1.7; }
-.run-active { background: rgba(51, 153, 255, 0.08); }
+.markdown-body :deep(table) { border-collapse: collapse; }
+.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid rgba(0,0,0,0.15); padding: 4px 8px; }
+.run-active { background: rgba(51, 153, 255, 0.12); }
 .finding-done { opacity: 0.55; }
 .exec-timeline {
   border-left: 2px solid rgba(51, 153, 255, 0.35);
@@ -803,4 +807,20 @@ onMounted(reloadAll)
 .exec-ev { font-weight: 600; margin-right: 6px; }
 .exec-meta { color: rgba(0, 0, 0, 0.45); margin-right: 6px; }
 .exec-note { color: rgba(0, 0, 0, 0.75); }
+.snapshot-layout { display: flex; gap: 14px; align-items: flex-start; }
+.snapshot-list { width: 210px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; }
+.snapshot-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 8px; border-radius: 4px; cursor: pointer;
+}
+.snapshot-item:hover { background: rgba(51, 153, 255, 0.08); }
+.snapshot-content {
+  flex: 1; min-width: 0; overflow-x: auto;
+  border-left: 1px solid rgba(0, 0, 0, 0.08); padding-left: 14px;
+}
+@media (max-width: 800px) {
+  .snapshot-layout { flex-direction: column; }
+  .snapshot-list { width: 100%; flex-direction: row; flex-wrap: wrap; }
+  .snapshot-content { border-left: none; padding-left: 0; width: 100%; }
+}
 </style>
