@@ -158,6 +158,11 @@ class Store:
         rel = f"{dirpart}/{name}.md" if dirpart else f"{name}.md"
         return rel
 
+    def topic_name_map(self) -> dict[str, str]:
+        """注册主题名 → 主题卡路径。主题名是 [[链接]] 的稳定引用——
+        卡的索引标题从 H1 提取、会与主题名漂移，按主题名解析必须走注册表。"""
+        return {t["title"]: t["card"] for t in self.load_topics() if t.get("card")}
+
     def resolve(self, path_or_title: str) -> str:
         """Resolve to an existing note: path first, then exact title."""
         p = (path_or_title or "").strip()
@@ -268,8 +273,14 @@ class Store:
 
         related = []
         seen_paths = {rel}
+        topic_names = self.topic_name_map()
         for link in parse_links(content):
             target = self.db.get_note_by_title(link)
+            if not target:
+                # 主题名解析：卡标题会随 H1 漂移，注册表里的主题名才是
+                # 稳定标识（[[工作规则与开发偏好]] → 其主题卡）
+                card = topic_names.get(link.strip())
+                target = self.db.get_note(card) if card else None
             if not target:
                 # 路径形式兜底（与 d3_scan 同规则）：agent 从 memory_list
                 # 拿到的是路径，[[topics/x/abstract.md]] 这类引用按路径解析
@@ -1023,7 +1034,10 @@ class Store:
             p = self.root / row["path"]
             if p.is_file():
                 contents[row["path"]] = p.read_text(encoding="utf-8")
-        dangling = d3_scan(contents, {r["title"] for r in titles})
+        # 主题名也算合法链接目标（卡的索引标题会随 H1 漂移，
+        # [[主题名]] 指向其主题卡——与 read() 的解析链同口径）
+        dangling = d3_scan(contents,
+                           {r["title"] for r in titles} | set(self.topic_name_map()))
 
         # 缺向量笔记自愈：embedding 端点故障期间写入的笔记 vector_ok=0，
         # hash 未变，外部变更自愈不会重试——审计补位重试 embedding，

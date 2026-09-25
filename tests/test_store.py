@@ -553,3 +553,19 @@ def test_rereview_numbering_is_sequential_across_sections(store: Store):
                    "1. **[low] other** — 新一\n2. **[low] other** — 新二\n"
                    "3. **[medium] stale-card** — 新三\n", encoding="utf-8")
     assert store._proposal_findings_indices(rel) == [1, 2, 3, 4, 5]
+
+
+def test_topic_name_links_resolve(store: Store, searcher):
+    """[[主题名]] 指向主题卡：卡的索引标题随 H1 漂移后，按注册表主题名
+    解析（read 相关笔记 + D3 不误报）。"""
+    store.topic_register("网络主题", description="测试")
+    # H1 漂移：卡的索引标题不再是主题名
+    store.save("topics/网络主题/abstract.md", "# network\n\n网络主题的现状卡。\n")
+    store.write("notes/引用方", "# 引用方\n\n详见 [[网络主题]]。\n")
+
+    # D3 不误报
+    r = store.audit()
+    assert all("网络主题" not in d["link"] for d in r["dangling_links"])
+    # 相关笔记按主题名解析到卡
+    rel = {x["title"]: x for x in store.read("notes/引用方")["related"]}
+    assert rel["网络主题"]["path"] == "topics/网络主题/abstract.md"
