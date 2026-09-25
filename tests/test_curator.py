@@ -121,3 +121,20 @@ def test_build_material_marks_long_card_excerpt(store: Store):
     assert "摘录说明" in m and "并非笔记末尾" in m
     # 短卡不打标
     assert m.count("摘录说明") == 1
+
+
+def test_build_material_surfaces_module_headings_and_profile(store):
+    """材料必须包含模块文件小节标题与画像——否则 curator 无法发现
+    「纪律类内容错放在按需检索层」这类组织问题
+    （2026-09-26 实爆：工作规则主题错位 curator 从未提出，
+    因为材料里只有主题卡、没有模块内容与画像）。"""
+    store.topic_register("工作规则", description="测试")
+    store.save("topics/工作规则/纪律.md",
+               "# 纪律\n\n## 三条铁律\n- 代码变更同步记忆\n\n## 发版规则\n- 打 tag 才部署\n")
+    (store.root / "PROFILE.md").write_text(
+        "# 用户画像\n\n- [风格] 简洁\n", encoding="utf-8")
+    m = build_material(store)
+    assert "topics/工作规则/纪律.md" in m
+    assert "三条铁律" in m and "发版规则" in m
+    assert "用户画像" in m
+    assert "agents/ 强制注入必读" in m

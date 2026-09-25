@@ -24,8 +24,13 @@ from yacmemo.config import Config, UserEntry, load_config
 logger = logging.getLogger("yacmemo.curator")
 
 _SYSTEM_PROMPT = """你是个人记忆体系的质量审查员。
-你收到：主题注册表、各主题卡（现状手册）、审计结果。
+你收到：主题注册表、各主题卡（现状手册）、各主题模块文件的小节标题、PROFILE.md（用户画像）、agents/ 强制注入必读的小节标题、审计结果。
 你的任务是发现记忆体系的质量问题并输出"提案"——你只提案，绝不执行，也绝不修改任何记忆。
+
+先理解记忆的分层模型（决定内容放对没放对）：
+- topics/ = 按需检索层：agent 执行任务搜到才看到，不保证每次会话都被看到
+- PROFILE.md + agents/<agent>/shared/必读.md = 强制注入层：每次会话开头自动注入，一定生效
+- 内容该放哪一层，取决于"错过它"的代价：事实记录错过可接受；行为纪律错过就是违规
 
 审查维度：
 - duplicate：同一主题的多份拷贝/快照
@@ -35,10 +40,19 @@ _SYSTEM_PROMPT = """你是个人记忆体系的质量审查员。
 - stale-card：主题卡的"现状"描述与正文明显不一致
 - merge：两个主题应合并
 - forget：纯过程性记录，建议遗忘（删除，git 可恢复）
+- misplaced：内容放错了记忆层级——重点维度。信号：主题笔记的小节标题或
+  内容是"给 agent 的行为纪律"（如 三条铁律/发版规则/每次会话必须/约定/
+  禁止事项），而非事实记录。这类内容放 topics/ 意味着"被检索到才生效"，
+  应提案迁移到强制注入位置：agent 纪律 → agents/<agent>/shared/必读.md；
+  用户个人偏好（工具链/环境/风格）→ PROFILE.md。对照材料中的
+  "模块文件小节标题"与"agents/ 强制注入必读"两个视图判断。
+- profile-overlap：PROFILE.md 与主题内容重复或边界不清——画像回答
+  "用户是谁、偏好什么"，主题回答"某件事的事实与现状"；明显重叠时
+  建议归位（画像保留画像侧，事实留给主题，或反之）。
 
 输出严格 JSON（不要 markdown 代码块）：
 {"summary": "总体评价（2-3 句）",
- "findings": [{"type": "duplicate|outdated|stray|stale-card|merge|forget|other",
+ "findings": [{"type": "duplicate|outdated|stray|stale-card|merge|forget|misplaced|profile-overlap|other",
                "severity": "high|medium|low",
                "paths": ["涉及笔记路径"],
                "reason": "判断依据",
@@ -83,10 +97,22 @@ def default_llm_call(config: Config):
     return call
 
 
+def _headings_of(path: Path, limit: int = 10) -> str:
+    """文件的小节标题串（高信号、低体量——供 LLM 判断内容性质）。"""
+    try:
+        heads = [ln.lstrip("# ").strip() for ln in
+                 path.read_text(encoding="utf-8").splitlines()
+                 if ln.lstrip().startswith("#")]
+    except OSError:
+        return "（读取失败）"
+    return " / ".join(heads[:limit]) if heads else "（无小节标题）"
+
+
 def build_material(store, max_chars_per_card: int = 2000) -> str:
-    """Registry + topic cards + audit, assembled into the reviewer prompt."""
+    """Registry + topic cards + module headings + PROFILE + audit, for the reviewer."""
     topics = store.load_topics()
     cards = []
+    hygiene = []
     for t in topics:
         p = store.root / t["card"] if t["card"] else None
         if t["card"] and p and p.is_file():
@@ -102,15 +128,35 @@ def build_material(store, max_chars_per_card: int = 2000) -> str:
             else:
                 body = raw
             cards.append(f"## {t['title']}（{t['card']}）\n{body}")
+        # 模块文件小节标题（卫生视图）：不看模块内容就无法发现
+        # "纪律/规则类内容错放在按需检索层"这类组织问题
+        if not t.get("archived") and t["card"]:
+            d = p.parent if p else None
+            if d and d.is_dir():
+                for f in sorted(d.glob("*.md")):
+                    if f.name == "abstract.md":
+                        continue
+                    hygiene.append(f"- {f.relative_to(store.root).as_posix()}：{_headings_of(f)}")
     audit = store.audit()
+    profile = store.root / "PROFILE.md"
+    profile_text = (profile.read_text(encoding="utf-8")[:1500]
+                    if profile.is_file() else "（尚无画像）")
+    mustread = []
+    for f in sorted(store.root.glob("agents/*/shared/*.md")):
+        mustread.append(f"- {f.relative_to(store.root).as_posix()}：{_headings_of(f)}")
     material = (
         "### 主题注册表\n" +
         (store.topics_file().read_text(encoding="utf-8")
          if store.topics_file().is_file() else "（空）")
         + "\n\n### 各主题卡\n" + ("\n\n".join(cards) or "（无）")
+        + "\n\n### 模块文件小节标题（各主题目录下的非 abstract 文件）\n"
+        + ("\n".join(hygiene) or "（无模块文件）")
+        + "\n\n### PROFILE.md（用户画像，强制注入）\n" + profile_text
+        + "\n\n### agents/ 强制注入必读（小节标题）\n"
+        + ("\n".join(mustread) or "（无）")
         + "\n\n### 审计结果\n" + json.dumps(audit, ensure_ascii=False)[:4000]
     )
-    return material[:30000]
+    return material[:36000]
 
 
 def parse_proposal(raw: str) -> dict:
