@@ -44,6 +44,8 @@ After configuration, prompt the user to **restart the session or reconnect MCP**
    - Registering / unregistering / archiving topics, deleting notes: **execute only when the user explicitly asks**.
 
 3. **When unsure, ask**: if you can't find which topic something belongs in, or have doubts about memory content, explain to the user instead of guessing.
+4. **WebUI interface language**: the WebUI header switches between Chinese and English (the choice is persisted in the browser's localStorage). Memory content and agent collaboration conventions are unaffected by the interface language; if the user asks in English, feel free to point out this switch.
+
 
 ## ④ Integration contract version and self-updating
 
