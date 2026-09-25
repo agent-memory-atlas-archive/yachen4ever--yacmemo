@@ -7,11 +7,11 @@
           <n-card size="small">
             <n-space justify="space-between" align="center">
               <n-space align="center">
-                <n-button type="primary" @click="runAudit" :loading="auditing">立即审计</n-button>
-                <n-text depth="3" v-if="lastAuditTime">上次审计：{{ lastAuditTime }}</n-text>
-                <n-text v-else depth="3">本页显示最近一次审计结果；服务重启后请重新审计</n-text>
+                <n-button type="primary" @click="runAudit" :loading="auditing">{{ t('立即审计') }}</n-button>
+                <n-text depth="3" v-if="lastAuditTime">{{ t('上次审计：') }}{{ lastAuditTime }}</n-text>
+                <n-text v-else depth="3">{{ t('本页显示最近一次审计结果；服务重启后请重新审计') }}</n-text>
               </n-space>
-              <n-text depth="3">快照每日一份，同日重跑自动追加"复审"</n-text>
+              <n-text depth="3">{{ t('快照每日一份，同日重跑自动追加"复审"') }}</n-text>
             </n-space>
           </n-card>
 
@@ -19,40 +19,39 @@
           <n-card size="small">
             <n-space align="center" justify="space-between">
               <n-space align="center" :size="6">
-                <n-tag size="small" :type="openCount ? 'warning' : 'default'">待处理 {{ openCount }}</n-tag>
+                <n-tag size="small" :type="openCount ? 'warning' : 'default'">{{ t('待处理') }} {{ openCount }}</n-tag>
                 <n-text depth="3">→</n-text>
-                <n-tag size="small" :type="inProgressCount ? 'info' : 'default'">执行中 {{ inProgressCount }}</n-tag>
+                <n-tag size="small" :type="inProgressCount ? 'info' : 'default'">{{ t('执行中') }} {{ inProgressCount }}</n-tag>
                 <n-text depth="3">→</n-text>
-                <n-tag size="small" :type="recheckCount ? 'warning' : 'default'">已执行待复审 {{ recheckCount }}</n-tag>
+                <n-tag size="small" :type="recheckCount ? 'warning' : 'default'">{{ t('已执行待复审') }} {{ recheckCount }}</n-tag>
                 <n-text depth="3">→</n-text>
-                <n-tag size="small" :type="verifiedIds.size ? 'success' : 'default'">复审通过 {{ verifiedIds.size }}</n-tag>
+                <n-tag size="small" :type="verifiedIds.size ? 'success' : 'default'">{{ t('复审通过') }} {{ verifiedIds.size }}</n-tag>
                 <n-text depth="3">·</n-text>
-                <n-tag v-if="blockedCount" size="small" type="error">受阻 {{ blockedCount }}</n-tag>
-                <n-tag size="small" type="default">已处置 {{ humanActions.length }}</n-tag>
+                <n-tag v-if="blockedCount" size="small" type="error">{{ t('受阻') }} {{ blockedCount }}</n-tag>
+                <n-tag size="small" type="default">{{ t('已处置') }} {{ humanActions.length }}</n-tag>
               </n-space>
               <n-select v-model:value="auditFilter" size="small"
                 :options="auditFilterOptions" style="width: 170px" />
             </n-space>
             <n-text depth="3" style="font-size: 12px; display: block; margin-top: 6px">
-              人只做判断（误报忽略 / 派发给 agent）；agent 执行修复并经 memory_audit_update
-              汇报过程；复审由审计自动确认——已执行且下轮不再报告即为通过。
+              {{ t('人只做判断（误报忽略 / 派发给 agent）；agent 执行修复并经 memory_audit_update 汇报过程；复审由审计自动确认——已执行且下轮不再报告即为通过。') }}
             </n-text>
           </n-card>
 
           <template v-if="auditData">
             <n-card v-if="auditData.git" size="small">
               <n-space align="center">
-                <n-text depth="3">git 快照：</n-text>
+                <n-text depth="3">{{ t('git 快照：') }}</n-text>
                 <n-tag :type="auditData.git.includes('启用') && !auditData.git.includes('失败') ? 'success' : 'warning'" size="small">
                   {{ auditData.git }}
                 </n-tag>
               </n-space>
             </n-card>
 
-            <AuditSection title="新增文件（已入索引）" :items="auditData.added" />
-            <AuditSection title="外部修改（已自动重建索引）" :items="auditData.resynced" />
-            <AuditSection title="外部删除（已清理索引）" :items="auditData.missing" />
-            <AuditSection title="缺向量笔记（已重试自愈）" :items="auditData.missing_vectors" />
+            <AuditSection :title="t('新增文件（已入索引）')" :items="auditData.added" />
+            <AuditSection :title="t('外部修改（已自动重建索引）')" :items="auditData.resynced" />
+            <AuditSection :title="t('外部删除（已清理索引）')" :items="auditData.missing" />
+            <AuditSection :title="t('缺向量笔记（已重试自愈）')" :items="auditData.missing_vectors" />
 
             <!-- 问题列表：与提案页同一套两级语言——
                  行 = 状态 + 类型 + 一句话描述（行内按钮），展开看详情与时间线 -->
@@ -69,37 +68,37 @@
                 </template>
                 <template #header-extra>
                   <n-space v-if="issueDispatchable(o)" :size="4" @click.stop>
-                    <n-button size="tiny" type="primary" secondary @click="copyIssueInstruction(o)">复制执行指令</n-button>
-                    <n-button size="tiny" @click="dispose(o.id, 'dismissed', o.dismissLabel)">忽略</n-button>
+                    <n-button size="tiny" type="primary" secondary @click="copyIssueInstruction(o)">{{ t('复制执行指令') }}</n-button>
+                    <n-button size="tiny" @click="dispose(o.id, 'dismissed', o.dismissLabel)">{{ t('忽略') }}</n-button>
                   </n-space>
                 </template>
                 <n-space vertical size="small">
                   <n-text v-for="(d, di) in o.detail" :key="di" depth="2" style="font-size: 12px">{{ d }}</n-text>
-                  <n-text depth="3" style="font-size: 12px">问题 id：{{ o.id }}</n-text>
+                  <n-text depth="3" style="font-size: 12px">{{ t('问题 id：') }}{{ o.id }}</n-text>
                   <exec-timeline :issue-id="o.id" />
                 </n-space>
               </n-collapse-item>
             </n-collapse>
             <n-card v-else-if="hasOpenIssues" size="small">
-              <n-text depth="3">当前筛选下没有问题。</n-text>
+              <n-text depth="3">{{ t('当前筛选下没有问题。') }}</n-text>
             </n-card>
 
             <!-- 复审通过：agent 已执行、本轮审计确认消除 -->
-            <n-card v-if="showVerified && verifiedIds.size" size="small" title="复审通过（本轮审计确认消除）">
+            <n-card v-if="showVerified && verifiedIds.size" size="small" :title="t('复审通过（本轮审计确认消除）')">
               <n-text depth="2" style="font-size: 13px">
                 <n-tag v-for="id in [...verifiedIds]" :key="id" size="tiny" type="success" style="margin: 2px">{{ id }}</n-tag>
               </n-text>
             </n-card>
 
             <n-card v-if="!hasOpenIssues" size="small">
-              <n-text depth="3">当前无待处理问题。</n-text>
+              <n-text depth="3">{{ t('当前无待处理问题。') }}</n-text>
             </n-card>
 
-            <n-card size="small" title="守卫统计">
+            <n-card size="small" :title="t('守卫统计')">
               <n-space>
-                <n-statistic label="拒绝" :value="auditData.guard_stats?.refused || 0" />
-                <n-statistic label="force 越过" :value="auditData.guard_stats?.forced || 0" />
-                <n-statistic label="未覆盖拦截" :value="auditData.guard_stats?.uncovered || 0" />
+                <n-statistic :label="t('拒绝')" :value="auditData.guard_stats?.refused || 0" />
+                <n-statistic :label="t('force 越过')" :value="auditData.guard_stats?.forced || 0" />
+                <n-statistic :label="t('未覆盖拦截')" :value="auditData.guard_stats?.uncovered || 0" />
               </n-space>
             </n-card>
           </template>
@@ -108,8 +107,8 @@
           </n-card>
 
           <!-- 判断与执行记录：人的处置（audit_actions）+ agent 的执行汇报 -->
-          <n-card size="small" title="判断与执行记录">
-            <n-empty v-if="!combinedLog.length" description="暂无记录" />
+          <n-card size="small" :title="t('判断与执行记录')">
+            <n-empty v-if="!combinedLog.length" :description="t('暂无记录')" />
             <n-list v-else>
               <n-list-item v-for="(e, i) in combinedLog.slice(0, 50)" :key="i">
                 <n-space justify="space-between" align="center">
@@ -124,8 +123,8 @@
           </n-card>
 
           <!-- 历史快照：左列清单 + 右列内容，不做上下堆叠 -->
-          <n-card size="small" title="历史审计快照">
-            <n-empty v-if="!runs.length" description="还没有审计记录" />
+          <n-card size="small" :title="t('历史审计快照')">
+            <n-empty v-if="!runs.length" :description="t('还没有审计记录')" />
             <div v-else class="snapshot-layout">
               <div class="snapshot-list">
                 <div v-for="r in runs" :key="r.file"
@@ -138,7 +137,7 @@
               <div class="snapshot-content">
                 <n-text depth="3" style="font-size: 12px; display: block; margin-bottom: 6px">{{ snapshotTitle }}</n-text>
                 <div v-if="snapshotMarkdown" class="markdown-body" v-html="renderMarkdown(snapshotMarkdown)" />
-                <n-text v-else depth="3">左侧选择一份快照查看内容。</n-text>
+                <n-text v-else depth="3">{{ t('左侧选择一份快照查看内容。') }}</n-text>
               </div>
             </div>
           </n-card>
@@ -151,34 +150,32 @@
           <n-card size="small">
             <n-space justify="space-between" align="center">
               <n-space align="center">
-                <n-button type="primary" @click="runCurator" :loading="curatorRunning">立即深度审查</n-button>
-                <n-text depth="3">调用主模型产出质量提案，约需 1–3 分钟；每周 timer 自动执行</n-text>
+                <n-button type="primary" @click="runCurator" :loading="curatorRunning">{{ t('立即深度审查') }}</n-button>
+                <n-text depth="3">{{ t('调用主模型产出质量提案，约需 1–3 分钟；每周 timer 自动执行') }}</n-text>
               </n-space>
               <n-select v-model:value="proposalFilter" size="small"
                 :options="proposalFilterOptions" style="width: 170px" />
             </n-space>
             <n-space align="center" :size="6" style="margin-top: 8px">
-              <n-tag size="small" :type="pCount('pending') ? 'warning' : 'default'">待处理 {{ pCount('pending') }}</n-tag>
+              <n-tag size="small" :type="pCount('pending') ? 'warning' : 'default'">{{ t('待处理') }} {{ pCount('pending') }}</n-tag>
               <n-text depth="3">→</n-text>
-              <n-tag size="small" :type="pCount('executing') ? 'info' : 'default'">执行中 {{ pCount('executing') }}</n-tag>
+              <n-tag size="small" :type="pCount('executing') ? 'info' : 'default'">{{ t('执行中') }} {{ pCount('executing') }}</n-tag>
               <n-text depth="3">→</n-text>
-              <n-tag size="small" :type="pCount('executed') ? 'success' : 'default'">已执行 {{ pCount('executed') }}</n-tag>
+              <n-tag size="small" :type="pCount('executed') ? 'success' : 'default'">{{ t('已执行') }} {{ pCount('executed') }}</n-tag>
               <n-text depth="3">·</n-text>
-              <n-tag v-if="pCount('blocked')" size="small" type="error">受阻 {{ pCount('blocked') }}</n-tag>
-              <n-tag v-if="pCount('adopted')" size="small" type="warning">已采纳·未执行 {{ pCount('adopted') }}</n-tag>
-              <n-tag size="small" type="default">已忽略 {{ pCount('dismissed') }}</n-tag>
+              <n-tag v-if="pCount('blocked')" size="small" type="error">{{ t('受阻') }} {{ pCount('blocked') }}</n-tag>
+              <n-tag v-if="pCount('adopted')" size="small" type="warning">{{ t('已采纳·未执行') }} {{ pCount('adopted') }}</n-tag>
+              <n-tag size="small" type="default">{{ t('已忽略') }} {{ pCount('dismissed') }}</n-tag>
             </n-space>
             <n-text depth="3" style="font-size: 12px; display: block; margin-top: 6px">
-              提案是派给 agent 的工作项：派发即采纳（复制执行指令），误报/不做点忽略；
-              agent 执行进度经 memory_audit_update 汇报。全部条目执行/忽略后提案自动结案，
-              不再出现在 agent 的检索结果里。
+              {{ t('提案是派给 agent 的工作项：派发即采纳（复制执行指令），误报/不做点忽略；agent 执行进度经 memory_audit_update 汇报。全部条目执行/忽略后提案自动结案，不再出现在 agent 的检索结果里。') }}
             </n-text>
           </n-card>
 
           <n-empty v-if="!proposals.length"
-            description="还没有质量提案——点上方「立即深度审查」生成，或等每周 timer 自动执行" />
+            :description="t('还没有质量提案——点上方「立即深度审查」生成，或等每周 timer 自动执行')" />
           <n-card v-else-if="!visibleProposalCount" size="small">
-            <n-text depth="3">当前筛选下没有提案条目。</n-text>
+            <n-text depth="3">{{ t('当前筛选下没有提案条目。') }}</n-text>
           </n-card>
 
           <!-- 两级结构：第一层提案（提案级状态汇总），点开是条目（条目级状态） -->
@@ -202,7 +199,7 @@
                         {{ f.severity }}
                       </n-tag>
                       <n-tag size="tiny">{{ f.type }}</n-tag>
-                      <n-tag v-if="f.review" size="tiny" type="info" :title="f.review">复审</n-tag>
+                      <n-tag v-if="f.review" size="tiny" type="info" :title="f.review">{{ t('复审') }}</n-tag>
                       <n-tag size="tiny" :type="findingState(p, f).type">{{ findingState(p, f).label }}</n-tag>
                     </n-space>
                       <n-space v-if="findingDispatchable(p, f)">
@@ -218,9 +215,9 @@
                     <exec-timeline :issue-id="`P:${p.path}:${f.index}`" />
                   </n-space>
                 </n-card>
-                <n-text v-if="!p.findings.length" depth="3">本次提案无发现条目。</n-text>
+                <n-text v-if="!p.findings.length" depth="3">{{ t('本次提案无发现条目。') }}</n-text>
                 <n-collapse>
-                  <n-collapse-item title="提案原文" name="raw">
+                  <n-collapse-item :title="t('提案原文')" name="raw">
                     <div class="markdown-body" v-html="renderMarkdown(p.content)" />
                   </n-collapse-item>
                 </n-collapse>
@@ -242,6 +239,7 @@ import {
 import { marked } from 'marked'
 import { api, params } from '../composables/api.js'
 import { parseFindings } from '../composables/proposal-parse.js'
+import { t } from '../composables/i18n.js'
 
 const props = defineProps({ user: String })
 const message = useMessage()
@@ -304,7 +302,7 @@ const d5Parts = c => {
 // ---- 扁平化当前报告的全部待关注问题（执行状态机在这里落位）----
 // 已忽略（audit_actions 有行）直接剔除；行内状态标签说清"这事要你干什么"
 const kindNames = { D1: '标题重复', D2: '语义撞车', D3: '悬空链接', D4: '游离文件', D5: '悬空主题卡' }
-const kindLabel = k => kindNames[k] || k
+const kindLabel = k => t(kindNames[k] || k)
 const openItems = computed(() => {
   const a = auditData.value
   if (!a) return []
@@ -316,20 +314,20 @@ const openItems = computed(() => {
   }
   for (const c of a.title_duplicates || [])
     push(d1Id(c), 'D1', `${c.a_path} ↔ ${c.b_path}`,
-      [`相似度 ${c.score}`, '两篇标题近似——确认是否同一主题的两份拷贝'], '标题重复误报')
+      [`${t('相似度')} ${c.score}`, t('两篇标题近似——确认是否同一主题的两份拷贝')], t('标题重复误报'))
   for (const c of a.collisions || [])
     push(`D2:${c.id}`, 'D2', `${c.a_path} ↔ ${c.b_path}`,
-      [`相似度 ${c.score}`, `A: ${c.a_text || ''}`, `B: ${c.b_text || ''}`,
-       '两篇疑似在说同一件事——合并后派发，或判为误报'], '撞车误报')
+      [`${t('相似度')} ${c.score}`, `A: ${c.a_text || ''}`, `B: ${c.b_text || ''}`,
+       t('两篇疑似在说同一件事——合并后派发，或判为误报')], t('撞车误报'))
   for (const c of a.dangling_links || [])
     push(d3Id(c), 'D3', `${c.path}: [[${c.link}]]`,
-      ['链接目标按标题与路径都解析不到——补目标笔记或删掉链接'], '非笔记引用')
+      [t('链接目标按标题与路径都解析不到——补目标笔记或删掉链接')], t('非笔记引用'))
   for (const p of a.stray || [])
-    push(d4Id(p), 'D4', p, ['散文件不属于任何注册主题——归位到主题目录，或删除'], '无需归位')
+    push(d4Id(p), 'D4', p, [t('散文件不属于任何注册主题——归位到主题目录，或删除')], t('无需归位'))
   for (const c of a.dangling_cards || []) {
     const t = d5Parts(c)
     push(c, 'D5', `${t.title}：卡路径不存在（${t.card}）`,
-      ['注册表指向的 abstract 不存在——修正注册表路径或重建卡'], '暂不处理')
+      [t('注册表指向的 abstract 不存在——修正注册表路径或重建卡')], t('暂不处理'))
   }
   return items
 })
@@ -339,12 +337,12 @@ const hasOpenIssues = computed(() => openItems.value.length > 0)
 // ---- 问题级状态标签（与提案页同一套话术：说清"这事要你干什么"）----
 function issueStatus(state) {
   switch (state.key) {
-    case 'blocked': return { key: 'blocked', label: '受阻·需要你介入', type: 'error', order: 0 }
-    case 'open': return { key: 'open', label: '待处理·等你决定', type: 'warning', order: 1 }
-    case 'regressed': return { key: 'regressed', label: '复发·重新处理', type: 'warning', order: 1 }
-    case 'executing': return { key: 'executing', label: '执行中·agent 正在做', type: 'info', order: 2 }
-    case 'executed': return { key: 'executed', label: '已执行·待复审', type: 'default', order: 3 }
-    default: return { key: 'open', label: '待处理·等你决定', type: 'warning', order: 1 }
+    case 'blocked': return { key: 'blocked', label: t('受阻·需要你介入'), type: 'error', order: 0 }
+    case 'open': return { key: 'open', label: t('待处理·等你决定'), type: 'warning', order: 1 }
+    case 'regressed': return { key: 'regressed', label: t('复发·重新处理'), type: 'warning', order: 1 }
+    case 'executing': return { key: 'executing', label: t('执行中·agent 正在做'), type: 'info', order: 2 }
+    case 'executed': return { key: 'executed', label: t('已执行·待复审'), type: 'default', order: 3 }
+    default: return { key: 'open', label: t('待处理·等你决定'), type: 'warning', order: 1 }
   }
 }
 
@@ -373,15 +371,15 @@ function issueDispatchable(o) {
   return ['open', 'regressed', 'blocked'].includes(o.st.key)
 }
 const auditFilterOptions = computed(() => {
-  const meta = { open: '待处理', executing: '执行中', executed: '已执行待复审',
-                 blocked: '受阻', regressed: '复发' }
-  const opts = [{ label: '全部状态', value: 'all' }]
+  const meta = { open: t('待处理'), executing: t('执行中'), executed: t('已执行待复审'),
+                 blocked: t('受阻'), regressed: t('复发') }
+  const opts = [{ label: t('全部状态'), value: 'all' }]
   for (const [key, label] of Object.entries(meta)) {
     const n = issueRows.value.filter(o => o.st.key === key).length
     if (n) opts.push({ label: `${label} (${n})`, value: key })
   }
   if (verifiedIds.value.size)
-    opts.push({ label: `复审通过 (${verifiedIds.value.size})`, value: 'verified' })
+    opts.push({ label: `${t('复审通过')} (${verifiedIds.value.size})`, value: 'verified' })
   return opts
 })
 const showVerified = computed(() => ['all', 'verified'].includes(auditFilter.value))
@@ -429,8 +427,8 @@ function lastEvent(id) {
   return (execEvents.value || []).find(e => e.issue_id === id) || null
 }
 function eventLabel(ev) {
-  return { executing: '开始执行', progress: '过程汇报', executed: '执行完成',
-           blocked: '受阻', verified: '复审通过' }[ev] || ev
+  return t({ executing: '开始执行', progress: '过程汇报', executed: '执行完成',
+             blocked: '受阻', verified: '复审通过' }[ev] || ev)
 }
 
 // ---- 人的判断（audit_actions）：D 类处置 + P 类提案忽略/旧采纳 ----
@@ -451,16 +449,16 @@ function findingState(p, f) {
   const st = execLastMap.value[`P:${p.path}:${f.index}`]
   if (st) {
     if (st.event === 'executed' || st.event === 'verified')
-      return { key: 'executed', label: '已执行', type: 'success' }
+      return { key: 'executed', label: t('已执行'), type: 'success' }
     if (st.event === 'executing' || st.event === 'progress')
-      return { key: 'executing', label: '执行中', type: 'info' }
+      return { key: 'executing', label: t('执行中'), type: 'info' }
     if (st.event === 'blocked')
-      return { key: 'blocked', label: '受阻', type: 'error' }
+      return { key: 'blocked', label: t('受阻'), type: 'error' }
   }
   const a = pActions.value.get(`P:${p.path}:${f.index}`)
-  if (a?.action === 'dismissed') return { key: 'dismissed', label: '已忽略', type: 'default' }
-  if (a?.action === 'adopted') return { key: 'adopted', label: '已采纳·未执行', type: 'warning' }
-  return { key: 'pending', label: '待处理', type: 'default' }
+  if (a?.action === 'dismissed') return { key: 'dismissed', label: t('已忽略'), type: 'default' }
+  if (a?.action === 'adopted') return { key: 'adopted', label: t('已采纳·未执行'), type: 'warning' }
+  return { key: 'pending', label: t('待处理'), type: 'default' }
 }
 function findingDispatchable(p, f) {
   return ['pending', 'adopted', 'blocked'].includes(findingState(p, f).key)
@@ -473,12 +471,12 @@ function findingSettled(p, f) {
 // 受阻 > 待处理（有等你决定的条目）> 执行中 > 已结案（全部收口）
 function proposalStatus(p) {
   const keys = (p.findings || []).map(f => findingState(p, f).key)
-  if (!keys.length) return { key: 'empty', label: '无条目', type: 'default' }
-  if (keys.includes('blocked')) return { key: 'blocked', label: '受阻·需要你介入', type: 'error' }
+  if (!keys.length) return { key: 'empty', label: t('无条目'), type: 'default' }
+  if (keys.includes('blocked')) return { key: 'blocked', label: t('受阻·需要你介入'), type: 'error' }
   if (keys.includes('pending') || keys.includes('adopted'))
-    return { key: 'attention', label: '待处理·等你决定', type: 'warning' }
-  if (keys.includes('executing')) return { key: 'executing', label: '执行中·agent 正在做', type: 'info' }
-  return { key: 'settled', label: '已结案·全部完成', type: 'success' }
+    return { key: 'attention', label: t('待处理·等你决定'), type: 'warning' }
+  if (keys.includes('executing')) return { key: 'executing', label: t('执行中·agent 正在做'), type: 'info' }
+  return { key: 'settled', label: t('已结案·全部完成'), type: 'success' }
 }
 function proposalCountsLine(p) {
   const c = {}
@@ -488,8 +486,8 @@ function proposalCountsLine(p) {
   }
   const order = [['pending', '待处理'], ['executing', '执行中'], ['blocked', '受阻'],
                  ['executed', '已执行'], ['adopted', '已采纳·未执行'], ['dismissed', '已忽略']]
-  const parts = order.filter(([k]) => c[k]).map(([k, label]) => `${label} ${c[k]}`)
-  return parts.length ? parts.join(' · ') : '无条目'
+  const parts = order.filter(([k]) => c[k]).map(([k, label]) => `${t(label)} ${c[k]}`)
+  return parts.length ? parts.join(' · ') : t('无条目')
 }
 const statusOrder = { blocked: 0, attention: 1, executing: 2, settled: 3, empty: 4 }
 const sortedProposals = computed(() =>
@@ -518,7 +516,7 @@ const pCount = computed(() => (key) => {
   return n
 })
 const proposalFilterOptions = computed(() => {
-  const opts = [{ label: '全部状态', value: 'all' }]
+  const opts = [{ label: t('全部状态'), value: 'all' }]
   const meta = {
     pending: '待处理', executing: '执行中', executed: '已执行',
     blocked: '受阻', adopted: '已采纳·未执行', dismissed: '已忽略',
@@ -542,10 +540,10 @@ const combinedLog = computed(() => {
     rows.push({
       ts: a.acted_at, id: a.id, note: a.note,
       verb: a.kind === 'P'
-        ? (a.action === 'adopted' ? '提案已采纳' : '提案已忽略')
-        : (a.action === 'resolved' ? '人·已处理' : '人·忽略'),
+        ? (a.action === 'adopted' ? t('提案已采纳') : t('提案已忽略'))
+        : (a.action === 'resolved' ? t('人·已处理') : t('人·忽略')),
       tagType: a.action === 'resolved' || a.action === 'adopted' ? 'success' : 'default',
-      actor: '人',
+      actor: t('人'),
     })
   }
   for (const e of execEvents.value || []) {
@@ -623,9 +621,9 @@ async function viewRun(r) {
       // 快照可能已被手动删除或 curator 过期清理：降级展示，不弹错误
       // （审计结果本身仍有效，处置历史以 audit_actions 表为权威）
       snapshotMarkdown.value = ''
-      message.info('快照文件不存在（可能已被删除或过期清理）')
+      message.info(t('快照文件不存在（可能已被删除或过期清理）'))
     } else {
-      message.error('加载快照失败: ' + e.message)
+      message.error(t('加载快照失败：') + e.message)
     }
   }
 }
@@ -653,14 +651,14 @@ async function runAudit() {
     const data = await api(`/api/${props.user}/audit`, { method: 'POST' })
     auditData.value = data.audit
     lastAuditTs.value = Math.floor(Date.now() / 1000)
-    message.success('审计完成')
+    message.success(t('审计完成'))
     autoExpandIssues()
     await Promise.all([loadRuns(), loadActions(), loadExecEvents()])
     if (auditData.value.audit_file) {
       await viewRun({ path: auditData.value.audit_file, file: auditData.value.audit_file.split('/').pop() })
     }
   } catch (e) {
-    message.error('审计失败: ' + e.message)
+    message.error(t('审计失败') + ': ' + e.message)
   } finally {
     auditing.value = false
   }
@@ -676,7 +674,7 @@ async function dispose(issueId, action, label) {
     disposed.value.add(issueId)
     if (data.content) snapshotMarkdown.value = data.content
     await loadActions()
-    message.success('已忽略——该问题不再重放')
+    message.success(t('已忽略——该问题不再重放'))
   } catch (e) {
     message.error(e.message)
   }
@@ -714,16 +712,16 @@ const REPORT_PROTOCOL = (id) => (
 function copyIssueInstruction(o) {
   const text = `请处理记忆审计问题 ${o.id}（${o.kind}）：${o.desc}。\n${REPORT_PROTOCOL(o.id)}`
   copyText(text).then(
-    () => message.success('执行指令已复制，粘贴给任意 agent 即可'),
-    e => message.error('复制失败：' + e.message))
+    () => message.success(t('执行指令已复制，粘贴给任意 agent 即可')),
+    e => message.error(t('复制失败：') + e.message))
 }
 
 async function runCurator() {
   curatorRunning.value = true
-  message.info('深度审查进行中，约需 1–3 分钟…')
+  message.info(t('深度审查进行中，约需 1–3 分钟…'))
   try {
     await api(`/api/${props.user}/curator`, { method: 'POST' })
-    message.success('深度审查完成')
+    message.success(t('深度审查完成'))
     await loadProposals()
   } catch (e) {
     // 服务端消息已带「深度审查失败」前缀，避免重复
@@ -744,7 +742,7 @@ async function judge(p, f, action) {
     })
     if (data.content) p.content = data.content
     await loadActions()
-    message.success('已忽略——该条目不再出现；若提案全部条目收口将自动结案')
+    message.success(t('已忽略——该条目不再出现；若提案全部条目收口将自动结案'))
   } catch (e) {
     message.error(e.message)
   }
@@ -757,9 +755,9 @@ async function copyExecInstruction(p, f) {
     + REPORT_PROTOCOL(id))
   try {
     await copyText(text)
-    message.success('执行指令已复制，粘贴给任意 agent 即可')
+    message.success(t('执行指令已复制，粘贴给任意 agent 即可'))
   } catch (e) {
-    message.error('复制失败：' + e.message)
+    message.error(t('复制失败：') + e.message)
   }
 }
 

@@ -1,5 +1,5 @@
 <template>
-  <n-config-provider :theme="theme" :locale="zhCN" :date-locale="dateZhCN">
+  <n-config-provider :theme="theme" :locale="naiveLocale" :date-locale="naiveDateLocale">
     <n-loading-bar-provider>
       <n-message-provider>
         <n-dialog-provider>
@@ -49,6 +49,13 @@
                           style="width: 120px"
                           @update:value="onUserChange"
                         />
+                        <n-select
+                          :value="locale"
+                          :options="localeOptions"
+                          size="small"
+                          style="width: 96px"
+                          @update:value="setLocale"
+                        />
                       </n-space>
                     </n-space>
                   </n-layout-header>
@@ -69,16 +76,16 @@
         </n-dialog-provider>
       </n-message-provider>
 
-      <n-modal :show="needLogin" preset="dialog" title="yacmemo 登录" :show-icon="false"
+      <n-modal :show="needLogin" preset="dialog" :title="t('yacmemo 登录')" :show-icon="false"
                :mask-closable="false" :closable="false" style="width: 320px">
         <n-input
           v-model:value="loginPassword"
           type="password" show-password-on="click"
-          placeholder="访问密码" @keyup.enter="doLogin"
+          :placeholder="t('访问密码')" @keyup.enter="doLogin"
         />
         <n-text v-if="loginError" type="error" style="font-size: 12px">{{ loginError }}</n-text>
         <template #action>
-          <n-button type="primary" block :loading="loginBusy" @click="doLogin">登录</n-button>
+          <n-button type="primary" block :loading="loginBusy" @click="doLogin">{{ t('登录') }}</n-button>
         </template>
       </n-modal>
     </n-loading-bar-provider>
@@ -92,7 +99,7 @@ import {
   NMenu, NSpace, NText, NTag, NSelect, NLoadingBarProvider,
   NMessageProvider, NDialogProvider, NNotificationProvider,
   NModal, NInput, NButton,
-  darkTheme, zhCN, dateZhCN,
+  darkTheme, zhCN, dateZhCN, enUS, dateEnUS,
   NIcon,
 } from 'naive-ui'
 
@@ -104,6 +111,7 @@ import IdentitiesPage from './components/IdentitiesPage.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import DashboardPage from './components/DashboardPage.vue'
 import { api } from './composables/api.js'
+import { t, locale, setLocale } from './composables/i18n.js'
 
 const build = __BUILD__
 
@@ -116,20 +124,29 @@ const loginPassword = ref('')
 const loginBusy = ref(false)
 const loginError = ref('')
 
-const menuOptions = [
-  { label: '仪表盘', key: 'dashboard' },
-  { label: '主题', key: 'topics' },
-  { label: '搜索', key: 'search' },
-  { label: '审计', key: 'audit' },
-  { label: '画像', key: 'profile' },
-  { label: '身份', key: 'identities' },
-  { label: '设置', key: 'settings' },
-]
+const menuOptions = computed(() => [
+  { label: t('仪表盘'), key: 'dashboard' },
+  { label: t('主题'), key: 'topics' },
+  { label: t('搜索'), key: 'search' },
+  { label: t('审计'), key: 'audit' },
+  { label: t('画像'), key: 'profile' },
+  { label: t('身份'), key: 'identities' },
+  { label: t('设置'), key: 'settings' },
+])
 
 const pageTitle = computed(() => {
-  const m = { dashboard: '仪表盘', topics: '主题浏览', search: '搜索', audit: '审计', profile: '画像与偏好', identities: '身份管理', settings: '设置' }
+  const m = { dashboard: t('仪表盘'), topics: t('主题浏览'), search: t('搜索'),
+              audit: t('审计'), profile: t('画像与偏好'), identities: t('身份管理'),
+              settings: t('设置') }
   return m[activePage.value] || ''
 })
+
+const naiveLocale = computed(() => (locale.value === 'en' ? enUS : zhCN))
+const naiveDateLocale = computed(() => (locale.value === 'en' ? dateEnUS : dateZhCN))
+const localeOptions = [
+  { label: '中文', value: 'zh' },
+  { label: 'English', value: 'en' },
+]
 
 function onDashboardNavigate({ user, page }) {
   if (user) currentUser.value = user

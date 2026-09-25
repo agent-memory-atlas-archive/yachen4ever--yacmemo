@@ -31,3 +31,5 @@ yacmemo/webui/dist/
 
 # Agent background registry (temp)
 .temp/
+frontend/src/node_modules/
+.zcode/

@@ -17,16 +17,16 @@
       </template>
       <template #2>
         <div class="topic-detail">
-          <n-empty v-if="!selectedNote" description="选择左侧主题或笔记查看内容" />
+          <n-empty v-if="!selectedNote" :description="t('选择左侧主题或笔记查看内容')" />
           <template v-else>
             <n-space justify="space-between" align="center" style="margin-bottom: 12px">
               <n-text strong style="font-size: 15px">{{ selectedNoteTitle }}</n-text>
               <n-space>
                 <n-button size="small" @click="toggleEdit">
-                  {{ editing ? '预览' : '编辑' }}
+                  {{ editing ? t('预览') : t('编辑') }}
                 </n-button>
                 <n-button size="small" type="error" ghost @click="handleDelete"
-                  v-if="!isAbstract">删除</n-button>
+                  v-if="!isAbstract">{{ t('删除') }}</n-button>
               </n-space>
             </n-space>
             <n-input
@@ -49,6 +49,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { NSplit, NSpin, NTree, NEmpty, NText, NSpace, NButton, NInput, useMessage, useDialog } from 'naive-ui'
 import { marked } from 'marked'
 import { api, params } from '../composables/api.js'
+import { t } from '../composables/i18n.js'
 
 const props = defineProps({ user: String })
 const message = useMessage()
@@ -101,13 +102,13 @@ const treeData = computed(() => {
       ],
     })
   }
-  result.push({ key: 'active', label: `活跃主题 (${activeChildren.length})`, children: activeChildren })
+  result.push({ key: 'active', label: `${t("活跃主题")} (${activeChildren.length})`, children: activeChildren })
   // Archived topics：卡已被后端改写到 archive/<主题>/，同样展开目录下全部文件
   const archived = topics.value.filter(t => t.archived)
   if (archived.length) {
     result.push({
       key: 'archived',
-      label: `已归档 (${archived.length})`,
+      label: `${t("已归档")} (${archived.length})`,
       children: archived.map(t => {
         const dir = dirOf(t.card)
         const files = notes.value.filter(n =>
@@ -124,7 +125,7 @@ const treeData = computed(() => {
     })
   }
   // Free zones
-  result.push({ key: 'free', label: '免注册区', children: [
+  result.push({ key: 'free', label: t("免注册区"), children: [
     { key: 'zone:journal', label: 'journal', children: notes.value
       .filter(n => n.path.startsWith('journal/'))
       .map(noteNode) },
@@ -139,7 +140,7 @@ const treeData = computed(() => {
     const byAgent = {}
     for (const n of agentNotes) {
       const seg = n.path.split('/')
-      const agent = seg[1] || '（未分组）'
+      const agent = seg[1] || t("（未分组）")
       const g = (byAgent[agent] = byAgent[agent] || { shared: [], devices: {} })
       if (seg[2] === 'shared') g.shared.push(n)
       else if (seg.length >= 4) {
@@ -148,7 +149,7 @@ const treeData = computed(() => {
     }
     result.push({
       key: 'agents',
-      label: `专属记忆 (${agentNotes.length})`,
+      label: `${t("专属记忆")} (${agentNotes.length})`,
       children: Object.entries(byAgent).map(([agent, g]) => ({
         key: `agent:${agent}`,
         label: agent,
@@ -169,11 +170,11 @@ const treeData = computed(() => {
     !n.path.startsWith('curator/') && !n.path.startsWith('agents/') &&
     n.path !== 'TOPICS.md' && n.path !== 'PROFILE.md' &&
     !isCovered(n.path))
-  result.push({ key: 'stray', label: `游离文件 (${strays.length})`,
+  result.push({ key: 'stray', label: `${t("游离文件")} (${strays.length})`,
     children: strays.map(noteNode) })
   const system = notes.value.filter(n => n.path === 'TOPICS.md' || n.path === 'PROFILE.md')
   if (system.length) {
-    result.push({ key: 'system', label: '系统文件', children: system.map(noteNode) })
+    result.push({ key: 'system', label: t("系统文件"), children: system.map(noteNode) })
   }
   return result
 })
@@ -194,7 +195,7 @@ async function loadData() {
     topics.value = [...topicData.active, ...topicData.archived.map(a => ({ ...a, archived: true }))]
     notes.value = noteData.notes
   } catch (e) {
-    message.error('加载失败: ' + e.message)
+    message.error(t('加载失败') + ': ' + e.message)
   } finally {
     loading.value = false
   }
@@ -212,7 +213,7 @@ async function onSelect(keys) {
     editing.value = false
     editContent.value = data.content
   } catch (e) {
-    message.error('读取失败: ' + e.message)
+    message.error(t('读取失败') + ': ' + e.message)
   }
 }
 
@@ -233,26 +234,26 @@ async function saveNote() {
     })
     selectedNote.value.content = editContent.value
     editing.value = false
-    message.success('已保存')
+    message.success(t('已保存'))
   } catch (e) {
-    message.error('保存失败: ' + e.message)
+    message.error(t('保存失败') + ': ' + e.message)
   }
 }
 
 function handleDelete() {
   dialog.warning({
-    title: '删除笔记',
-    content: `确认删除 ${selectedNote.value.path}？git 历史可恢复。`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('删除笔记'),
+    content: t('确认删除 {path}？git 历史可恢复。', { path: selectedNote.value.path }),
+    positiveText: t('删除'),
+    negativeText: t('取消'),
     onPositiveClick: async () => {
       try {
         await api(`/api/${props.user}/note${params({ path: selectedNote.value.path })}`, { method: 'DELETE' })
-        message.success('已删除')
+        message.success(t('已删除'))
         selectedNote.value = null
         await loadData()
       } catch (e) {
-        message.error('删除失败: ' + e.message)
+        message.error(t('删除失败') + ': ' + e.message)
       }
     },
   })

@@ -4,12 +4,12 @@
       <n-input-group>
         <n-input
           v-model:value="query"
-          placeholder="输入关键词或自然语句搜索…"
+          :placeholder="t('输入关键词或自然语句搜索…')"
           @keydown.enter="doSearch"
           clearable
         />
         <n-select v-model:value="kind" :options="kindOptions" style="width: 110px" />
-        <n-button type="primary" @click="doSearch" :loading="searching">搜索</n-button>
+        <n-button type="primary" @click="doSearch" :loading="searching">{{ t('搜索') }}</n-button>
       </n-input-group>
       <n-alert v-if="notice" type="warning" size="small" style="margin-bottom: 8px">{{ notice }}</n-alert>
       <div v-if="results.length" class="search-results">
@@ -28,15 +28,16 @@
             style="margin-top: 4px">{{ w }}</n-alert>
         </n-card>
       </div>
-      <n-empty v-else-if="searched" description="未找到相关笔记" />
+      <n-empty v-else-if="searched" :description="t('未找到相关笔记')" />
     </n-space>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { NSpace, NInputGroup, NInput, NSelect, NButton, NCard, NTag, NText, NProgress, NAlert, NEmpty, useMessage } from 'naive-ui'
 import { api, params } from '../composables/api.js'
+import { t } from '../composables/i18n.js'
 
 const props = defineProps({ user: String })
 const message = useMessage()
@@ -48,11 +49,11 @@ const searched = ref(false)
 const results = ref([])
 const notice = ref('')
 
-const kindOptions = [
-  { label: '混合', value: 'hybrid' },
-  { label: '全文', value: 'fts' },
-  { label: '向量', value: 'vector' },
-]
+const kindOptions = computed(() => [
+  { label: t('混合'), value: 'hybrid' },
+  { label: t('全文'), value: 'fts' },
+  { label: t('向量'), value: 'vector' },
+])
 
 function scorePercent(score) {
   return Math.min(100, Math.round(score * 3000))
@@ -67,7 +68,7 @@ async function doSearch() {
     results.value = data.results
     notice.value = data.notice || ''
   } catch (e) {
-    message.error('搜索失败: ' + e.message)
+    message.error(t('搜索失败') + ': ' + e.message)
   } finally {
     searching.value = false
   }

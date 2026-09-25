@@ -6,17 +6,17 @@
         <n-space align="center" justify="space-between">
           <n-space align="center" :size="10">
             <n-tag size="small" :type="overview ? 'success' : 'error'">
-              {{ overview ? '服务运行中' : '连接失败' }}
+              {{ t(overview ? '服务运行中' : '连接失败') }}
             </n-tag>
             <n-tag size="small" :type="overview?.embedding?.configured ? 'success' : 'warning'">
-              Embedding：{{ overview?.embedding?.configured ? overview.embedding.model : '未配置（FTS-only）' }}
+              {{ t('Embedding') }}：{{ overview?.embedding?.configured ? overview.embedding.model : t('未配置（FTS-only）') }}
             </n-tag>
             <n-tag size="small" :type="overview?.curator?.enabled ? 'success' : 'default'">
-              Curator：{{ overview?.curator?.enabled ? (overview.curator.model || '已启用') : '未启用' }}
+              {{ t('Curator') }}：{{ overview?.curator?.enabled ? (overview.curator.model || t('已启用')) : t('未启用') }}
             </n-tag>
-            <n-tag size="small">今日调用 {{ overview?.calls_today ?? 0 }}</n-tag>
+            <n-tag size="small">{{ t('今日调用') }} {{ overview?.calls_today ?? 0 }}</n-tag>
           </n-space>
-          <n-button size="small" @click="load" :loading="loading">刷新</n-button>
+          <n-button size="small" @click="load" :loading="loading">{{ t('刷新') }}</n-button>
         </n-space>
       </n-card>
 
@@ -26,23 +26,23 @@
           <n-card size="small" :title="u.id">
             <template #header-extra>
               <n-space :size="4">
-                <n-button size="tiny" @click="go(u.id, 'audit')">审计</n-button>
-                <n-button size="tiny" quaternary @click="go(u.id, 'topics')">笔记</n-button>
+                <n-button size="tiny" @click="go(u.id, 'audit')">{{ t('审计') }}</n-button>
+                <n-button size="tiny" quaternary @click="go(u.id, 'topics')">{{ t('笔记') }}</n-button>
               </n-space>
             </template>
             <n-grid :cols="4" :x-gap="8">
-              <n-gi><n-statistic label="笔记" :value="u.note_count" /></n-gi>
-              <n-gi><n-statistic label="主题" :value="u.topics.length" /></n-gi>
-              <n-gi><n-statistic label="待处理" :value="u.open_issues ?? '—'" /></n-gi>
-              <n-gi><n-statistic label="提案" :value="u.curator_proposals" /></n-gi>
+              <n-gi><n-statistic :label="t('笔记')" :value="u.note_count" /></n-gi>
+              <n-gi><n-statistic :label="t('主题')" :value="u.topics.length" /></n-gi>
+              <n-gi><n-statistic :label="t('待处理')" :value="u.open_issues ?? '—'" /></n-gi>
+              <n-gi><n-statistic :label="t('提案')" :value="u.curator_proposals" /></n-gi>
             </n-grid>
             <n-space size="small" style="margin-top: 8px" :wrap="true">
               <n-tag size="tiny" :type="(u.open_issues ?? 0) > 0 ? 'warning' : 'success'">
-                审计待办 {{ u.open_issues ?? '—' }}
+                {{ t('审计待办') }} {{ u.open_issues ?? '—' }}
               </n-tag>
-              <n-tag size="tiny">最近审计 {{ fmtTs(u.last_audit_ts) || '重启后未审计' }}</n-tag>
+              <n-tag size="tiny">{{ t('最近审计') }} {{ fmtTs(u.last_audit_ts) || t('重启后未审计') }}</n-tag>
               <n-tag size="tiny" :type="(u.git_status || '').includes('失败') ? 'error' : 'success'">
-                git 正常
+                {{ t('git 正常') }}
               </n-tag>
             </n-space>
           </n-card>
@@ -50,8 +50,8 @@
       </n-grid>
 
       <!-- 最近活动 -->
-      <n-card size="small" title="最近活动">
-        <n-empty v-if="!recent.length" description="暂无调用记录" />
+      <n-card size="small" :title="t('最近活动')">
+        <n-empty v-if="!recent.length" :description="t('暂无调用记录')" />
         <n-list v-else>
           <n-list-item v-for="r in recent" :key="r.id">
             <n-space justify="space-between" align="center" :wrap="false">
@@ -77,6 +77,7 @@ import {
   NText, NEmpty,
 } from 'naive-ui'
 import { api, params } from '../composables/api.js'
+import { t } from '../composables/i18n.js'
 
 defineProps({ build: { type: Object, default: () => ({}) } })
 const emit = defineEmits(['navigate'])

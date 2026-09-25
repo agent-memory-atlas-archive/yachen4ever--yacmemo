@@ -17,40 +17,40 @@
               </n-list-item>
             </n-list>
             <n-button size="small" dashed block style="margin-top: 8px" @click="showAdd = true">
-              + 新增小节
+              {{ t('+ 新增小节') }}
             </n-button>
           </template>
         </div>
       </template>
       <template #2>
         <div class="profile-editor">
-          <n-empty v-if="!selectedSection" description="选择左侧小节查看或编辑" />
+          <n-empty v-if="!selectedSection" :description="t('选择左侧小节查看或编辑')" />
           <template v-else>
             <n-space justify="space-between" align="center" style="margin-bottom: 12px">
               <n-text strong style="font-size: 15px">{{ selectedSection }}</n-text>
-              <n-button size="small" type="primary" @click="save" :loading="saving">保存</n-button>
+              <n-button size="small" type="primary" @click="save" :loading="saving">{{ t('保存') }}</n-button>
             </n-space>
             <n-input
               v-model:value="editContent"
               type="textarea"
               :rows="20"
               style="font-family: monospace"
-              placeholder="事实行用 - [类别] 内容 语法"
+              :placeholder="t('事实行用 - [类别] 内容 语法')"
             />
             <n-divider />
-            <n-text depth="3" style="font-size: 12px">预览：</n-text>
+            <n-text depth="3" style="font-size: 12px">{{ t('预览：') }}</n-text>
             <div class="markdown-body" v-html="renderedPreview" />
           </template>
         </div>
       </template>
     </n-split>
 
-    <n-modal v-model:show="showAdd" preset="dialog" title="新增画像小节">
-          <n-input v-model:value="newSectionName" placeholder="小节名（如沟通风格）" />
+    <n-modal v-model:show="showAdd" preset="dialog" :title="t('新增画像小节')">
+          <n-input v-model:value="newSectionName" :placeholder="t('小节名（如沟通风格）')" />
       <template #action>
         <n-space>
-          <n-button @click="showAdd = false">取消</n-button>
-          <n-button type="primary" @click="addSection" :disabled="!newSectionName.trim()">创建</n-button>
+          <n-button @click="showAdd = false">{{ t('取消') }}</n-button>
+          <n-button type="primary" @click="addSection" :disabled="!newSectionName.trim()">{{ t('创建') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -62,6 +62,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { NSplit, NSpin, NList, NListItem, NThing, NButton, NInput, NSpace, NText, NDivider, NEmpty, NModal, useMessage } from 'naive-ui'
 import { marked } from 'marked'
 import { api } from '../composables/api.js'
+import { t } from '../composables/i18n.js'
 
 const props = defineProps({ user: String })
 const message = useMessage()
@@ -102,7 +103,7 @@ async function loadProfile() {
     const data = await api(`/api/${props.user}/profile`)
     sections.value = parseSections(data.content)
   } catch (e) {
-    message.error('加载失败: ' + e.message)
+    message.error(t('加载失败') + ': ' + e.message)
   } finally {
     loading.value = false
   }
@@ -120,10 +121,10 @@ async function save() {
       method: 'PUT',
       body: JSON.stringify({ section: selectedSection.value, content: editContent.value }),
     })
-    message.success('已保存')
+    message.success(t('已保存'))
     await loadProfile()
   } catch (e) {
-    message.error('保存失败: ' + e.message)
+    message.error(t('保存失败') + ': ' + e.message)
   } finally {
     saving.value = false
   }
@@ -137,7 +138,7 @@ async function addSection() {
       method: 'PUT',
       body: JSON.stringify({ section: name, content: '- [类别] 待补充' }),
     })
-    message.success('已创建')
+    message.success(t('已创建'))
     showAdd.value = false
     newSectionName.value = ''
     await loadProfile()

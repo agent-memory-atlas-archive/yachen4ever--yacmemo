@@ -1,37 +1,37 @@
 <template>
   <div class="identities-page">
     <n-alert type="info" :show-icon="false" style="margin-bottom: 16px">
-      <n-text strong>专属记忆层级模型：</n-text>
-      user 层（topics/、journal/、PROFILE.md）所有身份共享；
-      <n-text code>agents/&lt;agent&gt;/shared/</n-text> 为 agent 层（同 agent 跨设备共享）；
-      <n-text code>agents/&lt;agent&gt;/&lt;device&gt;/</n-text> 为 identity 层（本机专属）。
-      不同 identity 互相不可见：memory_search 只返回 user 层 + 自己的专属区，
-      memory_context 自动注入自己的两份必读。
+      <n-text strong>{{ t('专属记忆层级模型：') }}</n-text>
+      user 层（topics/、journal/、PROFILE.md）{{ t('所有身份共享；') }}
+      <n-text code>agents/&lt;agent&gt;/shared/</n-text> {{ t('为 agent 层（同 agent 跨设备共享）；') }}
+      <n-text code>agents/&lt;agent&gt;/&lt;device&gt;/</n-text> {{ t('为 identity 层（本机专属）。') }}
+      {{ t('不同 identity 互相不可见：memory_search 只返回 user 层 + 自己的专属区，') }}
+      {{ t('memory_context 自动注入自己的两份必读。') }}
     </n-alert>
 
     <n-space justify="space-between" align="center" style="margin-bottom: 12px">
-      <n-text strong style="font-size: 15px">已有 identity（扫描 agents/ 目录 + 创建登记）</n-text>
+      <n-text strong style="font-size: 15px">{{ t('已有 identity（扫描 agents/ 目录 + 创建登记）') }}</n-text>
       <n-space>
-        <n-button size="small" @click="load" :loading="loading">刷新</n-button>
-        <n-button size="small" type="primary" @click="showCreate = true">新建 identity</n-button>
+        <n-button size="small" @click="load" :loading="loading">{{ t('刷新') }}</n-button>
+        <n-button size="small" type="primary" @click="showCreate = true">{{ t('新建 identity') }}</n-button>
       </n-space>
     </n-space>
 
     <n-spin v-if="loading" size="small" />
-    <n-empty v-else-if="!rows.length" description="尚无 identity——agents/ 目录为空。点「新建 identity」生成第一个 token" />
+    <n-empty v-else-if="!rows.length" :description="t('尚无 identity——agents/ 目录为空。点「新建 identity」生成第一个 token')" />
     <n-collapse v-else v-model:expanded-names="expanded">
       <n-collapse-item v-for="row in rows" :key="row.agent" :name="row.agent">
         <template #header>
           <n-space align="center">
             <n-text strong>{{ row.agent }}</n-text>
             <n-tag size="small" :type="row.devices.length ? 'info' : 'default'">
-              {{ row.devices.length }} 设备
+              {{ row.devices.length }} {{ t('设备') }}
             </n-tag>
-            <n-tag size="small">agent 层 {{ row.shared_files }} 文件</n-tag>
+            <n-tag size="small">{{ t('agent 层') }} {{ row.shared_files }} {{ t('文件') }}</n-tag>
           </n-space>
         </template>
         <n-text depth="3" style="font-size: 12px">
-          agent 层共享子树：agents/{{ row.agent }}/shared/（同 agent 所有设备共享）
+          {{ t('agent 层共享子树：') }}agents/{{ row.agent }}/shared/（{{ t('同 agent 所有设备共享') }}）
         </n-text>
         <n-space vertical size="small" style="margin-top: 6px">
           <n-button v-for="f in filesOf(row.agent).shared" :key="f.path"
@@ -45,11 +45,11 @@
               <template #header>
                 <n-space align="center">
                   <n-text strong>{{ d.device }}</n-text>
-                  <n-tag v-if="!d.active" size="small" type="warning">未激活（尚无专属文件）</n-tag>
+                  <n-tag v-if="!d.active" size="small" type="warning">{{ t('未激活（尚无专属文件）') }}</n-tag>
                 </n-space>
               </template>
               <template #description>
-                agents/{{ row.agent }}/{{ d.device }}/ · {{ d.notes }} 个笔记 · token：
+                agents/{{ row.agent }}/{{ d.device }}/ · {{ d.notes }} {{ t('个笔记') }} · token：
                 <n-code :code="`${d.device}_${row.agent}`" language="text" />
               </template>
               <n-space vertical size="small" style="margin-top: 6px">
@@ -61,20 +61,20 @@
             </n-thing>
           </n-list-item>
         </n-list>
-        <n-text v-else depth="3" style="font-size: 12px">（尚无设备子树）</n-text>
+        <n-text v-else depth="3" style="font-size: 12px">{{ t('（尚无设备子树）') }}</n-text>
       </n-collapse-item>
     </n-collapse>
 
-    <n-modal v-model:show="showCreate" preset="dialog" title="新建 identity" :show-icon="false">
+    <n-modal v-model:show="showCreate" preset="dialog" :title="t('新建 identity')" :show-icon="false">
       <n-space vertical>
-        <n-input v-model:value="newAgent" placeholder="agent 名（如 teleagent）" />
-        <n-input v-model:value="newDevice" placeholder="设备名（如 r9000x）" />
+        <n-input v-model:value="newAgent" :placeholder="t('agent 名（如 teleagent）')" />
+        <n-input v-model:value="newDevice" :placeholder="t('设备名（如 r9000x）')" />
         <n-text depth="3" style="font-size: 12px">
-          名称限小写字母/数字/短横线（不含下划线）。token = 设备名_agent名，确定性拼接、可随时重建。
+          {{ t('名称限小写字母/数字/短横线（不含下划线）。token = 设备名_agent名，确定性拼接、可随时重建。') }}
         </n-text>
         <template v-if="created">
           <n-alert type="success" :show-icon="false">
-            token：<n-text code>{{ created.token }}</n-text>
+            {{ t('token：') }}<n-text code>{{ created.token }}</n-text>
           </n-alert>
           <n-input :value="claudeSnippet" type="textarea" :rows="2" readonly />
           <n-input :value="jsonSnippet" type="textarea" :rows="5" readonly />
@@ -82,11 +82,11 @@
       </n-space>
       <template #action>
         <n-space>
-          <n-button @click="closeCreate">关闭</n-button>
+          <n-button @click="closeCreate">{{ t('关闭') }}</n-button>
           <n-button type="primary" :loading="creating"
                     :disabled="!newAgent.trim() || !newDevice.trim()"
                     @click="create">
-            {{ created ? '重新生成' : '生成 token' }}
+            {{ created ? t('重新生成') : t('生成 token') }}
           </n-button>
         </n-space>
       </template>
@@ -108,6 +108,7 @@ import {
 } from 'naive-ui'
 import { marked } from 'marked'
 import { api } from '../composables/api.js'
+import { t } from '../composables/i18n.js'
 
 const props = defineProps({ user: String })
 const message = useMessage()
@@ -166,7 +167,7 @@ async function preview(f) {
     const data = await api(`/api/${props.user}/note?path=${encodeURIComponent(f.path)}`)
     previewContent.value = data.content
   } catch (e) {
-    previewContent.value = `（加载失败：${e.message}）`
+    previewContent.value = t('（加载失败：{msg}）', { msg: e.message })
   } finally {
     previewLoading.value = false
   }
@@ -201,7 +202,7 @@ async function create() {
       body: JSON.stringify({ agent: newAgent.value, device: newDevice.value }),
     })
     created.value = data
-    message.success(`已生成 token: ${data.token}`)
+    message.success(t('已生成 token: {token}', { token: data.token }))
     await load()
   } catch (e) {
     message.error(e.message)
