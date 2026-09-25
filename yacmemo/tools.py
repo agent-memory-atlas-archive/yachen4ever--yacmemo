@@ -361,7 +361,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             col = r["collisions"]
             lines.append(f"== 语义撞车（{len(col)}）==")
             for c in col[:10]:
-                lines.append(f"- {c['a_path']} ↔ {c['b_path']} (score {c['score']})")
+                lines.append(f"- `D2:{c['id']}` {c['a_path']} ↔ {c['b_path']} (score {c['score']})")
                 lines.append(f"  A: {c['a_text'][:60]}")
                 lines.append(f"  B: {c['b_text'][:60]}")
             dangling = r["dangling_links"]
