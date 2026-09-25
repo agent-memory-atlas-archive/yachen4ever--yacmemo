@@ -7,6 +7,8 @@
 
 ## 1. Overview
 
+- **UI language**: a Chinese / English switcher in the header (persisted in localStorage); the naive-ui component language follows. Business messages returned by the backend remain in Chinese (the server-side message catalog is not internationalized yet);
+
 - The WebUI and the MCP endpoints share the same Starlette application and the same user contexts (Store/Searcher/IndexDB instances) — **what you see and change in the browser is exactly the data the agents are using**; there is no second data path;
 - Route order: `/api/*` and `/ui/*` are registered before the per-user MCP mounts; the config layer also reserves `api`/`ui`/`health` as user-id reserved words, ruling out shadowing;
 - Error convention: business-level refusals (e.g. guard interception) return HTTP 200 + `{"ok": false, "error": "..."}`; unknown users return 404;
