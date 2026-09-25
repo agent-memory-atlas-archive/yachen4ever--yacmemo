@@ -510,3 +510,17 @@ def test_webui_config_structured_roundtrip(http_server):
     assert r["embedding"]["model"] == "test-model"
     assert r["embedding"]["dimensions"] == 512
     assert r["curator"]["enabled"] is True
+
+
+def test_webui_user_delete_removes_empty_dedicated_parent(http_server, tmp_path):
+    base = f"http://127.0.0.1:{http_server}"
+    dedicated = tmp_path / "users-dir" / "dave"
+    httpx.post(f"{base}/api/users/add", json={
+        "id": "dave2", "root": str(dedicated), "restart": False})
+    r = httpx.post(f"{base}/api/users/delete", json={
+        "id": "dave2", "confirm_id": "dave2", "purge": True, "restart": False}).json()
+    assert r["ok"] is True and r["purged"] is True
+    assert not dedicated.exists()                       # 记忆目录已删
+    assert not (tmp_path / "users-dir").exists()        # 空的专属父目录一并收尾
+    # 非空父目录不受影响（config.toml 仍在 tmp_path 下）
+    assert (tmp_path / "config.toml").is_file()

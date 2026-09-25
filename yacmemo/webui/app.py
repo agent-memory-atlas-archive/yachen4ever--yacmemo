@@ -940,6 +940,10 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             if root_path.is_dir():
                 shutil.rmtree(root_path)
                 purged = True
+                # 若父目录是为该用户专建（现已空），一并收尾
+                parent = root_path.parent
+                if parent != Path(config.root_abs) and not any(parent.iterdir()):
+                    parent.rmdir()
         config.users.remove(cur)
         _maybe_restart(bool(body.get("restart", True)))
         return _ok({"deleted": uid, "purged": purged, "backup": backup,
