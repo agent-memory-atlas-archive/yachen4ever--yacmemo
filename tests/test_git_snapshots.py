@@ -180,3 +180,40 @@ def test_status_line_surfaces_runtime_failure(store: Store, monkeypatch):
     monkeypatch.setattr(store.snapshots, "_run", orig)
     store.delete_note("失败可见性测试")  # cleanup; snapshot path works again
     assert "启用" in store.snapshots.status_line()
+
+
+def test_init_inside_outer_repo_uses_own_git(tmp_path):
+    """记忆根嵌在外层 git 仓库内（如 /srv/yacmemo/user2/memory）时，首次
+    快照必须 init 自己的 .git——不能把提交逃逸进外层仓库（2026-09-25
+    user2 实爆：--is-inside-work-tree 向上命中外层仓库返回 true 跳过 init）。"""
+    import os
+    import subprocess
+    from yacmemo.config import Config, MemoryConfig
+    from yacmemo.index_db import IndexDB
+
+    outer = tmp_path / "outer"
+    (outer / "user2" / "memory").mkdir(parents=True)
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "init", "-q", str(outer)], check=True)
+    subprocess.run(["git", "-C", str(outer), "commit", "--allow-empty", "-q",
+                    "-m", "outer base"], check=True, env=env)
+
+    root = outer / "user2" / "memory"
+    cfg = Config(memory=MemoryConfig(root=str(root)))
+    db = IndexDB(cfg.sqlite_path)
+    try:
+        s = Store(cfg, db)
+        (root / "notes").mkdir()
+        (root / "TOPICS.md").write_text(
+            "# 主题记忆注册表\n\n## 笔记主题\n- 卡: notes/a.md\n- 现状: x\n",
+            encoding="utf-8")
+        s.write("notes/测试笔记", "# 测试笔记\n内容\n")
+        assert (root / ".git").is_dir()                       # 自己的仓库
+        n_outer = subprocess.run(
+            ["git", "-C", str(outer), "rev-list", "--count", "HEAD"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        assert n_outer == "1"                                 # 外层零污染
+        assert "启用" in s.snapshots.status_line()
+    finally:
+        db.close()

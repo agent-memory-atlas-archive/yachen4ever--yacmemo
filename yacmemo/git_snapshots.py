@@ -78,8 +78,13 @@ class GitSnapshots:
         gitconfig must not silently outrank the yacmemo-configured identity
         (resolve_git_identity chain), so we read with --local and never
         overwrite a locally-set value."""
-        r = self._run("rev-parse", "--is-inside-work-tree", check=False)
-        if r.returncode != 0 or r.stdout.strip() != "true":
+        # 必须确认仓库根就是记忆根本身：--is-inside-work-tree 会在记忆根
+        # 缺少 .git 时向上命中外层仓库（如 /srv/yacmemo 代码仓库）并返回
+        # true，快照提交全部逃逸进代码仓库（2026-09-25 user2 实爆）
+        r = self._run("rev-parse", "--show-toplevel", check=False)
+        inside_own_repo = (r.returncode == 0
+                           and Path(r.stdout.strip()).resolve() == self.root.resolve())
+        if not inside_own_repo:
             init = self._run("init", "-q", check=False)
             if init.returncode != 0:
                 self._disabled_reason = init.stderr.strip() or "git init 失败"
