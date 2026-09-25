@@ -17,8 +17,11 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import tomllib
@@ -36,7 +39,7 @@ from starlette.responses import (
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from ..config import Config
+from ..config import Config, UserEntry, _RESERVED_IDS
 from ..identity import IdentityError, make_identity
 from ..store import StoreError
 
@@ -77,6 +80,89 @@ def _ok(payload: dict) -> JSONResponse:
 def _err(msg: str, status: int = 200) -> JSONResponse:
     # Guard refusals and user errors are normal outcomes → HTTP 200 with ok:false
     return JSONResponse({"ok": False, "error": msg}, status_code=status)
+
+
+# ---- config.toml 文本手术（用户管理 / 结构化配置）----
+# 全部走「读原文 → 定位块/键 → 改行 → 完整校验 → 备份 → 原子写回」：
+# 保留注释与键顺序，校验失败一律不落盘。
+
+
+def _users_blocks(content: str) -> list[dict]:
+    """解析 [[users]] 块的行区间与 id（保序）。"""
+    blocks, lines, i = [], content.splitlines(), 0
+    while i < len(lines):
+        if lines[i].strip() == "[[users]]":
+            j = i + 1
+            while j < len(lines) and not lines[j].lstrip().startswith("["):
+                j += 1
+            bid = ""
+            for ln in lines[i:j]:
+                m = re.match(r'\s*id\s*=\s*"([^"]*)"', ln)
+                if m:
+                    bid = m.group(1).strip()
+                    break
+            blocks.append({"id": bid, "start": i, "end": j})
+            i = j
+        else:
+            i += 1
+    return blocks
+
+
+def _render_user_block(u: dict) -> str:
+    lines = ["[[users]]", f'id = "{u["id"]}"', f'root = "{u["root"]}"']
+    if u.get("git_user_name"):
+        lines.append(f'git_user_name = "{u["git_user_name"]}"')
+    if u.get("git_user_email"):
+        lines.append(f'git_user_email = "{u["git_user_email"]}"')
+    return "\n".join(lines)
+
+
+def _validate_config_text(content: str) -> None:
+    """TOML 语法 + 完整 load_config 结构校验；失败抛 ValueError（不落盘）。"""
+    try:
+        tomllib.loads(content)
+    except Exception as e:
+        raise ValueError(f"TOML 语法错误: {e}") from e
+    fd, tmp = tempfile.mkstemp(suffix=".toml")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        from ..config import load_config as _load
+
+        _load(tmp)
+    except Exception as e:
+        raise ValueError(f"配置校验失败: {e}") from e
+    finally:
+        os.unlink(tmp)
+
+
+def _set_toml_key(content: str, section: str, key: str, value) -> str:
+    """在 [section] 内替换或追加 key = value（保注释与顺序；无节则追加新节）。"""
+
+    def _repr(v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float)):
+            return str(v)
+        return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    lines = content.splitlines()
+    sec = f"[{section}]"
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == sec), None)
+    if start is None:
+        lines += ["", sec, f"{key} = {_repr(value)}"]
+        return "\n".join(lines) + "\n"
+    end = start + 1
+    while end < len(lines) and not lines[end].lstrip().startswith("["):
+        end += 1
+    for i in range(start + 1, end):
+        if re.match(rf"^\s*{re.escape(key)}\s*=", lines[i]):
+            lines[i] = re.sub(
+                rf"^(\s*{re.escape(key)}\s*=\s*).*$",
+                lambda mm: mm.group(1) + _repr(value), lines[i], count=1)
+            return "\n".join(lines) + "\n"
+    lines.insert(end, f"{key} = {_repr(value)}")
+    return "\n".join(lines) + "\n"
 
 
 async def _body(request: Request) -> dict:
@@ -276,6 +362,14 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                 proposals = (
                     len(list(curator_dir.glob("提案-*.md")))
                     if curator_dir.is_dir() else 0)
+                last = c["store"].last_audit or {}
+                la = last.get("audit") or {}
+                open_issues = (len(la.get("title_duplicates") or [])
+                               + len(la.get("collisions") or [])
+                               + len(la.get("dangling_links") or [])
+                               + len(la.get("stray") or [])
+                               + len(la.get("dangling_cards") or [])
+                               ) if last else None
                 users.append({
                     "id": uid,
                     "note_count": len(c["store"].list_notes()),
@@ -287,17 +381,21 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                                         for t in archived],
                     "curator_proposals": proposals,
                     "git_status": c["store"].snapshots.status_line(),
+                    "last_audit_ts": last.get("ts"),
+                    "open_issues": open_issues,
                 })
             return users
 
         users = await run_in_threadpool(_collect)
         emb = config.embedding
         return _ok({
-            "users": users,
-            "embedding": {"configured": bool(emb.base_url and emb.model),
-                          "model": emb.model, "dimensions": emb.dimensions},
-            "calls_today": usage_day_total(contexts),
-        })
+                "users": users,
+                "embedding": {"configured": bool(emb.base_url and emb.model),
+                              "model": emb.model, "dimensions": emb.dimensions},
+                "curator": {"enabled": config.curator.enabled,
+                            "model": config.curator.model},
+                "calls_today": usage_day_total(contexts),
+            })
 
     def usage_db(config) -> object | None:
         for c in contexts.values():
@@ -691,41 +789,273 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         if not config.config_path:
             return _err("服务未使用配置文件启动，无法保存")
         body = await _body(request)
-        content = body.get("content", "")
+        try:
+            backup = await run_in_threadpool(_persist_config,
+                                             body.get("content", ""))
+        except ValueError as e:
+            return _err(str(e))
+        restarting = bool(body.get("restart"))
+        _maybe_restart(restarting)
+        return _ok({"saved": True, "backup": backup, "restarting": restarting})
+
+    # ---- 用户管理（config.toml [[users]] 的结构化增删改）----
+
+    def _persist_config(content: str) -> str | None:
+        """校验 → 备份 → 原子写回（600）。校验失败抛 ValueError，不落盘。"""
+        _validate_config_text(content)
         target = Path(config.config_path)
-
-        # 1) TOML 语法 + 结构校验（写到临时文件走完整 load_config）
-        try:
-            tomllib.loads(content)
-        except Exception as e:
-            return _err(f"TOML 语法错误: {e}")
-        tmp = target.with_suffix(".toml.validating")
-        tmp.write_text(content, encoding="utf-8")
-        try:
-            from ..config import load_config as _load
-            _load(str(tmp))
-        except Exception as e:
-            tmp.unlink(missing_ok=True)
-            return _err(f"配置校验失败: {e}")
-        tmp.unlink(missing_ok=True)
-
-        # 2) 备份 + 原子落盘（保留 600 权限）
         backup = None
         if target.exists():
             backup = f"{target.name}.bak-{time.strftime('%Y%m%d%H%M%S')}"
-            await run_in_threadpool(shutil.copy2, target, target.parent / backup)
-        await run_in_threadpool(target.write_text, content, encoding="utf-8")
-        import os as _os
-        _os.chmod(target, 0o600)
+            shutil.copy2(target, target.parent / backup)
+        target.write_text(content, encoding="utf-8")
+        os.chmod(target, 0o600)
+        return backup
 
-        # 3) 可选重启（systemd Restart 由 unit 决定；延迟 1.5s 让响应先送达）
-        restarting = bool(body.get("restart"))
+    def _maybe_restart(restarting: bool) -> None:
         if restarting:
             def _restart():
                 time.sleep(1.5)
                 subprocess.run(["systemctl", "restart", "yacmemo"], check=False)
             threading.Thread(target=_restart, daemon=True).start()
+
+    def _read_config_text() -> str:
+        return Path(config.config_path).read_text(encoding="utf-8")
+
+    async def users_list(request: Request):
+        users = []
+        for u in config.users:
+            root = Path(config.user_root_abs(u))
+            users.append({"id": u.id, "root": u.root,
+                          "git_user_name": u.git_user_name,
+                          "git_user_email": u.git_user_email,
+                          "root_exists": root.is_dir(),
+                          "mounted": u.id in contexts})
+        return _ok({"users": users, "config_path": config.config_path})
+
+    async def user_add(request: Request):
+        if not config.config_path:
+            return _err("服务未使用配置文件启动，无法管理用户")
+        body = await _body(request)
+        uid = str(body.get("id", "")).strip()
+        root = str(body.get("root", "")).strip()
+        if not uid or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", uid):
+            return _err("用户 id 非法：仅限字母/数字/下划线/连字符，且以字母或数字开头")
+        if uid in _RESERVED_IDS:
+            return _err(f"id「{uid}」是系统保留字（api / ui / health）")
+        if any(u.id == uid for u in config.users):
+            return _err(f"用户已存在: {uid}")
+        if not root:
+            return _err("记忆根路径不能为空")
+        root_path = Path(root).expanduser()
+        if not root_path.is_absolute() and config.config_path:
+            root_path = Path(config.config_path).parent / root_path
+        root_path = root_path.resolve()
+        root_path.mkdir(parents=True, exist_ok=True)
+        new_u = {"id": uid, "root": root_path.as_posix(),
+                 "git_user_name": str(body.get("git_user_name", "")).strip(),
+                 "git_user_email": str(body.get("git_user_email", "")).strip()}
+        content = _read_config_text().rstrip("\n") + "\n\n" + \
+            _render_user_block(new_u) + "\n"
+        try:
+            backup = await run_in_threadpool(_persist_config, content)
+        except ValueError as e:
+            return _err(str(e))
+        restarting = body.get("restart", True)   # 新用户必须重启才会挂载 MCP
+        _maybe_restart(restarting)
+        # 同步内存配置：列表/删除等后续操作读的是运行中的 config 对象
+        # （MCP 挂载仍需重启，mounted 标记如实反映）
+        config.users.append(UserEntry(id=uid, root=new_u["root"],
+                                      git_user_name=new_u["git_user_name"],
+                                      git_user_email=new_u["git_user_email"]))
+        return _ok({"added": uid, "root": new_u["root"], "backup": backup,
+                    "restarting": restarting})
+
+    async def user_update(request: Request):
+        if not config.config_path:
+            return _err("服务未使用配置文件启动，无法管理用户")
+        body = await _body(request)
+        uid = str(body.get("id", "")).strip()
+        cur = next((u for u in config.users if u.id == uid), None)
+        if not cur:
+            return _err(f"配置中找不到用户: {uid}")
+        content = _read_config_text()
+        blocks = _users_blocks(content)
+        blk = next((b for b in blocks if b["id"] == uid), None)
+        if not blk:
+            return _err(f"配置中找不到 [[users]] 块: {uid}")
+        new_root = str(body.get("root", "")).strip()
+        if new_root:
+            root_path = Path(new_root).expanduser()
+            if not root_path.is_absolute() and config.config_path:
+                root_path = Path(config.config_path).parent / root_path
+            root_path = root_path.resolve()
+            root_path.mkdir(parents=True, exist_ok=True)
+            new_root = root_path.as_posix()
+        new_u = {"id": uid, "root": new_root or cur.root,
+                 "git_user_name": str(body.get("git_user_name", cur.git_user_name)).strip(),
+                 "git_user_email": str(body.get("git_user_email", cur.git_user_email)).strip()}
+        lines = content.splitlines()
+        content = "\n".join(lines[:blk["start"]]
+                            + _render_user_block(new_u).splitlines()
+                            + lines[blk["end"]:]) + "\n"
+        try:
+            backup = await run_in_threadpool(_persist_config, content)
+        except ValueError as e:
+            return _err(str(e))
+        root_changed = new_u["root"] != cur.root
+        cur.root = new_u["root"]
+        cur.git_user_name = new_u["git_user_name"]
+        cur.git_user_email = new_u["git_user_email"]
+        restarting = bool(body.get("restart", root_changed))
+        _maybe_restart(restarting)
+        return _ok({"updated": uid, "backup": backup, "restarting": restarting})
+
+    async def user_delete(request: Request):
+        if not config.config_path:
+            return _err("服务未使用配置文件启动，无法管理用户")
+        body = await _body(request)
+        uid = str(body.get("id", "")).strip()
+        confirm_id = str(body.get("confirm_id", "")).strip()
+        purge = bool(body.get("purge"))
+        cur = next((u for u in config.users if u.id == uid), None)
+        if not cur:
+            return _err(f"配置中找不到用户: {uid}")
+        if confirm_id != uid:
+            return _err("安全确认失败：请在输入框中输入该用户的 id 以确认删除")
+        content = _read_config_text()
+        blocks = _users_blocks(content)
+        blk = next((b for b in blocks if b["id"] == uid), None)
+        if not blk:
+            return _err(f"配置中找不到 [[users]] 块: {uid}")
+        lines = content.splitlines()
+        content = "\n".join(lines[:blk["start"]] + lines[blk["end"]:]).strip("\n") + "\n"
+        try:
+            backup = await run_in_threadpool(_persist_config, content)
+        except ValueError as e:
+            return _err(str(e))
+        purged = False
+        if purge:
+            root_path = Path(config.user_root_abs(cur))
+            if root_path.is_dir():
+                shutil.rmtree(root_path)
+                purged = True
+        config.users.remove(cur)
+        _maybe_restart(bool(body.get("restart", True)))
+        return _ok({"deleted": uid, "purged": purged, "backup": backup,
+                    "note": "仅移出配置" if not purged else "配置与记忆目录均已删除"})
+
+    # ---- 结构化配置（embedding / curator 表单化）----
+
+    async def config_structured_get(request: Request):
+        if not config.config_path or not Path(config.config_path).is_file():
+            return _err("服务未使用配置文件启动")
+        data = tomllib.loads(_read_config_text())
+        emb, cur = data.get("embedding", {}), data.get("curator", {})
+        return _ok({
+            "embedding": {"base_url": emb.get("base_url", ""),
+                          "api_key": emb.get("api_key", ""),
+                          "model": emb.get("model", ""),
+                          "dimensions": emb.get("dimensions", 1024),
+                          "timeout": emb.get("timeout", 30)},
+            "curator": {"enabled": cur.get("enabled", False),
+                        "base_url": cur.get("base_url", ""),
+                        "api_key": cur.get("api_key", ""),
+                        "model": cur.get("model", ""),
+                        "max_tokens": cur.get("max_tokens", 4096),
+                        "timeout": cur.get("timeout", 180),
+                        "audit_retention_days": cur.get("audit_retention_days", 7)},
+        })
+
+    async def config_structured_save(request: Request):
+        if not config.config_path:
+            return _err("服务未使用配置文件启动，无法保存")
+        body = await _body(request)
+        content = _read_config_text()
+        fields = {"embedding": (("base_url", str), ("api_key", str), ("model", str),
+                                ("dimensions", int), ("timeout", int)),
+                  "curator": (("enabled", bool), ("base_url", str), ("api_key", str),
+                              ("model", str), ("max_tokens", int), ("timeout", int),
+                              ("audit_retention_days", int))}
+        for section, keys in fields.items():
+            payload = body.get(section) or {}
+            for key, typ in keys:
+                if key not in payload:
+                    continue
+                v = payload[key]
+                try:
+                    v = typ(v)
+                except (TypeError, ValueError):
+                    return _err(f"{section}.{key} 类型错误（应为 {typ.__name__}）")
+                content = _set_toml_key(content, section, key, v)
+        try:
+            backup = await run_in_threadpool(_persist_config, content)
+        except ValueError as e:
+            return _err(str(e))
+        restarting = bool(body.get("restart"))
+        _maybe_restart(restarting)
         return _ok({"saved": True, "backup": backup, "restarting": restarting})
+
+    async def config_test_embedding(request: Request):
+        body = await _body(request)
+        base = str(body.get("base_url", "")).strip().rstrip("/")
+        model = str(body.get("model", "")).strip()
+        if not base or not model:
+            return _err("base_url 与 model 必填")
+        headers = ({"Authorization": f"Bearer {body.get('api_key', '')}"}
+                   if body.get("api_key") else {})
+
+        def _probe():
+            t0 = time.monotonic()
+            try:
+                import httpx
+                resp = httpx.post(f"{base}/embeddings",
+                                  json={"model": model, "input": ["connectivity ping"]},
+                                  headers=headers, timeout=15)
+                latency = int((time.monotonic() - t0) * 1000)
+                if resp.status_code != 200:
+                    return {"ok": False, "latency_ms": latency,
+                            "error": f"HTTP {resp.status_code}: {resp.text[:160]}"}
+                vec = (resp.json().get("data") or [{}])[0].get("embedding") or []
+                return {"ok": True, "latency_ms": latency, "dims": len(vec)}
+            except Exception as e:
+                return {"ok": False,
+                        "latency_ms": int((time.monotonic() - t0) * 1000),
+                        "error": str(e)[:200]}
+
+        return _ok(await run_in_threadpool(_probe))
+
+    async def config_test_curator(request: Request):
+        body = await _body(request)
+        base = str(body.get("base_url", "")).strip().rstrip("/")
+        model = str(body.get("model", "")).strip()
+        if not base or not model:
+            return _err("base_url 与 model 必填")
+        headers = ({"Authorization": f"Bearer {body.get('api_key', '')}"}
+                   if body.get("api_key") else {})
+
+        def _probe():
+            t0 = time.monotonic()
+            try:
+                import httpx
+                resp = httpx.post(f"{base}/chat/completions",
+                                  json={"model": model, "max_tokens": 16,
+                                        "messages": [{"role": "user",
+                                                      "content": "只回复两个字：正常"}]},
+                                  headers=headers, timeout=30)
+                latency = int((time.monotonic() - t0) * 1000)
+                if resp.status_code != 200:
+                    return {"ok": False, "latency_ms": latency,
+                            "error": f"HTTP {resp.status_code}: {resp.text[:160]}"}
+                reply = ((resp.json().get("choices") or [{}])[0]
+                         .get("message", {}).get("content", ""))
+                return {"ok": True, "latency_ms": latency, "reply": reply[:60]}
+            except Exception as e:
+                return {"ok": False,
+                        "latency_ms": int((time.monotonic() - t0) * 1000),
+                        "error": str(e)[:200]}
+
+        return _ok(await run_in_threadpool(_probe))
 
     return [
         Route("/", _wrap(index, html=True), methods=["GET"]),
@@ -735,6 +1065,14 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                  name="assets"),) if (STATIC_DIR / "assets").is_dir() else ()),
         Route("/api/login", login, methods=["POST"]),
         Route("/api/overview", _wrap(overview), methods=["GET"]),
+        Route("/api/users", _wrap(users_list), methods=["GET"]),
+        Route("/api/users/add", _wrap(user_add), methods=["POST"]),
+        Route("/api/users/update", _wrap(user_update), methods=["POST"]),
+        Route("/api/users/delete", _wrap(user_delete), methods=["POST"]),
+        Route("/api/config/structured", _wrap(config_structured_get), methods=["GET"]),
+        Route("/api/config/structured", _wrap(config_structured_save), methods=["POST"]),
+        Route("/api/config/test-embedding", _wrap(config_test_embedding), methods=["POST"]),
+        Route("/api/config/test-curator", _wrap(config_test_curator), methods=["POST"]),
         Route("/api/usage", _wrap(usage_recent), methods=["GET"]),
         Route("/api/usage/clients", _wrap(usage_clients), methods=["GET"]),
         Route("/api/usage/days", _wrap(usage_days), methods=["GET"]),

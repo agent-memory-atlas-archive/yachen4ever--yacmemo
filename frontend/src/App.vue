@@ -53,7 +53,9 @@
                     </n-space>
                   </n-layout-header>
                   <n-layout-content class="app-content">
-                    <TopicsPage v-if="activePage === 'topics'" :user="currentUser" />
+                    <DashboardPage v-if="activePage === 'dashboard'" :build="build"
+                      @navigate="onDashboardNavigate" />
+                    <TopicsPage v-else-if="activePage === 'topics'" :user="currentUser" />
                     <SearchPage v-else-if="activePage === 'search'" :user="currentUser" />
                     <AuditPage v-else-if="activePage === 'audit'" :user="currentUser" />
                     <ProfilePage v-else-if="activePage === 'profile'" :user="currentUser" />
@@ -100,11 +102,12 @@ import AuditPage from './components/AuditPage.vue'
 import ProfilePage from './components/ProfilePage.vue'
 import IdentitiesPage from './components/IdentitiesPage.vue'
 import SettingsPage from './components/SettingsPage.vue'
+import DashboardPage from './components/DashboardPage.vue'
 import { api } from './composables/api.js'
 
 const build = __BUILD__
 
-const activePage = ref('topics')
+const activePage = ref('dashboard')
 const collapsed = ref(false)
 const currentUser = ref('')
 const users = ref([])
@@ -114,6 +117,7 @@ const loginBusy = ref(false)
 const loginError = ref('')
 
 const menuOptions = [
+  { label: '仪表盘', key: 'dashboard' },
   { label: '主题', key: 'topics' },
   { label: '搜索', key: 'search' },
   { label: '审计', key: 'audit' },
@@ -123,9 +127,14 @@ const menuOptions = [
 ]
 
 const pageTitle = computed(() => {
-  const m = { topics: '主题浏览', search: '搜索', audit: '审计', profile: '画像与偏好', identities: '身份管理', settings: '设置' }
+  const m = { dashboard: '仪表盘', topics: '主题浏览', search: '搜索', audit: '审计', profile: '画像与偏好', identities: '身份管理', settings: '设置' }
   return m[activePage.value] || ''
 })
+
+function onDashboardNavigate({ user, page }) {
+  if (user) currentUser.value = user
+  activePage.value = page
+}
 
 async function doLogin() {
   loginBusy.value = true

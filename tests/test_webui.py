@@ -429,3 +429,84 @@ def test_webui_password_flow(http_server_auth):
         assert r.json()["ok"] is True
         r = c.get(f"{base}/api/overview", timeout=5)
         assert r.status_code == 200 and r.json()["ok"] is True
+
+
+def test_toml_surgery_preserves_comments_and_order():
+    """文本手术必须保注释与顺序；无节则追加新节。"""
+    from yacmemo.webui.app import _set_toml_key, _users_blocks
+
+    content = '[memory]\nroot = "m"  # 根目录\n\n[embedding]\nbase_url = "http://x"\n'
+    out = _set_toml_key(content, "embedding", "model", "m2")
+    assert 'base_url = "http://x"' in out and 'model = "m2"' in out
+    assert "# 根目录" in out
+    out2 = _set_toml_key(out, "curator", "enabled", True)
+    assert "[curator]" in out2 and "enabled = true" in out2
+    blocks = _users_blocks(content + '\n\n[[users]]\nid = "a"\nroot = "r"\n')
+    assert [b["id"] for b in blocks] == ["a"]
+
+
+def test_webui_users_crud(http_server, tmp_path):
+    base = f"http://127.0.0.1:{http_server}"
+    ids = [u["id"] for u in httpx.get(f"{base}/api/users").json()["users"]]
+    assert "alice" in ids and "bob" in ids
+
+    # 新增：自动建目录、写回 config
+    r = httpx.post(f"{base}/api/users/add", json={
+        "id": "carol", "root": str(tmp_path / "carol"), "restart": False}).json()
+    assert r["ok"] is True, r
+    assert (tmp_path / "carol").is_dir()
+    assert "carol" in [u["id"] for u in httpx.get(f"{base}/api/users").json()["users"]]
+
+    # 保留字 / 重复 拒绝
+    r = httpx.post(f"{base}/api/users/add", json={
+        "id": "api", "root": str(tmp_path / "x"), "restart": False}).json()
+    assert r["ok"] is False and "保留字" in r["error"]
+    r = httpx.post(f"{base}/api/users/add", json={
+        "id": "carol", "root": str(tmp_path / "x"), "restart": False}).json()
+    assert r["ok"] is False and "已存在" in r["error"]
+
+    # 编辑 git 身份
+    r = httpx.post(f"{base}/api/users/update", json={
+        "id": "carol", "git_user_name": "Carol", "restart": False}).json()
+    assert r["ok"] is True
+    carol = next(u for u in httpx.get(f"{base}/api/users").json()["users"]
+                 if u["id"] == "carol")
+    assert carol["git_user_name"] == "Carol"
+
+    # 删除：确认 id 不匹配拒绝
+    r = httpx.post(f"{base}/api/users/delete", json={
+        "id": "carol", "confirm_id": "nope", "restart": False}).json()
+    assert r["ok"] is False
+
+    # 删除：默认保留数据
+    r = httpx.post(f"{base}/api/users/delete", json={
+        "id": "carol", "confirm_id": "carol", "purge": False, "restart": False}).json()
+    assert r["ok"] is True and r["purged"] is False
+    assert (tmp_path / "carol").is_dir()
+    assert "carol" not in [u["id"] for u in httpx.get(f"{base}/api/users").json()["users"]]
+
+
+def test_webui_user_delete_purges_data(http_server, tmp_path):
+    base = f"http://127.0.0.1:{http_server}"
+    httpx.post(f"{base}/api/users/add", json={
+        "id": "dave", "root": str(tmp_path / "dave"), "restart": False})
+    (tmp_path / "dave" / "x.md").write_text("x", encoding="utf-8")
+    r = httpx.post(f"{base}/api/users/delete", json={
+        "id": "dave", "confirm_id": "dave", "purge": True, "restart": False}).json()
+    assert r["ok"] is True and r["purged"] is True
+    assert not (tmp_path / "dave").exists()
+
+
+def test_webui_config_structured_roundtrip(http_server):
+    base = f"http://127.0.0.1:{http_server}"
+    r = httpx.get(f"{base}/api/config/structured").json()
+    assert "embedding" in r and "curator" in r
+    r = httpx.post(f"{base}/api/config/structured", json={
+        "embedding": {"model": "test-model", "dimensions": 512},
+        "curator": {"enabled": True, "model": "judge-model"},
+        "restart": False}).json()
+    assert r["ok"] is True
+    r = httpx.get(f"{base}/api/config/structured").json()
+    assert r["embedding"]["model"] == "test-model"
+    assert r["embedding"]["dimensions"] == 512
+    assert r["curator"]["enabled"] is True
