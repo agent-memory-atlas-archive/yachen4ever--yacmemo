@@ -211,7 +211,17 @@ def run_check(config: Config, user: UserEntry, dry_run: bool = False,
             # 同日重跑 = 复审：追加复审小节而非新建笔记——
             # 每天一份报告、标题天然唯一，D1 标题守卫不再被重跑命中
             old = abs_path.read_text(encoding="utf-8")
-            store.save(path, old + render_review_section(proposal))
+            merged = old + render_review_section(proposal)
+            if proposal.get("findings"):
+                # 复审带来新条目 → 旧「已结案」标记失效：撤标 + 状态复位，
+                # 防止带着新待办的报告对 agent 隐身（审计侧双向自愈兜底）
+                from .store import PROPOSAL_SETTLED_MARKER
+                if PROPOSAL_SETTLED_MARKER in merged:
+                    merged = ("\n".join(
+                        ln for ln in merged.splitlines()
+                        if PROPOSAL_SETTLED_MARKER not in ln) + "\n"
+                    ).replace("**状态：已结案**", "**状态：待裁决**", 1)
+            store.save(path, merged)
         else:
             store.save(path, report)
     db.close()

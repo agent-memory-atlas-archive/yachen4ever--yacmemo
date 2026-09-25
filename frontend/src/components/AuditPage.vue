@@ -197,13 +197,14 @@
                   :bordered="true" :class="{ 'finding-done': findingSettled(p, f) }">
                   <n-space vertical size="small">
                     <n-space justify="space-between" align="center">
-                      <n-space align="center">
-                        <n-tag size="tiny" :type="f.severity === 'high' ? 'error' : f.severity === 'medium' ? 'warning' : 'default'">
-                          {{ f.severity }}
-                        </n-tag>
-                        <n-tag size="tiny">{{ f.type }}</n-tag>
-                        <n-tag size="tiny" :type="findingState(p, f).type">{{ findingState(p, f).label }}</n-tag>
-                      </n-space>
+                    <n-space align="center">
+                      <n-tag size="tiny" :type="f.severity === 'high' ? 'error' : f.severity === 'medium' ? 'warning' : 'default'">
+                        {{ f.severity }}
+                      </n-tag>
+                      <n-tag size="tiny">{{ f.type }}</n-tag>
+                      <n-tag v-if="f.review" size="tiny" type="info" :title="f.review">复审</n-tag>
+                      <n-tag size="tiny" :type="findingState(p, f).type">{{ findingState(p, f).label }}</n-tag>
+                    </n-space>
                       <n-space v-if="findingDispatchable(p, f)">
                         <n-button size="tiny" type="primary" secondary @click="copyExecInstruction(p, f)">复制执行指令</n-button>
                         <n-button size="tiny" @click="judge(p, f, 'dismissed')">忽略</n-button>
@@ -564,22 +565,31 @@ const lastAuditTime = computed(() => lastAuditTs.value
 
 function parseFindings(markdown) {
   const lines = (markdown || '').split('\n')
-  const start = lines.findIndex(l => l.startsWith('## 提案'))
-  if (start === -1) return []
   const findings = []
   let cur = null
-  for (const line of lines.slice(start + 1)) {
-    if (line.startsWith('## ') || line.startsWith('> ')) break
-    // 类型名可含连字符（stale-card 等）——与后端 d3/条目解析同口径，
+  let seq = 0
+  let section = ''
+  for (const line of lines) {
+    if (line.startsWith('## ')) {
+      // 提案节与同日复审节都含条目；复审节从头重新打印序号，
+      // 全局序号在这里连续重编（与后端 P:<file>:<index> 同口径）
+      const head = line.slice(3).trim()
+      section = head.startsWith('提案') || head.startsWith('复审') ? head : ''
+      continue
+    }
+    if (!section || line.startsWith('> ')) continue
+    // 类型名可含连字符（stale-card 等）——与后端条目解析同口径，
     // 只要求 "N. **[" 前缀，severity/type 尽力提取
     const m = line.match(/^(\d+)\.\s+\*\*\[(\w+)\]\s+([\w-]+)\*\*\s*[—-]\s*(.*)$/)
       || line.match(/^(\d+)\.\s+\*\*(.+?)\*\*\s*[—-]\s*(.*)$/)
     if (m) {
+      seq += 1
+      const review = section.startsWith('复审') ? section : ''
       if (m.length === 5) {
-        cur = { index: Number(m[1]), severity: m[2], type: m[3], reason: m[4], paths: [], proposal: '' }
+        cur = { index: seq, review, severity: m[2], type: m[3], reason: m[4], paths: [], proposal: '' }
       } else {
         const inner = m[2].match(/\[(\w+)\]\s*([\w-]+)/)
-        cur = { index: Number(m[1]), severity: inner?.[1] || 'other', type: inner?.[2] || 'other',
+        cur = { index: seq, review, severity: inner?.[1] || 'other', type: inner?.[2] || 'other',
                 reason: m[3], paths: [], proposal: '' }
       }
       findings.push(cur)
@@ -774,8 +784,8 @@ async function judge(p, f, action) {
 
 async function copyExecInstruction(p, f) {
   const id = `P:${p.path}:${f.index}`
-  const text = (`请执行记忆质量提案 ${p.file} 第${f.index}条（[${f.severity}] ${f.type}）：`
-    + `${f.reason} 涉及：${f.paths.join('、') || '—'} 建议：${f.proposal || '—'}。\n`
+  const text = (`请执行记忆质量提案 ${p.file} 第${f.index}条（全局序号${f.review ? `，出自${f.review}` : ''}；`
+    + `[${f.severity}] ${f.type}）：${f.reason} 涉及：${f.paths.join('、') || '—'} 建议：${f.proposal || '—'}。\n`
     + REPORT_PROTOCOL(id))
   try {
     await copyText(text)

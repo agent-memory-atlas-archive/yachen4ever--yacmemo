@@ -1064,10 +1064,14 @@ class Store:
                           if t["card"] and not (self.root / t["card"]).is_file()
                           and _d5_id(t["title"], t["card"]) not in disposed]
 
-        # 提案结案调和：文件已带已结案标记（含 agent 手工打标）而条目缺
-        # 执行事件的——事件机制上线前完成的工作、或 agent 确认完成后手工
-        # 打标——补记 executed。markdown 事实源优先，两条记录路线最终一致
+        # 提案结案调和（双向自愈）——顺序敏感：
+        # ① 先补记：文件已标已结案、条目只有旧口径「已采纳」行而无执行
+        #    事件的 → 补记 executed（采纳=派发意图 + 标记=已全部落地）；
+        # ② 再撤标：复审追加新条目后旧标记失效 → 撤标、状态复位，防止
+        #    带着新待办的作品对 agent 隐身。无记录条目不补记（复审后无法
+        #    区分新老，保持可见待人裁决）
         reconciled = self._reconcile_proposals()
+        unmarked = self._unmark_stale_settled_proposals()
 
         # 执行进度派生（判断与执行分离：人在 WebUI 判断，agent 经
         # memory_audit_update 汇报执行，审计只做最终验证——已执行且本轮
@@ -1116,6 +1120,7 @@ class Store:
                "exec_status": exec_status,
                "verified": verified,
                "reconciled_proposals": reconciled,
+               "unmarked_proposals": unmarked,
                "git": self.snapshots.status_line(),
                "guard_stats": self.db.guard_stats(),
                "audit_file": audit_file}
@@ -1341,13 +1346,12 @@ class Store:
     # ---- proposal settlement（提案全部条目执行/忽略后对 agent 隐去）----
 
     def _reconcile_proposals(self) -> int:
-        """文件已标已结案、而条目缺结构化执行事件的提案，补记 executed。
+        """文件已标已结案、而条目只有旧口径「已采纳」行、缺执行事件的，
+        补记 executed（采纳=人批过的派发意图，标记=已全部落地）。
 
-        补记对象 = 提案文件头部带已结案标记，且条目既无执行事件、也未被
-        忽略——覆盖两类真实场景：事件机制上线前完成的执行（含 WebUI
-        旧口径「已采纳」的条目，采纳只是派发意图、文件标记证明已落地），
-        和 agent 确认完成后用 memory_edit 手工打标。markdown 事实源
-        优先，幂等。
+        无任何记录的条目**不**补记：同日复审会给文件追加新条目，标记
+        无法区分"事件机制上线前的老条目"和"复审新条目"，后者必须保持
+        待处理可见。幂等。
         """
         imported = 0
         d = self.root / "curator"
@@ -1365,35 +1369,73 @@ class Store:
             if not indices:
                 continue
             prefix = f"P:{rel}:"
+            adopted = {a["id"] for a in self.db.list_audit_actions()
+                       if a["id"].startswith(prefix) and a["action"] == "adopted"}
             has_event = set(self.db.exec_last_status().keys())
-            # dismissed 保持原状态（忽略不翻转为执行）；adopted 正是要调和
-            # 的主体——人批过 + 文件标结案 = 事件机制上线前的"已执行"
-            dismissed = {a["id"] for a in self.db.list_audit_actions()
-                         if a["id"].startswith(prefix) and a["action"] == "dismissed"}
             for i in indices:
                 iid = f"{prefix}{i}"
-                if iid in has_event or iid in dismissed:
+                if iid not in adopted or iid in has_event:
                     continue
                 self.db.add_exec_event(
                     iid, "P", "executed", identity="reconcile",
-                    note="结案补记：提案文件已标记已结案（条目在事件机制上线前完成或人工确认）")
+                    note="结案补记：提案文件已标记已结案，且条目已经人工采纳")
                 imported += 1
         return imported
 
+    def _unmark_stale_settled_proposals(self) -> int:
+        """撤掉失效的已结案标记：同日复审给文件追加了新条目，而标记宣称
+        "全部已执行或忽略"——此时标记既阻止 agent 检索到新待办，又与
+        WebUI 状态机矛盾。撤标 + 状态行复位（幂等）。"""
+        changed = 0
+        d = self.root / "curator"
+        if not d.is_dir():
+            return 0
+        for p in sorted(d.glob("提案-*.md")):
+            rel = p.relative_to(self.root).as_posix()
+            try:
+                content = p.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if PROPOSAL_SETTLED_MARKER not in content:
+                continue
+            indices = self._proposal_findings_indices(rel)
+            if not indices:
+                continue
+            prefix = f"P:{rel}:"
+            done = {a["id"] for a in self.db.list_audit_actions()
+                    if a["id"].startswith(prefix) and a["action"] == "dismissed"}
+            for iid, st in self.db.exec_last_status().items():
+                if iid.startswith(prefix) and st["event"] in ("executed", "verified"):
+                    done.add(iid)
+            if all(f"{prefix}{i}" in done for i in indices):
+                continue  # 确实全部收口，标记有效
+            lines = [ln for ln in content.splitlines()
+                     if PROPOSAL_SETTLED_MARKER not in ln]
+            content = ("\n".join(lines) + "\n"
+                       ).replace("**状态：已结案**", "**状态：待裁决**", 1)
+            self.save(rel, content)
+            logger.info("proposal unmarked (stale settled marker): %s", rel)
+            changed += 1
+        return changed
+
     def _proposal_findings_indices(self, rel: str) -> list[int]:
-        """提案文件里的条目序号（1..N）；文件缺失或无提案节返回空表。"""
+        """提案文件里的条目序号（1..N，跨原提案与同日复审节**连续编号**——
+        P:<file>:<index> 的唯一性依赖它；复审节从头重新打印的序号不采用）。
+        文件缺失或无提案节返回空表。"""
         p = self.root / rel
         if not p.is_file():
             return []
-        indices, in_section = [], False
+        indices, seq, in_section = [], 0, False
         for line in p.read_text(encoding="utf-8").splitlines():
             if line.startswith("## "):
-                in_section = line.startswith("## 提案")
+                head = line[3:].strip()
+                in_section = head.startswith("提案") or head.startswith("复审")
                 continue
             if in_section:
                 m = re.match(r"^(\d+)\.\s+\*\*\[", line)
                 if m:
-                    indices.append(int(m.group(1)))
+                    seq += 1
+                    indices.append(seq)
         return indices
 
     def _mark_proposal_settled(self, rel: str) -> bool:

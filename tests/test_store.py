@@ -501,13 +501,62 @@ def test_audit_reconciles_hand_stamped_settled_proposal(store: Store):
     assert store.db.exec_last_status()[f"P:{rel}:1"]["event"] == "executed"
 
 
-def test_audit_reconciles_untracked_findings_under_marker(store: Store):
+def test_untracked_findings_under_marker_stay_pending(store: Store, searcher):
+    """无任何记录的条目不补记（同日复审后无法区分新老）——保持待处理，
+    且未全部收口的文件撤标、检索解除隐身。"""
     rel = "curator/提案-20260925d.md"
     content = _proposal_markdown().replace(
         "**状态：待裁决**", "> 状态：已结案（agent 补标）")
     store.save(rel, content)
     r = store.audit()
-    assert r["reconciled_proposals"] == 2
-    last = store.db.exec_last_status()
-    assert last[f"P:{rel}:1"]["event"] == "executed"
-    assert last[f"P:{rel}:2"]["event"] == "executed"
+    assert r["reconciled_proposals"] == 0
+    assert r["unmarked_proposals"] == 1
+    assert store.db.exec_last_status().get(f"P:{rel}:1") is None
+    assert "已结案" not in (store.root / rel).read_text(encoding="utf-8")
+    assert any(h["path"] == rel for h in searcher.search("提案"))
+
+
+def test_unmarks_stale_marker_after_rereview_adds_findings(store: Store, searcher):
+    """同日复审追加新条目后，旧「已结案」标记失效：审计撤标 + 状态复位，
+    新条目保持待处理、检索解除隐身；老条目的事件不受影响。"""
+    rel = "curator/提案-20260925e.md"
+    store.save(rel, _proposal_markdown())
+    store.record_proposal_action(rel, 1, "adopted", type_="outdated", reason="a")
+    store.record_proposal_action(rel, 2, "adopted", type_="other", reason="b")
+    store.audit_exec_report(f"P:{rel}:1", "executed")
+    store.audit_exec_report(f"P:{rel}:2", "executed")
+    assert "已结案" in (store.root / rel).read_text(encoding="utf-8")
+
+    # 模拟 curator 同日复审追加 2 条新条目
+    p = store.root / rel
+    p.write_text(p.read_text(encoding="utf-8")
+                 + "\n---\n\n## 复审（2026-09-25 10:00）\n\n"
+                   "本次复审发现 2 条新问题，待裁决：\n"
+                   "1. **[low] other** — 新条目一\n   - 涉及: notes/a.md\n"
+                   "2. **[low] other** — 新条目二\n   - 涉及: notes/b.md\n",
+                 encoding="utf-8")
+
+    r = store.audit()
+    assert r["unmarked_proposals"] == 1
+    assert r["reconciled_proposals"] == 0
+    content = (store.root / rel).read_text(encoding="utf-8")
+    assert "已结案" not in content
+    assert "**状态：待裁决**" in content
+    # 多节连续编号：原 2 条 + 复审 2 条 → 1..4（复审条目无记录、不补记）
+    assert store._proposal_findings_indices(rel) == [1, 2, 3, 4]
+    assert store.db.exec_last_status().get(f"P:{rel}:3") is None
+    # 检索解除隐身（有待办的提案必须可见）
+    assert any(h["path"] == rel for h in searcher.search("提案"))
+
+
+def test_rereview_numbering_is_sequential_across_sections(store: Store):
+    """复审节打印序号从 1 重来，但全局序号必须跨节连续（P id 唯一性）。"""
+    rel = "curator/提案-20260925f.md"
+    store.save(rel, _proposal_markdown())
+    p = store.root / rel
+    p.write_text(p.read_text(encoding="utf-8")
+                 + "\n---\n\n## 复审（2026-09-25 11:00）\n\n"
+                   "本次复审发现 3 条新问题，待裁决：\n"
+                   "1. **[low] other** — 新一\n2. **[low] other** — 新二\n"
+                   "3. **[medium] stale-card** — 新三\n", encoding="utf-8")
+    assert store._proposal_findings_indices(rel) == [1, 2, 3, 4, 5]
