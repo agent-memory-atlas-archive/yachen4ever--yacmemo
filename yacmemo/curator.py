@@ -90,7 +90,17 @@ def build_material(store, max_chars_per_card: int = 2000) -> str:
     for t in topics:
         p = store.root / t["card"] if t["card"] else None
         if t["card"] and p and p.is_file():
-            body = p.read_text(encoding="utf-8")[:max_chars_per_card]
+            raw = p.read_text(encoding="utf-8")
+            if len(raw) > max_chars_per_card:
+                # 超长卡只送摘录——必须显式声明这是摘录而非笔记末尾，
+                # 否则 LLM 会把摘录边界误读成"卡片末尾截断/内容缺失"
+                # （2026-09-25 实爆：一次复审 6 条误报全是这个来源）
+                body = (raw[:max_chars_per_card]
+                        + f"\n\n（摘录说明：本卡全文共 {len(raw)} 字符，以上只是开头摘录，"
+                          "并非笔记末尾——禁止以「末尾截断/内容在'质量全'等词后被切断/"
+                          "缺失 META 或结尾」为由提案）")
+            else:
+                body = raw
             cards.append(f"## {t['title']}（{t['card']}）\n{body}")
     audit = store.audit()
     material = (
