@@ -185,41 +185,51 @@
             <n-text depth="3">当前筛选下没有提案条目。</n-text>
           </n-card>
 
-          <n-card v-for="p in proposals" :key="p.file" size="small"
-            :title="p.file + (proposalSettled(p) ? '　（已结案）' : '')">
-            <n-space vertical size="small">
-              <n-card v-for="f in filteredFindings(p)" :key="f.index" size="small"
-                :bordered="true" :class="{ 'finding-done': findingSettled(p, f) }">
-                <n-space vertical size="small">
-                  <n-space justify="space-between" align="center">
-                    <n-space align="center">
-                      <n-tag size="tiny" :type="f.severity === 'high' ? 'error' : f.severity === 'medium' ? 'warning' : 'default'">
-                        {{ f.severity }}
-                      </n-tag>
-                      <n-tag size="tiny">{{ f.type }}</n-tag>
-                      <n-tag size="tiny" :type="findingState(p, f).type">{{ findingState(p, f).label }}</n-tag>
-                    </n-space>
-                    <n-space v-if="findingDispatchable(p, f)">
-                      <n-button size="tiny" type="primary" secondary @click="copyExecInstruction(p, f)">复制执行指令</n-button>
-                      <n-button size="tiny" @click="judge(p, f, 'dismissed')">忽略</n-button>
-                    </n-space>
-                  </n-space>
-                  <n-text depth="2">{{ f.reason }}</n-text>
-                  <n-text v-if="f.paths.length" depth="3" style="font-size: 12px">
-                    涉及：{{ f.paths.join('、') }}
-                  </n-text>
-                  <n-text v-if="f.proposal" depth="3" style="font-size: 12px">建议：{{ f.proposal }}</n-text>
-                  <exec-timeline :issue-id="`P:${p.path}:${f.index}`" />
+          <!-- 两级结构：第一层提案（提案级状态汇总），点开是条目（条目级状态） -->
+          <n-collapse :expanded-names="expandedProposals"
+            @update:expanded-names="names => expandedProposals = names">
+            <n-collapse-item v-for="p in sortedProposals" :key="p.file" :name="p.path">
+              <template #header>
+                <n-space align="center" :size="10" wrap>
+                  <n-tag size="small" :type="proposalStatus(p).type">{{ proposalStatus(p).label }}</n-tag>
+                  <n-text strong>{{ p.file }}</n-text>
+                  <n-text depth="3" style="font-size: 12px">{{ proposalCountsLine(p) }}</n-text>
                 </n-space>
-              </n-card>
-              <n-text v-if="!p.findings.length" depth="3">本次提案无发现条目。</n-text>
-              <n-collapse>
-                <n-collapse-item title="提案原文" name="raw">
-                  <div class="markdown-body" v-html="renderMarkdown(p.content)" />
-                </n-collapse-item>
-              </n-collapse>
-            </n-space>
-          </n-card>
+              </template>
+              <n-space vertical size="small">
+                <n-card v-for="f in filteredFindings(p)" :key="f.index" size="small"
+                  :bordered="true" :class="{ 'finding-done': findingSettled(p, f) }">
+                  <n-space vertical size="small">
+                    <n-space justify="space-between" align="center">
+                      <n-space align="center">
+                        <n-tag size="tiny" :type="f.severity === 'high' ? 'error' : f.severity === 'medium' ? 'warning' : 'default'">
+                          {{ f.severity }}
+                        </n-tag>
+                        <n-tag size="tiny">{{ f.type }}</n-tag>
+                        <n-tag size="tiny" :type="findingState(p, f).type">{{ findingState(p, f).label }}</n-tag>
+                      </n-space>
+                      <n-space v-if="findingDispatchable(p, f)">
+                        <n-button size="tiny" type="primary" secondary @click="copyExecInstruction(p, f)">复制执行指令</n-button>
+                        <n-button size="tiny" @click="judge(p, f, 'dismissed')">忽略</n-button>
+                      </n-space>
+                    </n-space>
+                    <n-text depth="2">{{ f.reason }}</n-text>
+                    <n-text v-if="f.paths.length" depth="3" style="font-size: 12px">
+                      涉及：{{ f.paths.join('、') }}
+                    </n-text>
+                    <n-text v-if="f.proposal" depth="3" style="font-size: 12px">建议：{{ f.proposal }}</n-text>
+                    <exec-timeline :issue-id="`P:${p.path}:${f.index}`" />
+                  </n-space>
+                </n-card>
+                <n-text v-if="!p.findings.length" depth="3">本次提案无发现条目。</n-text>
+                <n-collapse>
+                  <n-collapse-item title="提案原文" name="raw">
+                    <div class="markdown-body" v-html="renderMarkdown(p.content)" />
+                  </n-collapse-item>
+                </n-collapse>
+              </n-space>
+            </n-collapse-item>
+          </n-collapse>
         </n-space>
       </n-tab-pane>
     </n-tabs>
@@ -429,8 +439,44 @@ function findingDispatchable(p, f) {
 function findingSettled(p, f) {
   return ['executed', 'dismissed'].includes(findingState(p, f).key)
 }
-function proposalSettled(p) {
-  return p.findings.length > 0 && p.findings.every(f => findingSettled(p, f))
+
+// ---- 提案级状态汇总（给"什么都不懂的用户"一眼看懂）----
+// 受阻 > 待处理（有等你决定的条目）> 执行中 > 已结案（全部收口）
+function proposalStatus(p) {
+  const keys = (p.findings || []).map(f => findingState(p, f).key)
+  if (!keys.length) return { key: 'empty', label: '无条目', type: 'default' }
+  if (keys.includes('blocked')) return { key: 'blocked', label: '受阻·需要你介入', type: 'error' }
+  if (keys.includes('pending') || keys.includes('adopted'))
+    return { key: 'attention', label: '待处理·等你决定', type: 'warning' }
+  if (keys.includes('executing')) return { key: 'executing', label: '执行中·agent 正在做', type: 'info' }
+  return { key: 'settled', label: '已结案·全部完成', type: 'success' }
+}
+function proposalCountsLine(p) {
+  const c = {}
+  for (const f of p.findings || []) {
+    const k = findingState(p, f).key
+    c[k] = (c[k] || 0) + 1
+  }
+  const order = [['pending', '待处理'], ['executing', '执行中'], ['blocked', '受阻'],
+                 ['executed', '已执行'], ['adopted', '已采纳·未执行'], ['dismissed', '已忽略']]
+  const parts = order.filter(([k]) => c[k]).map(([k, label]) => `${label} ${c[k]}`)
+  return parts.length ? parts.join(' · ') : '无条目'
+}
+const statusOrder = { blocked: 0, attention: 1, executing: 2, settled: 3, empty: 4 }
+const sortedProposals = computed(() =>
+  [...proposals.value].sort((a, b) => {
+    const d = statusOrder[proposalStatus(a).key] - statusOrder[proposalStatus(b).key]
+    return d !== 0 ? d : (a.file < b.file ? 1 : -1)
+  }))
+
+// 展开管理：默认展开"需要你关注"的提案，已结案折叠；按状态筛选时全展开
+// （watch 放在 proposalFilter 定义之后——见下方筛选块）
+const expandedProposals = ref([])
+function autoExpandProposals() {
+  const visible = sortedProposals.value.filter(p => filteredFindings(p).length)
+  expandedProposals.value = proposalFilter.value === 'all'
+    ? visible.filter(p => proposalStatus(p).key !== 'settled').map(p => p.path)
+    : visible.map(p => p.path)
 }
 
 // ---- 提案统计与筛选 ----
@@ -458,6 +504,7 @@ function filteredFindings(p) {
 }
 const visibleProposalCount = computed(() =>
   proposals.value.reduce((n, p) => n + filteredFindings(p).length, 0))
+watch(proposalFilter, autoExpandProposals)
 
 // ---- 判断与执行记录：人的处置 + agent 汇报合并按时间倒序 ----
 const combinedLog = computed(() => {
@@ -585,6 +632,7 @@ async function loadProposals() {
       loaded.push({ ...p, content: note.content, findings: parseFindings(note.content) })
     }
     proposals.value = loaded
+    autoExpandProposals()
   } catch (e) { /* */ }
 }
 async function reloadAll() {
