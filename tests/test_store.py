@@ -569,3 +569,57 @@ def test_topic_name_links_resolve(store: Store, searcher):
     # 相关笔记按主题名解析到卡
     rel = {x["title"]: x for x in store.read("notes/引用方")["related"]}
     assert rel["网络主题"]["path"] == "topics/网络主题/abstract.md"
+
+
+def test_settlement_cycle_with_rereview_and_old_session_agent(store: Store, searcher):
+    """全周期不变量（0.3.5/0.3.7 承诺，TeleAgent 实况回归）：
+    结案 → 同日复审追加（curator 即时撤标）→ 新条目可见待裁决 →
+    旧会话 agent（拿不到汇报工具）手工打标收尾 → 再收敛。每一步
+    对 WebUI 状态机与检索的可见性都必须正确。"""
+    rel = "curator/提案-20260925g.md"
+    store.save(rel, _proposal_markdown())
+    # 轮 1：全部采纳+执行 → 自动打标、检索隐身
+    for i, t in [(1, "outdated"), (2, "other")]:
+        store.record_proposal_action(rel, i, "adopted", type_=t, reason=f"条目{i}")
+    for i in (1, 2):
+        store.audit_exec_report(f"P:{rel}:{i}", "executed")
+    store.audit()
+    assert "已结案" in (store.root / rel).read_text(encoding="utf-8")
+    assert not any(h["path"] == rel for h in searcher.search("提案"))
+
+    # 轮 2：同日复审追加新条目（curator 钩子即时撤标 + 状态复位）
+    p = store.root / rel
+    lines = [ln for ln in p.read_text(encoding="utf-8").splitlines()
+             if "已结案" not in ln]
+    content = ("\n".join(lines) + "\n").replace(
+        "**状态：已结案**", "**状态：待裁决**", 1)
+    content += ("\n---\n\n## 复审（2026-09-25 10:00）\n\n"
+                "本次复审发现 1 条新问题，待裁决：\n"
+                "1. **[low] other** — 复审新条目\n   - 涉及: notes/a.md\n")
+    p.write_text(content, encoding="utf-8")
+    store.audit()
+    # 新条目可见待裁决（全局序号 3）
+    assert store.db.exec_last_status().get(f"P:{rel}:3") is None
+    assert any(h["path"] == rel for h in searcher.search("提案"))
+
+    # 轮 3：旧会话 agent（无 memory_audit_update）手工打标收尾
+    lines = p.read_text(encoding="utf-8").splitlines()
+    content = "\n".join(
+        [lines[0], "", "> 状态：已结案 —— 复审条目已由用户裁决处置"]
+        + lines[1:]) + "\n"
+    p.write_text(content, encoding="utf-8")
+    r2 = store.audit()
+    assert r2["reconciled_proposals"] == 1   # 全局序号 3 补记
+    assert "已结案" in p.read_text(encoding="utf-8")
+    assert not any(h["path"] == rel for h in searcher.search("提案"))
+    # 幂等
+    assert store.audit()["reconciled_proposals"] == 0
+
+
+def test_write_echoes_new_collisions(store):
+    """写时撞车必须即时回显（agent 不该等审计才知道制造了 D2）。"""
+    store.write("notes/撞车甲", "# 撞车甲\n\n- [配置] yacmemo 服务端口是 9721\n")
+    r = store.write("notes/撞车乙", "# 撞车乙\n\n- [配置] yacmemo 服务端口是 9721\n")
+    assert r["new_collisions"], "写响应必须带回新撞车"
+    assert any(c["with_path"] == "notes/撞车甲.md" for c in r["new_collisions"])
+    assert r["new_collisions"][0]["text"] == "yacmemo 服务端口是 9721"

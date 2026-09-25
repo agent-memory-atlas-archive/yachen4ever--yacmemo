@@ -105,3 +105,19 @@ def test_cleanup_audit_snapshots_retention(tstore: Store):
     assert (audit_dir / "说明文档.md").exists()  # 无法判日期的文件不动
 
     assert cleanup_audit_snapshots(tstore, 0) == 0  # 0 = 永不清理
+
+
+def test_build_material_marks_long_card_excerpt(store: Store):
+    """超长卡进审查材料时必须显式标注摘录边界——否则 LLM 把截断处
+    误读为"卡片末尾截断/缺 META"，产生成批误报提案
+    （2026-09-25 实爆：一次复审 6 条误报全是这个来源）。"""
+    from yacmemo.curator import build_material
+
+    store.topic_register("长卡主题", description="长卡测试")
+    store.save("topics/长卡主题/abstract.md",
+               "# 长卡主题\n\n" + "内容行，用于撑满摘录上限。\n" * 450)
+    store.topic_register("短卡主题", description="短卡测试")
+    m = build_material(store)
+    assert "摘录说明" in m and "并非笔记末尾" in m
+    # 短卡不打标
+    assert m.count("摘录说明") == 1

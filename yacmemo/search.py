@@ -30,8 +30,6 @@ class Searcher:
         self.db = db
         self.emb = emb
         self.vectors = vectors
-        # 已结案提案只翻一次方向（单向状态），正结果可安全缓存
-        self._settled_cache: set[str] = set()
         # 最近一次 search() 的补充说明（向量通道降级 / 短查询提示）
         self.last_notice: str | None = None
 
@@ -103,7 +101,8 @@ class Searcher:
     def _drop_settled_proposals(self, results: list[dict]) -> list[dict]:
         """已结案提案（全部条目执行/忽略）默认不对 agent 可见：
         文件头部有已结案标记的 curator/ 报告从结果中隐去——执行类工作
-        不该被重复派发；显式 memory_read 仍可读（那是明确查阅）。"""
+        不该被重复派发；显式 memory_read 仍可读（那是明确查阅）。
+        注意结案不是单向状态（复审撤标后回到未结案），不做正结果缓存。"""
         kept, dropped = [], 0
         for r in results:
             if r["path"].startswith("curator/") and self._is_settled(r["path"]):
@@ -116,13 +115,8 @@ class Searcher:
         return kept
 
     def _is_settled(self, path: str) -> bool:
-        if path in self._settled_cache:
-            return True
         body = self.db.fts_body(path)
-        if body and PROPOSAL_SETTLED_MARKER in body:
-            self._settled_cache.add(path)
-            return True
-        return False
+        return bool(body) and PROPOSAL_SETTLED_MARKER in body
 
     def _rrf(self, channels: list[list[dict]], limit: int) -> list[dict]:
         k = self.config.search.rrf_k

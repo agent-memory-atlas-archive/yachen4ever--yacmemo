@@ -241,6 +241,7 @@ import {
 } from 'naive-ui'
 import { marked } from 'marked'
 import { api, params } from '../composables/api.js'
+import { parseFindings } from '../composables/proposal-parse.js'
 
 const props = defineProps({ user: String })
 const message = useMessage()
@@ -562,47 +563,6 @@ const combinedLog = computed(() => {
 
 const lastAuditTime = computed(() => lastAuditTs.value
   ? new Date(lastAuditTs.value * 1000).toLocaleString('zh-CN', { hour12: false }) : '')
-
-function parseFindings(markdown) {
-  const lines = (markdown || '').split('\n')
-  const findings = []
-  let cur = null
-  let seq = 0
-  let section = ''
-  for (const line of lines) {
-    if (line.startsWith('## ')) {
-      // 提案节与同日复审节都含条目；复审节从头重新打印序号，
-      // 全局序号在这里连续重编（与后端 P:<file>:<index> 同口径）
-      const head = line.slice(3).trim()
-      section = head.startsWith('提案') || head.startsWith('复审') ? head : ''
-      continue
-    }
-    if (!section || line.startsWith('> ')) continue
-    // 类型名可含连字符（stale-card 等）——与后端条目解析同口径，
-    // 只要求 "N. **[" 前缀，severity/type 尽力提取
-    const m = line.match(/^(\d+)\.\s+\*\*\[(\w+)\]\s+([\w-]+)\*\*\s*[—-]\s*(.*)$/)
-      || line.match(/^(\d+)\.\s+\*\*(.+?)\*\*\s*[—-]\s*(.*)$/)
-    if (m) {
-      seq += 1
-      const review = section.startsWith('复审') ? section : ''
-      if (m.length === 5) {
-        cur = { index: seq, review, severity: m[2], type: m[3], reason: m[4], paths: [], proposal: '' }
-      } else {
-        const inner = m[2].match(/\[(\w+)\]\s*([\w-]+)/)
-        cur = { index: seq, review, severity: inner?.[1] || 'other', type: inner?.[2] || 'other',
-                reason: m[3], paths: [], proposal: '' }
-      }
-      findings.push(cur)
-      continue
-    }
-    if (!cur) continue
-    const p = line.match(/^\s+-\s+涉及:\s+(.*)$/)
-    if (p) cur.paths.push(p[1])
-    const s = line.match(/^\s+-\s+建议:\s+(.*)$/)
-    if (s) cur.proposal = s[1]
-  }
-  return findings
-}
 
 function fmtSize(n) { return n > 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B` }
 function fmtRunName(file) {
