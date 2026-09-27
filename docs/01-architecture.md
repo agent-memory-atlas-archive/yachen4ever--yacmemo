@@ -234,7 +234,7 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 |---|---|---|
 | `memory_search` | `query, limit=10, kind="hybrid"\|"fts"\|"vector"` | 双路 RRF 融合 + 撞车标注内联；<3 字查询走 LIKE 回退，向量通道故障附降级提示 |
 | `memory_read` | `path_or_title` | 正文 + 1-hop 相关笔记 |
-| `memory_write` | `title, content, force=false, force_confirm=false` | **主题硬拦截**（未注册主题覆盖的路径拒写，force 不豁免，见 6.1）+ **近重名拦截**（含两级 force 确认）；写入即同步索引 |
+| `memory_write` | `title, content, force=false, force_confirm=false` | **主题硬拦截**（未注册主题覆盖的路径拒写，force 不豁免，见 6.1）+ **同名只创建拦截**（目标已存在直接拒绝，含 journal/，force 不豁免，0.3.12）+ **近重名拦截**（含两级 force 确认）；写入即同步索引 |
 | `memory_edit` | `path, old_string, new_string` | **锚点唯一性强制**：找不到/命中多处 → 拒绝并列出候选位置 |
 | `memory_edit_section` | `path, heading, new_content` | 按 `##` 标题段替换 |
 | `memory_move` | `path, new_path` | 移动 + 全库索引随路径更新（[[链接]] 按标题解析，移动不改标题故无需改写链接）；**目标路径同样受主题硬拦截**（移入免注册区放行） |
@@ -269,7 +269,14 @@ memory_write(title, content):
            新主题先 topic_register 注册（仅用户明确要求），
            模块笔记写入 topics/<主题>/ 下；免注册区不受限。"
 
-    # 第二道：近似标题守卫
+    # 第二道：同名只创建拦截（0.3.12 增补，force 不豁免）
+    if rel 已存在:
+        return 拒绝:
+          "已存在，memory_write 只创建不覆盖。
+           更新用 memory_edit / memory_edit_section；
+           整篇重建先 memory_delete（仅用户明确要求时）。"
+
+    # 第三道：近似标题守卫
     normalized = normalize(title)          # 小写、去标点空白、
                                            # 剥离日期串、"-2"/"(新)"/"更新" 等后缀
     for existing in all_titles:

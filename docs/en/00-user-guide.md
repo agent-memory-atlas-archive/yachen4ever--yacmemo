@@ -228,7 +228,7 @@ root = "/srv/yacmemo/user2/memory"
 
 Open `http://debsvc.local:9721/ui/` in a browser (bundled with the server, nothing to install):
 
-- **Notes**: browse by user in the left-hand list; the body renders as markdown; "Edit" modifies the source file directly and syncs the index; "＋" creates a new note (the near-duplicate-title guard applies here too; if rejected, tick "Force" and save again — clicking the button on the web page counts as the human confirmation); "Delete" also cleans the index (still recoverable from git);
+- **Notes**: browse by user in the left-hand list; the body renders as markdown; "Edit" modifies the source file directly and syncs the index; "＋" creates a new note (the near-duplicate-title guard applies here too; if rejected, tick "Force" and save again — clicking the button on the web page counts as the human confirmation; **a note whose title is exactly identical to an existing one is always refused** — update it via "Edit" instead, `force` does not override this); "Delete" also cleans the index (still recoverable from git);
 - **Search**: manually verify retrieval quality anytime; supports switching between the hybrid/fts/vector channels; ⚠ markers are directly visible; clicking a result jumps to the note;
 - **Audit**: dual mode — "Deterministic Audit" for quick self-healing + rule detection (duplicate titles/semantic collisions/dangling links/stray files), "Deep Review" produces a proposal report from the configured LLM; both areas run the full workflow: each issue/proposal carries a status tag (pending/executing/executed/verified/dismissed), filters by status, and an expandable agent execution timeline; a human makes exactly two judgments — "Ignore" a false positive, or "Copy Execution Instruction" to dispatch an agent; issues an agent fixed are verified automatically on the next audit;
 - **Usage Log**: a usage log of every MCP tool call **and every WebUI console change** (save/create/delete/profile edits, client marked as `webui`) — time, user, tool, content summary, client UA, IP, duration, pre-change content hash. The most important page to watch during the trial period: which clients are active, what they called, what they wrote, whether anything errored;
@@ -245,6 +245,9 @@ For a full description of page functions and APIs, see [07-webui.md](07-webui.md
 
 **Q: The agent's note write was rejected, saying "a note with a near-duplicate title already exists"?**
 This is not a malfunction — it's the anti-duplication mechanism doing its job. It means memory already contains a note on the same topic — have the agent "update it" instead of creating a new one. If you're confident it's a different topic, the agent can override with `force=true` (more than 3 forces within 24 hours triggers a second confirmation; all countable audit metrics).
+
+**Q: The agent's note write was rejected, saying the note already exists ("memory_write is create-only")?**
+That is the same-name block (0.3.12): creating a note whose title is exactly identical to an existing one is always refused, even with `force` — this prevents silent overwrites from losing content. Have the agent update it in place with edit; to rebuild the whole note, delete first, then create (history stays recoverable in git).
 
 **Q: What does the ⚠ in search results mean?**
 "This note and another one may be talking about the same thing." Just have the agent read both and merge. The system never deletes on its own — it would rather make you take an extra look than let a correct memory disappear.

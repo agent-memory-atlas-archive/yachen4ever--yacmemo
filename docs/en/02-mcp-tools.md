@@ -88,6 +88,8 @@ memory_write(title: str, content: str, force: bool = False,
 
 Creates a new note. `title` may include a directory prefix; **within a topic directory, write as `topics/<topic>/<note-name>`** (a missing `topics/` prefix is hard-blocked by the topic registry, and the block message provides the corrected title). The directory is only for archiving; **the note's title is the topic name with the directory stripped**. Filenames are sanitized by replacing illegal characters (`\ / : * ? " < > |`).
 
+**Create-only, never overwrite** (added 0.3.12; `force` not exempt): if the target path already exists (same rule for topics/, journal/ and archive/), the write is refused and the existing note is left untouched — update via `memory_edit` / `memory_edit_section`; to rebuild an entire note, `memory_delete` first (only at the user's explicit request). The same-name block runs **before** the near-duplicate title guard: the exact match is excluded from near-duplicate candidates by `exclude_path`, so without this block the message would only point at `-2`-style near-duplicates and miss the truly identically-named note.
+
 **Topic hard block** (added 2026-09-17; force is not exempt): the write path must be covered by some registered topic — i.e. located under the directory containing a registered topic's card/related notes (one directory per topic; the directory is the membership) — otherwise refused:
 
 ```
@@ -154,6 +156,7 @@ Replaces an entire section matched by a `##` or deeper heading: the heading line
 
 - Heading does not exist → refused, listing **all existing section names**;
 - Multiple hits on the same heading name → refused with line numbers listed;
+- A leading heading line in `new_content` identical (same level and text) to the target heading → stripped automatically (the heading line is kept by the tool); deeper or differently-named sub-headings are legitimate content and are not touched;
 - Level-1 headings (`# Note title`) are unavailable — that is the note itself; use `memory_edit`.
 
 Suits rewriting a whole passage in one go (e.g. swapping out the entire "## Deployment steps"); more efficient than multiple `memory_edit` calls.

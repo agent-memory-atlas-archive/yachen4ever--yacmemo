@@ -43,7 +43,7 @@ We then gave up on building from scratch and adopted BM + a bolt-on — and even
 Building our own is not a return to v1: it keeps only the parts proven valuable, and gains two capabilities neither BM nor BM-plus-bolt-on could deliver:
 
 1. **Unified retrieval with Chinese as a first-class citizen**: a single hybrid search of FTS5 trigram + Qwen3-Embedding, no longer two retrieval tools of inconsistent quality;
-2. **API-level consistency enforcement**: `memory_write` refuses near-duplicate titles and `memory_edit` enforces unique anchors — conventions are probabilistic; an API refusal is certain.
+2. **API-level consistency enforcement**: `memory_write` refuses same-name overwrites (create-only), near-duplicate titles, and `memory_edit` enforces unique anchors — conventions are probabilistic; an API refusal is certain.
 
 ---
 
@@ -234,7 +234,7 @@ Beyond the body, `memory_read` also returns "related notes": `[[链接]]` target
 |---|---|---|
 | `memory_search` | `query, limit=10, kind="hybrid"\|"fts"\|"vector"` | Two-channel RRF fusion + inline collision annotation; queries under 3 characters fall back to LIKE; a degraded-mode notice is attached when the vector channel fails |
 | `memory_read` | `path_or_title` | Body + 1-hop related notes |
-| `memory_write` | `title, content, force=false, force_confirm=false` | **Topic hard block** (paths not covered by any registered topic are refused; force does not exempt, see 6.1) + **near-duplicate title block** (with two-level force confirmation); indexing runs synchronously on write |
+| `memory_write` | `title, content, force=false, force_confirm=false` | **Topic hard block** (paths not covered by any registered topic are refused; force does not exempt, see 6.1) + **same-name create-only block** (an existing target is refused outright, incl. journal/, force does not exempt, 0.3.12) + **near-duplicate title block** (with two-level force confirmation); indexing runs synchronously on write |
 | `memory_edit` | `path, old_string, new_string` | **Anchor uniqueness enforcement**: not found / multiple matches → refuse and list candidate locations |
 | `memory_edit_section` | `path, heading, new_content` | Replace a whole section by its `##` heading |
 | `memory_move` | `path, new_path` | Move + store-wide index updated to follow the path ([[链接]] resolves by title; moving does not change titles, so links need no rewriting); **the target path is subject to the same topic hard block** (moves into registry-free zones are allowed) |
@@ -269,7 +269,14 @@ memory_write(title, content):
            新主题先 topic_register 注册（仅用户明确要求），
            模块笔记写入 topics/<主题>/ 下；免注册区不受限。"
 
-    # 第二道：近似标题守卫
+    # 第二道：同名只创建拦截（0.3.12 增补，force 不豁免）
+    if rel 已存在:
+        return 拒绝:
+          "已存在，memory_write 只创建不覆盖。
+           更新用 memory_edit / memory_edit_section；
+           整篇重建先 memory_delete（仅用户明确要求时）。"
+
+    # 第三道：近似标题守卫
     normalized = normalize(title)          # 小写、去标点空白、
                                            # 剥离日期串、"-2"/"(新)"/"更新" 等后缀
     for existing in all_titles:

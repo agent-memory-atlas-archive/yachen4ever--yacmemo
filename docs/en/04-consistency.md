@@ -20,9 +20,9 @@ The root of memory rot is that **conventions are probabilistic**: no matter how 
 
 | Tool | Enforced behavior |
 |---|---|
-| `memory_write` | Normalized-title fuzzy comparison ≥ 0.85 → refuse creation and point to `memory_edit` instead; journal/ exempt |
+| `memory_write` | Refused outright if the target path already exists (create-only across all zones incl. journal/, `force` not exempt); normalized-title fuzzy comparison ≥ 0.85 → refuse creation and point to `memory_edit` instead (journal/ exempt from the fuzzy check) |
 | `memory_edit` | `old_string` must exist and be unique, otherwise refuse and list the hit line numbers |
-| `memory_edit_section` | The section heading must exist and be unique, otherwise list available sections/line numbers |
+| `memory_edit_section` | The section heading must exist and be unique, otherwise list available sections/line numbers; a leading heading line in `new_content` identical to the target heading is stripped automatically |
 | `memory_move` | Refuse if the target already exists |
 
 Rejection messages are all executable next-step instructions; the agent can self-correct as soon as it receives one.

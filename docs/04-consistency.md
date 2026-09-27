@@ -20,9 +20,9 @@
 
 | 工具 | 强制行为 |
 |---|---|
-| `memory_write` | 归一化标题模糊比对 ≥ 0.85 → 拒绝新建，提示改用 `memory_edit`；journal/ 豁免 |
+| `memory_write` | 目标已存在直接拒绝（全区只创建不覆盖，含 journal/，force 不豁免）；归一化标题模糊比对 ≥ 0.85 → 拒绝新建，提示改用 `memory_edit`（journal/ 豁免近似比对） |
 | `memory_edit` | `old_string` 必须存在且唯一，否则拒绝并列出命中行号 |
-| `memory_edit_section` | 小节标题必须存在且唯一，否则列出可用小节/行号 |
+| `memory_edit_section` | 小节标题必须存在且唯一，否则列出可用小节/行号；new_content 自带同级同名标题行自动剥除 |
 | `memory_move` | 目标已存在拒绝 |
 
 拒绝消息都是可执行的下一步指令，agent 拿到即能自纠。
