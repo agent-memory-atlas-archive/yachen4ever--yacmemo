@@ -194,3 +194,26 @@ def test_topic_tags_roundtrip(store: Store):
     # TOPICS.md 事实源：标签行落在注册表文件里
     raw = (store.root / "TOPICS.md").read_text(encoding="utf-8")
     assert "- 标签: 工作" in raw
+
+
+def test_topic_status_updates_registry_line(store: Store):
+    """topic_status 就地更新注册表现状行（卡/标签行顺序保留）；
+    空描述拒绝；未知主题拒绝；注册时快照漂移问题自此有修复通道。"""
+    store.topic_register("状态测试", description="注册时的旧描述")
+    assert "注册时的旧描述" in (store.root / "TOPICS.md").read_text(encoding="utf-8")
+
+    r = store.topic_status("状态测试", "Phase 1 client 阶段（现状一句话）")
+    assert r["status"].startswith("Phase 1")
+    raw = (store.root / "TOPICS.md").read_text(encoding="utf-8")
+    assert "注册时的旧描述" not in raw
+    assert "Phase 1 client 阶段（现状一句话）" in raw
+    # 卡行仍在且顺序在现状行之前
+    lines = [ln for ln in raw.splitlines() if ln.startswith("- ") and "状态测试" not in ln]
+    assert lines[0].startswith("- 卡:")
+    # 主题文件不动
+    assert (store.root / "topics/状态测试/abstract.md").is_file()
+
+    with pytest.raises(Exception, match="不能为空"):
+        store.topic_status("状态测试", "  ")
+    with pytest.raises(Exception, match="注册表中没有主题"):
+        store.topic_status("不存在的主题", "x")

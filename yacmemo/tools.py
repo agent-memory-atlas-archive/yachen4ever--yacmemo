@@ -497,6 +497,30 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             return "\n".join(lines)
 
     @mcp.tool()
+    def topic_status(title: str, status: str, ctx: Context = None) -> str:
+        """更新注册表该主题的「现状」一行（一句话定位，非进度流水）。
+
+        abstract 卡的现状变化后，用本工具同步注册表现状行——两层各一句
+        话，都不复制细节。不要把阶段流水/commit/日期塞进来。
+
+        Args:
+            title: 主题名
+            status: 新的一句话现状
+        """
+        out = {"ok": True, "error": ""}
+        with _logged("topic_status", ctx,
+                     summarize_args("topic_status", locals()), out):
+            try:
+                r = store.topic_status(title, status)
+            except StoreError as e:
+                return f"{e}"
+            except Exception as e:
+                out["ok"], out["error"] = False, str(e)
+                return f"更新现状失败: {e}"
+        return (f"已更新「{r['title']}」注册表现状：{r['status']}\n"
+                f"abstract 卡的现状若也已变化，请一并 memory_edit 同步。")
+
+    @mcp.tool()
     def topic_tag(title: str, add: str = "", remove: str = "",
                   ctx: Context = None) -> str:
         """为主题增删标签（轻量可逆元数据，0-多个）。优先复用已有标签，

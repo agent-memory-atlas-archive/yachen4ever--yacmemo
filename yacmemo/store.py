@@ -782,6 +782,37 @@ class Store:
         self.snapshots.commit(
             f"topic: tags {title} → {', '.join(tags) or '（清空）'}")
 
+    def topic_status(self, title: str, status: str) -> dict:
+        """更新注册表该主题的 `- 现状:` 行（一句话定位，非阶段流水）。
+        abstract 现状变化时由 agent 同步调用——注册表与卡片两层各自
+        一句话，都不复制细节。"""
+        status = status.strip()
+        if not status:
+            raise StoreError("现状描述不能为空（一句话定位，不是进度流水）。")
+        tmap = {t["title"]: t for t in self.load_topics()}
+        if title not in tmap:
+            known = "、".join(tmap) or "（空）"
+            raise StoreError(f"注册表中没有主题: {title}。现有主题: {known}")
+        p = self.topics_file()
+        lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+        start = next((i for i, ln in enumerate(lines)
+                      if ln.rstrip("\r\n") == f"## {title}"), None)
+        if start is None:
+            raise StoreError(f"注册表中没有主题块: {title}")
+        end = next((i for i in range(start + 1, len(lines))
+                    if lines[i].startswith("## ")), len(lines))
+        block = [ln for ln in lines[start + 1:end]
+                 if not re.match(r"^-\s*现状:", ln)]
+        pos = next((k for k, ln in enumerate(block)
+                    if ln.startswith("- 卡:") or ln.startswith("- 标签:")), -1)
+        block.insert(pos + 1, f"- 现状: {status}\n")
+        p.write_text("".join(lines[:start + 1] + block + lines[end:]),
+                     encoding="utf-8")
+        self._index_note(TOPICS_FILE, "主题记忆注册表",
+                         p.read_text(encoding="utf-8"))
+        self.snapshots.commit(f"topic: status {title}")
+        return {"title": title, "status": status}
+
     def topic_tag(self, title: str, add: str = "", remove: str = "") -> dict:
         """为主题增删标签（幂等，轻量可逆元数据）。返回该主题标签与
         全库标签清单——引导 agent 优先复用已有标签，避免同义词蔓延。"""

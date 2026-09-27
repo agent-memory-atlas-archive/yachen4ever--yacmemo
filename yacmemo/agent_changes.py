@@ -12,10 +12,17 @@ integration_check(onboarded_version=...) 获取增量变更与最新写入约定
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.3.9"
+AGENT_CONTRACT_VERSION = "0.3.10"
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.10": (
+        "- 新增 topic_status(title, status)：更新注册表该主题的「现状」行"
+        "（一句话定位，非进度流水）。abstract 卡现状变化后用它同步注册表，"
+        "两层各一句话、都不复制细节——不要再让注册表现状停留在注册时快照；
+"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.9": (
         "- 新增 archive_note(path, reason) / unarchive_note(path)：归档/取消"
         "归档主题内的单篇笔记（移入/移出 archive/<主题名>/）。abstract 不可"
