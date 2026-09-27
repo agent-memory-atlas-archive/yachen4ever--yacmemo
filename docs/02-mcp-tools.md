@@ -223,6 +223,7 @@ memory_list(path: str = "", sort: str = "name") -> str
 归档主题内单篇笔记？    → archive_note（abstract 不可单独归档）
 取消单篇归档？          → unarchive_note
 要给主题归类打标？      → topic_tag（优先复用响应里的全库标签清单）
+abstract 现状变了？     → topic_status 同步注册表现状行（一句话定位）
 ```
 
 
@@ -270,6 +271,14 @@ topic_tag(title: str, add: str = "", remove: str = "") -> str
 - `add` / `remove` 均为逗号分隔的标签列表（支持中文逗号），可同时使用；
 - 响应自带**全库标签清单**——打标签优先复用已有标签，避免同义词蔓延；
 - 用户没让就不主动批量打标；标签不影响 memory_search 的内容检索。
+
+## 10.6 topic_status
+
+```
+topic_status(title: str, status: str) -> str
+```
+
+更新注册表该主题的 `- 现状:` 行（契约 0.3.10）。注册表现状是 topic_register 时的描述快照，abstract 卡现状变化后用它同步——两层各一句话定位，都不复制细节（进度流水/commit/日期一律进 abstract 或 repo）。
 
 ## 11. topic_unregister
 

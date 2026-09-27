@@ -245,6 +245,7 @@ Beyond the body, `memory_read` also returns "related notes": `[[链接]]` target
 | `topic_list` | `tag` | List active/archived topics (grouped, with tags; filterable by tag) |
 | `topic_register` | `title, description, related` | Registers a new topic (**only when the user explicitly asks**), creating topics/<主题>/abstract.md |
 | `topic_tag` | `title, add, remove` | Add/remove topic tags (lightweight reversible; response carries the full tag inventory) |
+| `topic_status` | `title, status` | Update the registry status line (sync after abstract changes) |
 | `topic_unregister` | `title` | Unregisters a topic (**only when the user explicitly asks**; only removed from the registry, notes untouched, adjudicated once stray) |
 | `archive_topic` | `title` | Archives a topic (**only when the user explicitly asks**): the entire topic directory moves into archive/ (card paths rewritten in sync); retrieval keeps working, context no longer injects it |
 | `get_user_preference` | `section=""` | Reads the full profile & preferences or a specified section (PROFILE.md feature layer) |

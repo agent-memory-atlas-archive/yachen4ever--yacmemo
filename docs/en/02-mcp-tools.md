@@ -223,6 +223,7 @@ Fixing an audit issue?       → memory_audit_update to report progress (executi
 Archive one note in a topic? → archive_note (the abstract cannot be archived alone)
 Unarchive a single note?     → unarchive_note
 Categorizing a topic?        → topic_tag (prefer reusing tags from the response's inventory)
+Abstract status changed?     → topic_status to sync the registry status line (one-sentence positioning)
 ```
 
 
@@ -269,6 +270,14 @@ Adds/removes tags on a topic (contract 0.3.8). Tags are lightweight reversible m
 - `add` / `remove` are comma-separated tag lists (Chinese commas tolerated), usable together;
 - The response carries the **full tag inventory** — prefer reusing existing tags to avoid synonym sprawl;
 - Unprompted batch-tagging is against convention; tags do not affect memory_search content retrieval.
+
+## 10.6 topic_status
+
+```
+topic_status(title: str, status: str) -> str
+```
+
+Updates a topic's `- 现状:` registry line (contract 0.3.10). The registry status is the description snapshot taken at topic_register time; sync it with topic_status whenever the abstract's status changes — one sentence each, no detail duplication (progress logs / commits / dates go into the abstract or the repo).
 
 ## 11. topic_unregister
 
