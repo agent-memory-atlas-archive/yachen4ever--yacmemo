@@ -5,17 +5,53 @@
 integration_check(onboarded_version=...) 获取增量变更与最新写入约定，
 自主刷新本地提示词。
 
-契约版本只在 agent 可感知的行为变化（工具语义、返回文案、写入约定）时
-前进，独立于包版本；数值上当前与包版本保持一致。改这里的行为约定时，
-务必同步追加 AGENT_CHANGELOG 条目并前进版本号。
+版本号一元化：契约版本 = 发包版本 = pyproject.toml 的 project.version
+（本模块经 _package_version() 读取，是唯一的版本事实源）。每次发包都
+前进版本号并同步追加 AGENT_CHANGELOG 条目——含 agent 可感知变化时写清
+增量，纯发包时一句「无 agent 可感知语义变化」即可；test_agent_changes
+守卫版本与 changelog 头条一致，脱钩会红。
 """
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.3.12"
+import importlib.metadata
+import tomllib
+from pathlib import Path
+
+
+def _package_version() -> str:
+    """发包版本 = pyproject.toml 的 project.version（唯一版本事实源）。
+
+    源码 checkout（含 editable 部署）直接读仓库根的 pyproject.toml——
+    永远与 checkout 同步，不受安装元数据滞后影响；wheel 安装（无
+    pyproject）回退 importlib.metadata。两者都失败按 0.0.0 处理，
+    测试会点名，不让版本脱钩静默发生。"""
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            with pyproject.open("rb") as f:
+                v = tomllib.load(f)["project"]["version"]
+            if v:
+                return str(v)
+        except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError):
+            pass
+    try:
+        return importlib.metadata.version("yacmemo")
+    except importlib.metadata.PackageNotFoundError:
+        return "0.0.0"
+
+
+AGENT_CONTRACT_VERSION = _package_version()
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.13": (
+        "- 无 agent 可感知语义变化——发包版本号追平（pyproject 0.3.10→0.3.13，"
+        "含 obs 解析器 wiki-link 误判修复 8d98358 的部署）；agent 侧约定与 "
+        "0.3.12 完全一致；\n"
+        "- 版本号自此一元化：契约号即发包版本（pyproject 唯一事实源），"
+        "每次发包都前进版本号，无语义变化时本 changelog 只记一笔说明。"
+    ),
     "0.3.12": (
         "- memory_write 全区只创建不覆盖：目标路径已存在（含 journal/）直接"
         "拒绝，force 不豁免——更新一律 memory_edit / memory_edit_section；"

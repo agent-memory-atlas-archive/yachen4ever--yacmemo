@@ -10,6 +10,17 @@ from yacmemo.agent_changes import (
 )
 
 
+def test_contract_version_is_package_version():
+    """版本号一元化：契约号必须等于 pyproject 的 project.version——
+    版本唯一事实源，发包即前进，不许两处漂移。"""
+    import tomllib
+    from pathlib import Path
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    v = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    assert AGENT_CONTRACT_VERSION == v
+    assert AGENT_CONTRACT_VERSION != "0.0.0"
+
+
 def test_changelog_head_matches_contract_version():
     """变更记录的最新条目必须是当前契约版本——改契约必追加条目并前进版本。"""
     assert AGENT_CHANGELOG
