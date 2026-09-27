@@ -12,10 +12,17 @@ integration_check(onboarded_version=...) 获取增量变更与最新写入约定
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.3.10"
+AGENT_CONTRACT_VERSION = "0.3.11"
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.11": (
+        "- 主题标签定义收紧（AI VTuber 调研主题挂 6 个关键词标签的实爆）："
+        "标签=视角归类（如 工作/开发/生活 这类少量稳定类别），一般 1–2 个；"
+        "不是关键词/主题名/项目名/状态——那些交给检索和 META triggers；"
+        "超出的标签请建议用户清理；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.10": (
         "- 新增 topic_status(title, status)：更新注册表该主题的「现状」行"
         "（一句话定位，非进度流水）。abstract 卡现状变化后用它同步注册表，"
@@ -164,6 +171,8 @@ AGENT_CONTRACT_DIGEST = (
     "（agents/ 另有 identity 专属守卫）；\n"
     "- 审计问题执行：修复时用 memory_audit_update 汇报进度"
     "（executing / progress / executed / blocked），复审由审计自动确认；\n"
+    "- 主题标签=视角归类（如 工作/开发/生活），一般 1–2 个；不是关键词/"
+    "主题名/状态——打标用 topic_tag 且优先复用已有标签，用户没让不批量打；\n"
     "- topic_register / topic_unregister / archive_topic / memory_delete"
     " 仅在用户明确要求时调用。\n"
     "完整规格：docs/09-agent-onboarding.md 与 docs/02-mcp-tools.md。"

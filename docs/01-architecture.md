@@ -367,6 +367,7 @@ memory_write / memory_edit 完成 embedding 后：
 13. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 审计与提案：
 14. 执行审计问题（memory_audit 发现的、或 WebUI 执行指令派下的）时用 memory_audit_update 汇报：executing 接手 → progress 过程 → executed 完成（附摘要）/ blocked 受阻；复审由审计自动确认，不要声称"已验证"、不要代替人忽略。
+15. 主题标签=视角归类（如 工作/开发/生活），一般 1–2 个；不是关键词/主题名/状态。打标用 topic_tag 并优先复用已有标签；abstract 现状变化用 topic_status 同步注册表现状行。
 15. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读。
 ```
 
