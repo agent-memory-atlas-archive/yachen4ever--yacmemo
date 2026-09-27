@@ -85,6 +85,25 @@ def test_parse_observations():
     assert obs[1]["text"].endswith("#重要")
 
 
+def test_parse_observations_wiki_link_bullet_is_not_observation():
+    """`- [[链接]] 说明` 是普通 wiki-link 列表行，不是 observation——
+    `[[` 曾被当成类别括号开口，文本劈成 "] — …" 碎片，相同碎片跨笔记
+    撞出 D2 误报（2026-09-28 AI VTuber 调研 11 对）。"""
+    content = """# 标题
+
+- [[topics/youbuddy/abstract]] — youbuddy 项目主卡
+- [[youbuddy]] — youbuddy 项目主卡
+- [相关] [[topics/youbuddy/abstract]] — youbuddy 项目主卡
+- [事实] 正常观察行
+"""
+    obs = parse_observations(content)
+    assert len(obs) == 2
+    assert obs[0]["category"] == "相关"
+    assert obs[0]["text"] == "[[topics/youbuddy/abstract]] — youbuddy 项目主卡"
+    assert obs[1]["category"] == "事实"
+    assert not any(o["text"].startswith("]") for o in obs)
+
+
 def test_parse_links_unique_in_order():
     content = "见 [[A]] 和 [[B]]，再见 [[A]]。"
     assert parse_links(content) == ["A", "B"]

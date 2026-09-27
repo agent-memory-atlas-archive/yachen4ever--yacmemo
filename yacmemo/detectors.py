@@ -24,7 +24,10 @@ _SUFFIX_PATTERNS = [
 ]
 _NON_WORD = re.compile(r"[\W_]+", re.UNICODE)
 
-_OBS_RE = re.compile(r"^\s*-\s*\[([^\]]{1,32})\]\s*(.+?)\s*$")
+# 类别括号后不允许紧跟 '['——`- [[链接]] 说明` 是普通 wiki-link 列表行，
+# 不是 observation（否则 [[ 被当成类别开口，文本劈成 "] — …" 碎片，
+# 相同碎片跨笔记撞车：2026-09-28 AI VTuber 调研 11 对误报的根因）
+_OBS_RE = re.compile(r"^\s*-\s*\[(?!\[)([^\]]{1,32})\]\s*(.+?)\s*$")
 # GFM task-list items ("- [x] done") are checkboxes, not observations
 _TASK_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s")
 _LINK_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
@@ -84,6 +87,9 @@ def parse_observations(content: str) -> list[dict]:
 
     GFM task-list items (`- [x]` / `- [ ]`) are checkboxes, not observations,
     and are excluded so checklist-heavy notes don't generate collision noise.
+    Category-less wiki-link bullets (`- [[note]] — desc`) are plain list lines,
+    not observations — the opening `[[` must not be mistaken for a category
+    bracket.
     """
     out = []
     for lineno, line in enumerate(content.splitlines(), 1):
