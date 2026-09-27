@@ -284,3 +284,46 @@ def test_audit_prunes_blank_disposition_rows(store: Store):
     r = store.audit()
     assert r["pruned_blank_actions"] == 1
     assert store.db.list_audit_actions() == []
+
+
+def test_write_same_name_refused_not_overwritten(store: Store):
+    """memory_write 全区只创建不覆盖：同名标题（含 force）一律拒绝，
+    原文不动；拦截消息指向真正同名的笔记而非近似候选。"""
+    store.write("notes/配置说明", "# 配置说明\n- [配置] 端口 9721\n")
+    with pytest.raises(StoreError, match="已存在"):
+        store.write("notes/配置说明", "# 配置说明\n- [配置] 新内容\n")
+    assert "端口 9721" in (store.root / "notes/配置说明.md").read_text(
+        encoding="utf-8")
+    # force 不豁免覆盖
+    with pytest.raises(StoreError, match="已存在"):
+        store.write("notes/配置说明", "# 配置说明\n- [配置] 新内容\n",
+                    force=True, force_confirm=True)
+    # journal/ 同口径：流水文件同样只创建
+    store.write("journal/20260927-事件", "# 事件\n第一行\n")
+    with pytest.raises(StoreError, match="已存在"):
+        store.write("journal/20260927-事件", "# 事件\n第二行\n")
+
+
+def test_write_same_name_refusal_mentions_exact_note(store: Store):
+    """同名拦截先于近重名守卫：exact 匹配被 exclude_path 排除出候选，
+    拦截消息若走近重名路径只会指向 -2 之类的近似笔记——必须直指本名。"""
+    store.write("notes/部署配置", "# 部署配置\nA\n")
+    store.write("notes/部署配置-2", "# 部署配置-2\nB\n", force=True)
+    with pytest.raises(StoreError) as ei:
+        store.write("notes/部署配置", "# 部署配置\n覆盖尝试\n")
+    assert "notes/部署配置.md 已存在" in str(ei.value)
+
+
+def test_edit_section_strips_duplicate_heading_in_body(store: Store):
+    """new_content 自带与目标同级同名的标题行时自动剥除——标题行由工具
+    保留，双标题是事故；更深层的子标题不受影响。"""
+    store.write("notes/配置", SECTION_NOTE)
+    store.edit_section("配置", "网络", "## 网络\n\n新网络内容（自带标题）")
+    text = (store.root / "notes/配置.md").read_text(encoding="utf-8")
+    assert text.count("## 网络") == 1
+    assert "新网络内容（自带标题）" in text
+    # 同级但不同名/更深层的子标题是合法内容，不剥
+    store.edit_section("配置", "磁盘",
+                       "## 挂载点\n挂载内容\n### 细节\n细节内容")
+    text2 = (store.root / "notes/配置.md").read_text(encoding="utf-8")
+    assert "## 挂载点" in text2 and "### 细节" in text2

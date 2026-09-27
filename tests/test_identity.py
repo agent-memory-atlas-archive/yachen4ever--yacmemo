@@ -279,7 +279,7 @@ def test_list_notes_filters_other_identity_zones(store: Store):
                 identity=Identity("teleagent", "r9000x"))
     store.write("agents/hermes/shared/必读", "# 必读\n",
                 identity=Identity("hermes", "r9000x"))
-    store.write("notes/a", "# a\n补充内容\n")
+    store.edit("notes/a", "内容A", "补充内容")
     rows = store.list_notes(identity=Identity("teleagent", "r9000x"))
     assert "agents/teleagent/shared/必读.md" in rows
     assert "agents/hermes/shared/必读.md" not in rows
@@ -327,7 +327,6 @@ def test_memory_context_flags_stub(store: Store):
 
 
 def test_memory_context_anonymous_no_identity_section(store: Store):
-    store.write("notes/a", "# a\n补充\n")
     ctx = store.memory_context(identity=ANONYMOUS)
     assert "专属必读" not in ctx
 
@@ -335,7 +334,7 @@ def test_memory_context_anonymous_no_identity_section(store: Store):
 # ------------------------------------------------------------ scoped search
 
 def test_search_scoped_by_identity(store: Store, searcher):
-    store.write("notes/a", "# 共享笔记\n- [配置] 服务端口为 9721\n")
+    store.edit("notes/a", "内容A", "内容A\n- [配置] 服务端口为 9721")
     store.write("agents/teleagent/r9000x/环境",
                 "# 环境\n- [设备] r9000x 有独立 GPU 端口配置\n",
                 identity=Identity("teleagent", "r9000x"))

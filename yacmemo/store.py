@@ -203,6 +203,22 @@ class Store:
         # 与 journal 一样跳过全局唯一标题守卫（D1 审计侧同步排除）
         is_agent_zone = rel.startswith(AGENTS_PREFIX)
 
+        # memory_write 全区只创建不覆盖：同名拦截必须放在近重名守卫之前——
+        # exclude_path 会把 exact 匹配排除出候选，走到近重名守卫时拦截消息
+        # 指向的是 -2 之类的近似笔记而非真正同名的那篇；force 不豁免，
+        # 整篇重建的唯一通道是 memory_delete（仅用户明确要求时）
+        abs_path = self.root / rel
+        if abs_path.is_file():
+            if is_agent_zone:
+                raise StoreError(
+                    f"写入被拦截: {rel} 已存在（agents/ 区 memory_write 只创建不覆盖）。\n"
+                    "更新内容用 memory_edit / memory_edit_section 就地修改；"
+                    "确要整篇重建请先 memory_delete 该路径（仅用户明确要求时）。")
+            raise StoreError(
+                f"写入被拦截: {rel} 已存在，memory_write 只创建不覆盖。\n"
+                "更新内容用 memory_edit / memory_edit_section 就地修改；"
+                "确要整篇重建请先 memory_delete 该路径（仅用户明确要求时）。")
+
         # The stored title is the topic name without any directory prefix —
         # directories are filing, not part of the note's identity.
         conflicts: list[dict] = []
@@ -239,14 +255,6 @@ class Store:
             self.db.add_guard_event("forced", name, conflicts[0]["path"], forced=True)
 
         abs_path = self.root / rel
-        if is_agent_zone and abs_path.is_file():
-            # agents/ 区跳过标题守卫，覆盖不会像 topics/ 一样被近似同名拦截——
-            # 显式拒绝：必读等专属文件更新一律就地 edit（git 可恢复，但静默
-            # 覆盖是事故；WebUI 编辑器走 save() 不受影响）
-            raise StoreError(
-                f"写入被拦截: {rel} 已存在（agents/ 区 memory_write 只创建不覆盖）。\n"
-                "更新内容用 memory_edit / memory_edit_section 就地修改；"
-                "确要整篇重建请先 memory_delete 该路径（仅用户明确要求时）。")
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(content, encoding="utf-8")
 
@@ -442,6 +450,12 @@ class Store:
                 break
 
         body = (new_content or "").strip("\n")
+        if body:
+            # new_content 约定不含标题行（标题行由本工具保留）——自带与目标
+            # 同级同名的标题是最常见误用，此处剥除以免笔记长出双标题
+            m = _HEADING_RE.match(body.splitlines()[0])
+            if m and m.group(2).strip() == wanted and len(m.group(1)) == level:
+                body = "\n".join(body.splitlines()[1:]).strip("\n")
         new_lines = lines[:idx + 1]
         if body:
             new_lines += ["", *body.splitlines()]
@@ -959,6 +973,12 @@ class Store:
         parts = []
         if profile.is_file():
             parts.append(profile.read_text(encoding="utf-8"))
+        else:
+            # 与专属必读的「尚未创建」引导同款：让 agent 冷启动即感知画像缺失
+            parts.append(
+                "# 用户画像（尚未创建）\n"
+                "- 用 update_user_preference 分节沉淀用户身份/偏好"
+                "（写入 PROFILE.md，记忆层功能而非主题记忆）")
         if tf.is_file():
             parts.append(tf.read_text(encoding="utf-8"))
         cards = []

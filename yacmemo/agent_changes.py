@@ -12,10 +12,21 @@ integration_check(onboarded_version=...) 获取增量变更与最新写入约定
 
 from __future__ import annotations
 
-AGENT_CONTRACT_VERSION = "0.3.11"
+AGENT_CONTRACT_VERSION = "0.3.12"
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.12": (
+        "- memory_write 全区只创建不覆盖：目标路径已存在（含 journal/）直接"
+        "拒绝，force 不豁免——更新一律 memory_edit / memory_edit_section；"
+        "整篇重建先 memory_delete（仅用户明确要求时）。此前同名写入会静默"
+        "覆盖原笔记（user2 实例实测发现）；\n"
+        "- memory_edit_section 容错：new_content 自带与目标同级同名的标题行"
+        "会自动剥除（标题行由工具保留），不必自己掐头；\n"
+        "- PROFILE.md 缺失时 memory_context 注入「用户画像（尚未创建）」"
+        "引导——用 update_user_preference 沉淀即可；\n"
+        "- 工具无其他变化。"
+    ),
     "0.3.11": (
         "- 主题标签定义收紧（AI VTuber 调研主题挂 6 个关键词标签的实爆）："
         "标签=视角归类（如 工作/开发/生活 这类少量稳定类别），一般 1–2 个；"
@@ -161,7 +172,7 @@ AGENT_CONTRACT_DIGEST = (
     "（缺 topics/ 前缀会被硬拦截，force 不豁免）；\n"
     "- abstract（topics/<主题>/abstract.md）是摘要卡，保持一句话现状；"
     "详细内容写成模块笔记；\n"
-    "- 更新事实用 memory_edit / memory_edit_section 就地改，不新建重复笔记；\n"
+    "- 更新事实用 memory_edit / memory_edit_section 就地改，不新建重复笔记；memory_write 只创建不覆盖（同名直接拒绝，force 不豁免）；\n"
     "- 专属必读：agent 层写 agents/<agent>/shared/必读.md（同 agent 跨设备"
     "共享），本机层写 agents/<agent>/<device>/必读.md；只放指针与纪律，"
     "事实进 topics/；引用其他层路径必须代入真实设备名，模板占位一律用尖括号"

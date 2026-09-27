@@ -56,3 +56,15 @@ def test_profile_exempt_from_stray_and_context_first(tstore: Store):
 def test_update_preference_empty_section_refused(store: Store):
     with pytest.raises(StoreError, match="小节名不能为空"):
         store.update_preference("  ", "内容")
+
+
+def test_memory_context_hints_missing_profile(store: Store):
+    """PROFILE.md 缺失时冷启动注入引导（与专属必读「尚未创建」同款），
+    创建后引导消失。"""
+    ctx = store.memory_context()
+    assert "用户画像（尚未创建）" in ctx
+    assert "update_user_preference" in ctx
+    store.update_preference("身份", "- [身份] 测试用户")
+    ctx2 = store.memory_context()
+    assert "用户画像（尚未创建）" not in ctx2
+    assert "用户画像与偏好" in ctx2
