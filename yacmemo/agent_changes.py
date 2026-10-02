@@ -45,6 +45,13 @@ AGENT_CONTRACT_VERSION = _package_version()
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.14": (
+        "- memory_write 标题尾部带 .md 时先剥离再统一追加——修复"
+        " topics/x/abstract.md 落成 abstract.md.md 双扩展名的问题"
+        "（zcodium 实爆）；注意：主题卡的正常更新方式是 memory_edit，"
+        "不是 memory_write；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.13": (
         "- 无 agent 可感知语义变化——发包版本号追平（pyproject 0.3.10→0.3.13，"
         "含 obs 解析器 wiki-link 误判修复 8d98358 的部署）；agent 侧约定与 "

@@ -646,3 +646,13 @@ def test_note_archive_and_unarchive_roundtrip(store: Store):
     r2 = store.note_unarchive(r["to"])
     assert r2["to"] == rel
     assert (store.root / rel).is_file()
+
+
+def test_title_to_path_strips_md_suffix(store: Store):
+    """标题尾部 .md 剥离再统一追加——防 abstract.md.md 双扩展名
+    （zcodium 实爆：memory_write(title="topics/x/abstract.md")）。"""
+    assert store.title_to_path("topics/zcodium/abstract.md") == \
+        "topics/zcodium/abstract.md"
+    assert store.title_to_path("topics/zcodium/笔记.md") == \
+        "topics/zcodium/笔记.md"
+    assert store.title_to_path("笔记.MD") == "笔记.md"

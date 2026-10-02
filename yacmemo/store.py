@@ -153,6 +153,11 @@ class Store:
     def title_to_path(self, title: str) -> str:
         dirpart, name = self._split_title(title)
         name = _ILLEGAL_FILENAME.sub("_", name).strip(". ")
+        # 尾部 .md 剥掉再统一追加——否则 "x.md" 会落成 "x.md.md"
+        #（2026-09-28 实爆：memory_write(title="topics/zcodium/abstract.md")
+        #  造出 abstract.md.md，与 topic_register 的真卡并存）
+        if name.lower().endswith(".md"):
+            name = name[:-3].strip(". ")
         if not name:
             raise StoreError(f"标题无法转为合法文件名: {title}")
         rel = f"{dirpart}/{name}.md" if dirpart else f"{name}.md"
