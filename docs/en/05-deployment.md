@@ -184,6 +184,12 @@ scp -r yacmemo/webui/dist debsvc:/srv/yacmemo/yacmemo/webui/   # dist 不进 git
 
 Frontend-only updates need no service restart (static files are read from disk per request); **backend code updates** = `git pull && systemctl restart yacmemo`. The version number and commit hash are shown at the bottom of the sidebar (injected at build time by vite from package.json + git).
 
+**Build `dist` after the final commit.** `frontend/vite.config.js` injects the commit hash into the artifact using `git rev-parse --short HEAD` at build time, so commit first and build second — otherwise the sidebar shows the previous commit and you will wrongly conclude the deploy did not take effect. The correct order for a release is: commit → tag → `scripts/deploy_webui.sh` → `git push` → `git pull && systemctl restart yacmemo` on the server.
+
+Asset filenames are content hashes (`index-<hash>.js`), so a sync must **replace** the directory rather than merge into it, or stale hashed files linger on the server. `scripts/deploy_webui.sh` already does this via `find <dist> -mindepth 1 -delete`; a manual `scp` must do the same.
+
+> The `/ui/assets` mount is registered conditionally at `create_app()` time, based on whether `dist/assets` exists (`webui/app.py`). **Repeat deploys need no restart** — verified on debsvc 2026-10-04: after `dist` was in place and without a restart, `/ui/assets/*` returned 200 with the correct content type. Whether a **first-ever** deploy onto a host that has never had a `dist` needs a restart is **unverified**; if assets 404 in that case, `systemctl restart yacmemo` fixes it. The `curl /ui/` self-check at the end of `scripts/deploy_webui.sh` covers this path.
+
 Without a build the service still runs normally, `/ui/` returns a 503 with build instructions, and MCP/API are unaffected. After building, open `http://debsvc.local:9721/ui/` in a browser (`/` redirects automatically). The five pages:
 
 - **Topics**: the topic tree (registered topics → notes within a topic), with markdown rendering on the right, online editing (whole-file save, index synced) / deletion (confirm); the abstract cannot be deleted from the UI;

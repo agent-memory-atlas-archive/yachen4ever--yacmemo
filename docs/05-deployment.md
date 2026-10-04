@@ -184,6 +184,12 @@ scp -r yacmemo/webui/dist debsvc:/srv/yacmemo/yacmemo/webui/   # dist 不进 git
 
 纯前端更新无需重启服务（静态文件按请求读盘）；**后端代码更新** = `git pull && systemctl restart yacmemo`。版本号与 commit 号在侧边栏底部展示（构建期由 vite 从 package.json + git 注入）。
 
+**dist 必须在最终 commit 之后构建。** `frontend/vite.config.js` 用 `git rev-parse --short HEAD` 在构建期把 commit 号注入产物，先提交、后构建，侧边栏显示的 hash 才与线上代码对得上；顺序反了会显示上一个 commit，排查时极易误判"部署没生效"。发版时的正确顺序是：提交 → 打 tag → `scripts/deploy_webui.sh` → `git push` → 服务器 `git pull && systemctl restart`。
+
+资源文件名是内容哈希（`index-<hash>.js`），同步必须整体替换而不是叠加，否则旧哈希文件会一直留在服务器上。`scripts/deploy_webui.sh` 已用 `find <dist> -mindepth 1 -delete` 处理，手动 scp 时要自己做同样的事。
+
+> `/ui/assets` 的挂载在 `create_app()` 时按 `dist/assets` 是否存在条件注册（`webui/app.py`）。**重复部署已实测无需重启**（2026-10-04 于 debsvc 验证：dist 就位后未重启，`/ui/assets/*` 即返回 200 且带正确 content-type）。但「目标主机从未有过 dist」的首次部署是否需要重启**未实测**——此时若资源 404，`systemctl restart yacmemo` 即可；`scripts/deploy_webui.sh` 末尾的 `curl /ui/` 自检是这条路径的兜底。
+
 未构建时服务照常运行，`/ui/` 返回 503 构建指引，MCP/API 不受影响。构建完成后浏览器打开 `http://debsvc.local:9721/ui/`（`/` 自动跳转），五页：
 
 - **主题**：主题树（注册主题 → 主题内笔记），右侧 markdown 渲染、在线编辑（整篇保存，索引同步）/删除（confirm），abstract 不可从 UI 删；
