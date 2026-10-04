@@ -33,6 +33,8 @@ Rejection messages are all executable next-step instructions; the agent can self
 - `forced` count: **a direct measure of the violation rate** (the P4 core metric);
 - `uncovered` count: trigger count of the topic-registry hard block (added 2026-09-18, see 01-architecture §6.1).
 
+**Registry `卡:` values are funneled at load time** (added 2026-10-03): the `- 卡:` line lives in `TOPICS.md`, i.e. it is **externally writable content** (an agent can rewrite it with one ordinary `memory_edit`), while every consumer (`memory_context` / `archive_topic` / audit D5 / curator material) concatenates that value as a raw path — so, like every other path ingress, it passes the same guard **at the parse entry** (`store._topic_card`, `allow_leading_slash=False`). An invalid value is **blanked and recorded, not raised**: `load_topics()` runs inside `memory_context()`, and taking the whole memory layer down over one malformed registry line costs far more than that one card. The topic is **still listed** (it simply has no card); the offending raw value and reason land in `card_invalid` / `card_error`, and the audit keeps a record under `invalid_topic_cards` (see layer 2). Once blanked, every consumer degrades safely: the topic-name map filters it out, D5 sees a false, `archive_topic` skips the whole move block, and the curator cannot read a file. The remedy is **fixing that registry line** — an item an agent can do itself, the opposite of the quarantine item below.
+
 ### Layer 2: Deterministic detection (deterministic, zero LLM)
 
 **D1 duplicate titles**: the guard only intercepts "at write time"; existing notes (historical writes / force bypasses / external creations) are covered by the audit's full pairwise scan (`detectors.d1_scan`, rapidfuzz after normalization, O(n²) string operations, millisecond-scale at personal scale).
@@ -55,6 +57,15 @@ Each new observation vector → obs_vectors top-5 (excluding the same note)
 **D4 stray files**: markdown belonging to no registered topic is called out by audit (the registry-free zones journal/, archive/, curator/ are exempt). This is the enforcement mechanism of the topic registry — no hiding place outside topics; the registry itself is described in [01-architecture.md](01-architecture.md) §13. **The write path is already hard-blocked (added 2026-09-17)**: the tool surface (memory_write / save creating new / move targets) can no longer manufacture strays, so D4 becomes the backstop — covering strays outside the tool surface, such as hand-created Obsidian files and leftovers from unregistration; the write interception and D4 share the same coverage test (`_path_covered`), so the criteria are always identical.
 
 **D5 dangling topic cards**: the registry's `卡:` field points to a nonexistent abstract (leftovers from restructure / manual TOPICS.md edits). D3 only scans links inside note bodies, and the registry itself has no validation — audit fills the gap with call-outs; disposition means fixing the registry or rebuilding the card.
+
+**Out-of-root rows in the derived index: quarantined, not deleted** (added 2026-10-03): the `notes` table is derived data and may still hold out-of-root paths written by older (holed) builds. Every whole-index loop (the audit's body sampling, `_resync_stale_notes`' self-healing) funnels each row through the same ingress `store._index_row_ok`, which **returns the validated relative path** rather than merely judging true/false — if a caller instead joins the raw string from the notes table, pathlib's `/` silently discards the root on the left, which is exactly where the absolute-path fail-open came from. Rows that fail:
+
+- are **never read from disk** — outside content must never reach FTS / the vector store;
+- are **never deleted and never rewritten** — the row *is* the evidence ("who wrote an out-of-root path, and when"); deleting it destroys that, and cleaning the index is a **data decision**, not an action a guard should take on someone's behalf. The `卡:` decision at the layer above is consistent: out-of-root is out-of-root, never silently rewritten;
+- are **never written to `audit_actions` and get no issue_id** — that table means "a human/agent has disposed of some D1/D3/D4"; mixing this in pollutes the disposition state and may even suppress a genuinely pending report;
+- take part in neither D1 pairing (otherwise it produces a bogus "duplicate title" todo whose a_path/b_path are out of root, a human would go dispose of it, and the out-of-root path would enter the disposition chain) nor `missing_vectors` (retrying it can never self-heal; leaving it there only trains people to ignore the audit).
+
+It surfaces only in the audit result `quarantined_index_rows`, the audit snapshot and a WebUI audit-page alert, and the **remedy is `reindex()` to rebuild the index (a human action)** — so it is neither disposable via `memory_audit_update` nor sealable by re-audit. Non-canonical but still in-root rows (`notes/./a.md`) are **not** quarantined: the normalized path is returned for the caller's filesystem access, while the index key stays the row's own original path (changing the key would insert a second index row for the same physical file).
 
 Known blind spot (accepted): D2 misses contradictions that are logically conflicting but far apart in wording (e.g. "sys_user has no role_color" vs "added a role_color field"). Closing it would cost a full LLM scan — v1's lesson; not doing it.
 
@@ -102,7 +113,7 @@ Audit finds ──▶ Human judges ──▶ Agent executes ──▶ Audit veri
 
 - **Human** (WebUI): dismisses false positives; dispatches real issues to any agent via "copy execution instruction" (the instruction embeds the reporting convention);
 - **Agent** (MCP `memory_audit_update`): `executing` take over → `progress` updates → `executed` done / `blocked` stuck; identity is recorded into the timeline automatically; re-verification is not the agent's job;
-- **System** (`memory_audit`): the sole verifier — an issue with execution history that is no longer reported this round gets an automatic `verified` closing event (derived verification, no human sign-off); if it reappears it is flagged as regressed.
+- **System** (`memory_audit`): the sole verifier — an issue whose **last execution event is `executed`** and that is no longer reported this round gets an automatic `verified` closing event (derived verification, no human sign-off); reporting only `executing` / `blocked` never seals it (otherwise "not fixed" and "fixed" look identical in the system, and the seal is irreversible); if it reappears it is flagged as regressed.
 
 Status is derived at read time, not stored: the latest execution event plus the latest audit report yield open / executing / executed-awaiting-recheck / verified / dismissed.
 

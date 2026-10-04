@@ -83,7 +83,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 
 **第一次用？**请先读 [用户使用手册](docs/00-user-guide.md)——上手、日常用法、常见问题都在里面。
 
-## MCP 工具（20 个）
+## MCP 工具（22 个）
 
 | 工具 | 用途 |
 |---|---|
@@ -94,7 +94,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `memory_edit_section` | 按小节整段替换（new_content 自带同级同名标题行会自动剥除） |
 | `memory_move` | 移动文件，索引跟随；目标路径同样受主题注册制约束 |
 | `memory_delete` | 删除笔记（**仅用户明确要求时**，git 历史可恢复） |
-| `memory_audit` | 自愈式一致性审计（外部改动/删除自愈、D1–D5 一致性问题、缺向量笔记点名+自愈重试、守卫统计、过期冲突对清除计数、审计快照路径）；输出含「执行进度」与「复审通过」节 |
+| `memory_audit` | 自愈式一致性审计（外部改动/删除自愈、D1–D5 一致性问题、缺向量笔记点名+自愈重试、守卫统计、过期冲突对清除计数、越界索引行隔离上报、审计快照路径）；输出含「执行进度」与「复审通过」节 |
 | `memory_audit_update` | 执行审计问题修复时向 server 汇报进度（executing/progress/executed/blocked），identity 自动入时间线；复审由审计自动确认 |
 | `memory_list` | 目录树 / 最近变更 |
 | `memory_context` | **会话开始先调**：返回接入契约版本头 + 主题注册表 + 各主题卡摘要头（冷启动回顾） |
@@ -103,6 +103,8 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `topic_status` | 更新注册表主题「现状」行（一句话定位；abstract 现状变化后同步，防止注册表停留在注册时快照） |
 | `topic_register` | 注册新主题（**仅在用户明确要求时调用**，如"把 X 加入长期记忆"），创建 topics/<主题>/abstract.md；成功返回可复制的写入模板 |
 | `topic_unregister` | 注销主题（**仅用户明示**，仅移出注册表，笔记不动，游离后裁决） |
+| `archive_note` | 归档主题内单篇笔记（**仅用户明示**）：移入 `archive/<主题名>/`，`reason` 可选写入头部状态行；abstract 不可单独归档，归档后检索仍可用、WebUI 主题树「单篇归档」分组可见 |
+| `unarchive_note` | 取消单篇归档：按目录名反查活跃主题移回 `topics/<主题>/`（自由归档目录报错） |
 | `archive_topic` | 归档主题（**仅用户明示**）：整个主题目录移入 archive/，检索保留、context 退出 |
 | `get_user_preference` | 读画像/偏好（PROFILE.md 功能层，全文或指定小节） |
 | `update_user_preference` | 创建/替换画像/偏好的一个小节（agent 维护） |

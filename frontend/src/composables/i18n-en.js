@@ -212,6 +212,14 @@ export default {
   '编辑': 'Edit',
   '编辑用户 {id}': 'Edit user {id}',
   '缺向量笔记（已重试自愈）': 'Notes missing vectors (self-heal retried)',
+  '⚠ 越界索引行（隔离·未读盘未删行）': '⚠ Out-of-root index rows (quarantined · not read, not deleted)',
+  '非法主题卡': 'Rejected topic card paths',
+  '这些主题的 - 卡: 指向记忆库根目录之外，卡已被置空、主题仍在注册表里。修 TOPICS.md 对应那一行即可。':
+    'These topics\' `- 卡:` values point outside the memory root; the card was blanked but the topic is still in the registry. Fix the corresponding line in TOPICS.md.',
+  '卡路径被拒绝': 'Card path rejected',
+  '原值': 'was',
+  '这些索引行指向记忆库根目录之外的文件，已隔离：不读盘、不删行、不计入处置表。需要 reindex() 重建索引才能清除。':
+    'These index rows point outside the memory root and have been quarantined: not read, not deleted, not written to the disposition table. Run reindex() to rebuild the index and clear them.',
   '耗时': 'Duration',
   '记忆根目录（绝对路径，自动创建）': 'Memory root directory (absolute path, auto-created)',
   '设备': 'devices',

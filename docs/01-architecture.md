@@ -110,7 +110,7 @@ yacmemo-curator（systemd timer，每周）——读注册表/主题卡/审计 �
 
 数据模型从第一版的 nodes/edges/events 三表塌缩为 **notes + observations** 两级：笔记是主体，observation（若 agent 使用语法）是笔记内的事实行，用于更细粒度的检索与撞车检测。没有实体表、没有边表、没有事件表。
 
-两个用户的内存完全独立：各自的 Store 在构造时绑定各自 root（边界固定，不存在懒解析导致的串目录）；HTTP 传输用无状态会话，任意 MCP 客户端无需会话亲和。13 个工具在 `yacmemo/tools.py` 注册一次，stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`）两个入口共享同一工具面。
+两个用户的内存完全独立：各自的 Store 在构造时绑定各自 root（边界固定，不存在懒解析导致的串目录）；HTTP 传输用无状态会话，任意 MCP 客户端无需会话亲和。22 个工具在 `yacmemo/tools.py` 注册一次，stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`）两个入口共享同一工具面。
 
 ---
 
@@ -228,7 +228,7 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 
 ---
 
-## 六、MCP 工具面（17 个）
+## 六、MCP 工具面（22 个）
 
 | 工具 | 签名 | 关键行为 |
 |---|---|---|
@@ -240,6 +240,7 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 | `memory_move` | `path, new_path` | 移动 + 全库索引随路径更新（[[链接]] 按标题解析，移动不改标题故无需改写链接）；**目标路径同样受主题硬拦截**（移入免注册区放行） |
 | `memory_delete` | `path` | **仅用户明确要求时调用**；删文件 + 全部索引行；git 快照保留历史；删的是最近审计快照时联动清 last_audit 缓存 |
 | `memory_audit` | — | 自愈（外部改动/删除 hash 级重算与清理、缺向量笔记重试 embedding）+ D1/D3/D4/D5 扫描 + collisions 报告 + 守卫统计 + 空白处置行自清 + git 快照状态行 |
+| `memory_audit_update` | `issue_id, event, note=""` | 汇报审计问题的**执行进度**（判断与执行分离的 agent 侧入口）：`event` 取 `executing`/`progress`/`executed`/`blocked`，identity 自动入时间线；**复审不归 agent 管**——最后一条执行事件是 executed、且重跑 memory_audit 不再报告，才自动封口 |
 | `memory_list` | `path="", sort="name"\|"mtime"` | 目录树 / 最近变更 |
 | `memory_context` | — | **会话开始先调**：PROFILE 前置 + 注册表 + 活跃主题 abstract 摘要头（冷启动回顾） |
 | `topic_list` | `tag` | 列出活跃/已归档主题（分组，含标签；可按标签过滤） |
@@ -247,9 +248,12 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 | `topic_tag` | `title, add, remove` | 主题标签增删（轻量可逆；响应带全库清单引导复用） |
 | `topic_status` | `title, status` | 更新注册表现状行（abstract 现状变化后同步） |
 | `topic_unregister` | `title` | 注销主题（**仅用户明确要求**；仅移出注册表，笔记不动，游离后裁决） |
+| `archive_note` | `path, reason=""` | 归档主题内单篇笔记（**仅用户明确要求**）：移入 `archive/<主题名>/`，`reason` 可选写入头部状态行；abstract 不可单独归档、目标已存在拒绝；**不要手工 memory_move 到 archive/ 根目录** |
+| `unarchive_note` | `path` | 取消单篇归档：按目录名反查活跃主题移回 `topics/<主题>/`；自由归档目录（非主题形态）报错 |
 | `archive_topic` | `title` | 归档主题（**仅用户明确要求**）：整个主题目录移入 archive/（卡路径同步改写），检索可用、context 不注入 |
 | `get_user_preference` | `section=""` | 读画像/偏好全文或指定小节（PROFILE.md 功能层） |
 | `update_user_preference` | `section, content` | 创建/替换画像/偏好的一个小节（agent 维护） |
+| `integration_check` | `onboarded_version=""` | **Agent 接入契约版本核对**（"教 AI 自我更新"）：agent 汇报本地记录的契约版本，落后时返回增量变更与写入约定速览，agent 据此自主更新本地提示词 |
 
 完整规格见 [02-mcp-tools.md](02-mcp-tools.md)。
 
@@ -373,7 +377,7 @@ memory_write / memory_edit 完成 embedding 后：
 删除：
 13. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 审计与提案：
-14. 执行审计问题（memory_audit 发现的、或 WebUI 执行指令派下的）时用 memory_audit_update 汇报：executing 接手 → progress 过程 → executed 完成（附摘要）/ blocked 受阻；复审由审计自动确认，不要声称"已验证"、不要代替人忽略。
+14. 执行审计问题（memory_audit 发现的、或 WebUI 执行指令派下的）时用 memory_audit_update 汇报：executing 接手 → progress 过程 → executed 完成（附摘要）/ blocked 受阻；复审由审计自动确认，但只有以 executed 收口的问题才可能被封口——停手前务必补一条 executed，不要声称"已验证"、不要代替人忽略。
 15. 主题标签=视角归类（如 工作/开发/生活），一般 1–2 个；不是关键词/主题名/状态。打标用 topic_tag 并优先复用已有标签；abstract 现状变化用 topic_status 同步注册表现状行。
 15. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读。
 ```
@@ -482,7 +486,7 @@ obs_topk = 5
 - **铁律：只提案，绝不执行**——这是 v1"自动失效不问人"教训的最终形态：维护者 LLM 回来了，但被剥夺了一切写权力（唯一例外：顺手按 `audit_retention_days`（默认 7 天）清理过期的 journal/audit/ 审计快照——处置在 audit_actions 表、完整历史在 git，快照文件只是近期工作集视图）；
 - 批准的提案由 agent 或人工执行，执行后在报告笔记中留痕。
 
-### 工具面（累计 17 个）
+### 工具面（累计 22 个）
 
 主题生命周期四件套 `topic_list` / `topic_register` / `topic_unregister` / `archive_topic` + 冷启动 `memory_context`，画像/偏好功能对 `get_user_preference` / `update_user_preference`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。注销只移出注册表、不动笔记（注销后笔记成游离文件，由 D4 点名走裁决），归档保留检索可用性但退出注入——保证主题生命周期全程无静默数据损失。
 

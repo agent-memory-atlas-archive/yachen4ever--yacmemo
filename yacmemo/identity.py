@@ -106,6 +106,24 @@ def _segments(rel: str) -> list[str]:
     return rel.replace("\\", "/").split("/")
 
 
+def in_agents_zone(rel: str) -> bool:
+    """rel 是否落在 agents/ 专属区（大小写不敏感的唯一判定口径）。
+
+    为什么这一处不区分大小写、而 Store._norm_rel 的路径规范化区分：
+    两处守的不是同一个东西。
+    - 这里守的是"命名空间归属"——agents/ 是保留区，判成"在区内"只会更严
+      （ANONYMOUS 少看一篇、MCP 少写一篇），绝不会更松，所以按最坏情况
+      归类是安全的。文件系统却是不区分大小写的：macOS/Windows 上
+      `Agents/` 与 `agents/` 是同一个目录，用大小写敏感的 startswith 去守
+      一个大小写不敏感的文件系统等于没守——实测匿名连接写
+      `Agents/bob/r9000x/必读.md` 就能读改删别人的专属笔记。
+    - _norm_rel 守的是"这个路径指向哪个真实文件"。大小写敏感的 Linux 上
+      `Notes/` 与 `notes/` 是两个不同目录，无差别折叠会把合法路径判错。
+    同一个字符串比较不能同时按这两套标准来，所以只有保留前缀判定折大小写。
+    """
+    return rel.replace("\\", "/").lower().startswith(AGENTS_PREFIX)
+
+
 def visible(rel: str, identity: Identity | None) -> bool:
     """rel 是否对 identity 可见（MCP 读/检索/list 的统一过滤谓词）。
 
@@ -116,8 +134,12 @@ def visible(rel: str, identity: Identity | None) -> bool:
     """
     if identity is None:
         return True
-    if not rel.startswith(AGENTS_PREFIX):
+    if not in_agents_zone(rel):
         return True
+    # 以下段比较刻意保持大小写敏感：agent/device 名在 _validate_slug 里已强制
+    # 小写，而大小写敏感的文件系统上 `agents/BOB/` 与 `agents/bob/` 是两个不同
+    # 目录——折大小写会让前者被判成"自己的"，等于凭空多给一份访问权。这一层
+    # 是内部小节匹配、不是保留前缀判定，宁可判错成"不给你看"（fail-closed）。
     seg = _segments(rel)  # [agents, <agent>, ...]
     if len(seg) < 2 or seg[1] != identity.agent:
         return False
@@ -138,7 +160,7 @@ def writable(rel: str, identity: Identity | None) -> bool:
     """
     if identity is None:
         return False
-    if not rel.startswith(AGENTS_PREFIX):
+    if not in_agents_zone(rel):
         return False
     seg = _segments(rel)
     if len(seg) < 2 or seg[1] != identity.agent:

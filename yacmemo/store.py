@@ -23,6 +23,7 @@ import threading
 import time
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rapidfuzz import fuzz
 
@@ -38,9 +39,12 @@ from .detectors import (
 from .embedding import EmbeddingClient
 from .fs_utils import content_hash
 from .git_snapshots import GitSnapshots
-from .identity import AGENTS_PREFIX, Identity, visible, writable
+from .identity import AGENTS_PREFIX, Identity, in_agents_zone, visible, writable
 from .index_db import IndexDB
 from .vector import VectorStore
+
+if TYPE_CHECKING:  # Iterator 只用于类型标注，运行期不 import collections.abc
+    from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +61,29 @@ PROFILE_FILE = "PROFILE.md"
 # 见 _require_agents_write——免注册 ≠ 任意可写）
 FREE_ZONES = ("journal/", "archive/", "curator/", AGENTS_PREFIX)
 _TOPIC_FIELD_RE = re.compile(r"^-\s*(卡|相关|现状|注册|状态|标签):\s*(.*)$")
+# 盘符绝对路径（"C:/x/y.md"）。pathlib 判定它是绝对路径，`root / rel`
+# 会直接把 root 丢弃——Windows 上的越界向量，靠末尾的包含性断言兜住，
+# 这里先拦一次只为给出能读懂的报错。
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 # memory_read 返回值里的附加信息标记：agent 把它们当文件内容抄进 old_string
 # 时，拒绝消息要能直接点破（2026-09-16 TeleAgent 连续 4 次 edit 失败的根因）
 _READ_DECOR_MARKERS = ("[正文开始", "[正文结束", "相关笔记", "(path: ",
                        "(vector)", "(via: ")
+
+
+def _log_safe(value: object) -> str:
+    """日志用值：把换行/回车折成字面量（可诊断性不丢，仍能看出原值）。
+
+    与 vector._log_safe 同款，但**故意各留一份**：store 与 vector 之间没有
+    依赖方向（vector 不 import store），从任一侧 import 都会造出新的耦合
+    或循环导入风险，两行重复比一个 import 环便宜。
+
+    笔记路径由用户/agent 决定，`notes/a\nERROR forged line.md` 这样一个
+    路径就能在日志里伪造出第二行——伪造的 ERROR、伪造的处置痕迹都从这
+    里来。异常消息同样可能回显路径（OSError 会带上完整路径），一起过。
+    """
+    return str(value).replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
 
 
 def _d1_id(c: dict) -> str:
@@ -138,13 +160,79 @@ class Store:
 
     # ------------------------------------------------------------------ paths
 
+    def _norm_rel(self, path: str, *, what: str = "路径",
+                  allow_empty: bool = False,
+                  allow_leading_slash: bool = True) -> str:
+        """唯一收口：把外部传入的相对路径规范化，并保证它留在 root 之内。
+
+        所有外部路径入口（resolve / list / save / move / 标题 / 主题卡 /
+        审计文件 / 提案文件）都必须走这里。规范化原先散在六处、各自一套
+        标准——resolve 只 lstrip 前导斜杠不拒 ".."，而 save 拒 ".."，
+        同一个库两套标准，越界只需挑那条松的。
+
+        规则：反斜杠转正斜杠、拒盘符、折叠空段与 "."（否则 "topics//x.md"
+        与 "topics/./x.md" 会把同一个物理文件索引成两个路径，产出 agent
+        无法处置的假重复）、拒 ".." 段，最后以 resolve 后的包含性断言收尾
+        （UNC 等漏网形态在这里被拦下）。
+
+        越界一律以 StoreError 抛出：调用方普遍只 `except StoreError`，
+        让 ValueError/OSError 逃出去等于把守卫绕成崩溃。
+        allow_empty=True 时，只有斜杠/点的输入（"/"、"//"、"."）返回 ""
+        ——那是"整个根目录"的合法写法（list_notes 用），不是越界。
+
+        前导斜杠：默认**容忍**（"/topics/x.md" → "topics/x.md"），这是
+        resolve/memory_read 的既有容忍度，测试钉住（test_path_guard.py）
+        「收过头同样是回归」。容忍之所以安全，前提是调用方一律使用**返回值**
+        而不是原串：返回值恒为相对路径，`self.root / 返回值` 必然落在 root
+        内。2026-10-03 审查的 S1 就是死在这里——调用方把返回值丢掉、又拿
+        原串去 join，pathlib 的 `/` 遇到绝对右操作数会直接丢弃左侧 root，
+        守卫于是 fail-open。所以硬性要求是：
+            rel = self._norm_rel(...)   ← 之后的每一次 self.root / rel
+        派生数据入口（notes 表索引行、issue_id 里的提案文件）传
+        allow_leading_slash=False：那里出现的绝对路径不是"少写了个斜杠"
+        的笔误，而是索引损坏的证据，容忍它等于把损坏规范化成一个假的库内
+        路径（fail-closed，与 ".." 行同等处置：隔离、不读盘、不删行）。
+        """
+        raw = (path or "").strip()
+        rel = raw.replace("\\", "/")
+        if _DRIVE_RE.match(rel):
+            raise StoreError(f"{what}不允许盘符或绝对路径: {path}")
+        if rel.startswith("/") and not allow_leading_slash:
+            raise StoreError(f"{what}不允许绝对路径: {path}")
+        parts = []
+        for seg in rel.split("/"):
+            if seg in ("", "."):
+                continue
+            if seg == "..":
+                raise StoreError(f"{what}不允许路径穿越: {path}")
+            parts.append(seg)
+        rel = "/".join(parts)
+        if not rel:
+            if allow_empty:
+                return ""
+            raise StoreError(f"空的{what}。")
+        # 终局断言：任何漏进上面的形态（UNC、平台怪癖）都在这里被挡住。
+        # 两侧都取 resolve 后的 root 比对——root 自身是符号链接时（macOS 的
+        # /var、/tmp）未解析的 self.root 会让每个合法路径都误判为越界。
+        root = self.root.resolve()
+        try:
+            inside = (root / rel).resolve().is_relative_to(root)
+        except (ValueError, OSError) as e:
+            # 内嵌 NUL 等非法路径名：Path.resolve() 抛的是 ValueError，
+            # 不是本守卫的 StoreError——调用方的 except StoreError 接不住，
+            # 越界检查会被一条崩溃绕过。这里就地翻译成同一类拒绝。
+            raise StoreError(
+                f"{what}不是合法路径: {path!r}（{e}）") from e
+        if not inside:
+            raise StoreError(f"{what}越出记忆库根目录: {path}")
+        return rel
+
     def _split_title(self, title: str) -> tuple[str, str]:
-        """'projects/foo' -> ('projects', 'foo'); reject traversal."""
-        t = (title or "").strip().replace("\\", "/").strip("/")
+        """'projects/foo' -> ('projects', 'foo'); 规范化与越界判定见 _norm_rel。"""
+        t = (title or "").strip()
         if not t:
             raise StoreError("标题不能为空。")
-        if ".." in t.split("/"):
-            raise StoreError(f"标题不允许包含路径穿越: {title}")
+        t = self._norm_rel(t, what="标题")
         if "/" in t:
             dirpart, name = t.rsplit("/", 1)
             return dirpart, name
@@ -173,16 +261,77 @@ class Store:
         p = (path_or_title or "").strip()
         if not p:
             raise StoreError("空的路径/标题。")
-        rel = p.replace("\\", "/").lstrip("/")
+        rel = self._norm_rel(p, what="路径/标题")
         if (self.root / rel).is_file():
             return rel
         row = self.db.get_note_by_title(p)
         if row:
-            return row["path"]
+            # 索引行也要过 _norm_rel：notes 表是派生数据，库里可能还留着旧
+            # 版本（有洞的）构建写进去的越界 path——那种行只靠一个标题就能
+            # 把调用者带到 root 之外，而 read/edit/delete_note/move 拿到
+            # 返回值后一律 `self.root / rel` 直接读改删。这里不做静默改写
+            # 或删行：清理索引是数据决策，本守卫只负责拒绝（fail-closed）。
+            stored = row["path"] or ""
+            try:
+                return self._norm_rel(stored, what="索引行路径",
+                                      allow_leading_slash=False)
+            except StoreError as e:
+                raise StoreError(
+                    f"索引行非法: 标题 {p!r} 在索引里指向记忆库根目录之外的路径 "
+                    f"{stored!r}（{e}）。\n已拒绝一切操作。请人工核对该索引行"
+                    "（疑似旧版本越界写入的残留）后清理或重建索引。") from e
         # tolerate path with/without .md
         if not rel.endswith(".md") and (self.root / (rel + ".md")).is_file():
             return rel + ".md"
         raise StoreError(f"未找到笔记: {path_or_title}（可先用 memory_list 浏览）")
+
+    def _index_row_ok(self, stored: str, quarantine: list[dict]) -> str | None:
+        """索引行 path 的唯一收口：返回**校验过的相对路径**，非法则登记隔离
+        并返回 None。
+
+        notes 表是派生数据，库里可能还留着旧版本（有洞的）构建写进去的越界
+        path——整索引循环（audit 的正文取样、_resync_stale_notes 的自愈）拿到
+        行后一律 `self.root / row["path"]` 直接读改删，是 resolve() 之外的
+        同一类洞：一条被污染的行能让审计把记忆库根目录之外的文件内容读进
+        FTS/向量库。
+
+        2026-10-03 审查 S1：这个函数原来**只判不返**（返回 bool），调用方拿
+        的还是 notes 表里的原串。绝对路径 fail-open 就是这么来的——
+        `_norm_rel("/abs/x")` 剥掉前导斜杠、判定在 root 内、放行，调用方再
+        `self.root / "/abs/x"` 时 pathlib 的 `/` 直接丢弃左侧 root，读的却是
+        root 之外那个文件。守卫判的是一个串、用的是另一个串，等于没有守卫。
+        所以返回值就是唯一可用的路径，调用方必须 `rel = self._index_row_ok(...)`
+        之后再 `self.root / rel`；返回 None 的一律整行跳过。
+
+        绝对路径按索引损坏处置（allow_leading_slash=False），与 ".." 行同等：
+        把它"规范化"成 `abs/x.md` 是把损坏洗成一个假的库内路径，指向另一个
+        真实文件或一个不存在的路径，两种都比报错更坏。
+
+        隔离而非删除（失效语义优于检测语义：永不静默删除/隐藏）：
+        - 不读盘——外部内容不得进索引/FTS/向量；
+        - 不删行、不重写行——删掉就毁掉"谁在什么时候写进了越界 path"的
+          证据，而清理索引是数据决策，不是守卫该替人做的动作；
+        - 不写 audit_actions——那张表的语义是"人/agent 已处置某个
+          D1/D3/D4"，且用于把已处置问题从后续报告里滤掉；损坏索引行是另一
+          类东西，记进去会污染处置状态，还可能压掉一条真正待办的报告。
+
+        非规范但仍在库内的行（"notes/./a.md"）不算隔离：返回规范化后的
+        "notes/a.md"，调用方**文件系统访问**一律用这个返回值。索引键仍用
+        行里的原 path——notes 表的键是那行自己的身份，改键等于给同一个物理
+        文件凭空多插一条索引行（正是 _norm_rel 折叠 "." 想消灭的假重复），
+        而隔离场景下根本走不到这里（原串越界的行已被丢弃，压根不落库）。
+        """
+        try:
+            return self._norm_rel(stored or "", what="索引行路径",
+                                  allow_leading_slash=False)
+        except StoreError as e:
+            quarantine.append({
+                "path": stored,
+                "reason": (f"notes 表该行 path 未通过路径守卫（{e}）；"
+                           "已拒绝一切文件访问（未读盘、未删行）。"
+                           "疑似旧版本越界写入的残留，处置手段：reindex() 重建索引"),
+            })
+            return None
 
     # ------------------------------------------------------------------ guard
 
@@ -206,7 +355,7 @@ class Store:
         is_journal = rel.startswith(self.config.journal_prefix)
         # agents/ 专属区的标题是文件名语义（必读/环境……），跨 identity 同构，
         # 与 journal 一样跳过全局唯一标题守卫（D1 审计侧同步排除）
-        is_agent_zone = rel.startswith(AGENTS_PREFIX)
+        is_agent_zone = in_agents_zone(rel)
 
         # memory_write 全区只创建不覆盖：同名拦截必须放在近重名守卫之前——
         # exclude_path 会把 exact 匹配排除出候选，走到近重名守卫时拦截消息
@@ -301,7 +450,23 @@ class Store:
                 target = (self.db.get_note(tpath)
                           or self.db.get_note(tpath + ".md"))
             if target and target["path"] not in seen_paths:
-                first_obs = self._first_observation(target["path"])
+                # 链接目标同样来自 notes 表（派生数据）：一个被污染的行会让
+                # memory_read 把 root 之外文件的第一条观察原样吐给 agent
+                # （2026-10-03 审查 S2 实测泄漏）。这里过同一个收口，且只
+                # 报告、不外泄——path 与 observation 都不进返回值。
+                # 不并进 audit 的 quarantined_index_rows：read 是纯读路径，
+                # 权威隔离清单由 audit() 产出（read 不该改审计状态），就地
+                # 标 quarantined 让调用方看得见"这条链接有坏行"。
+                trel = self._index_row_ok(target["path"], [])
+                if trel is None:
+                    seen_paths.add(target["path"])
+                    related.append({
+                        "title": link, "via": "link", "quarantined": True,
+                        "note": ("该链接在索引里指向记忆库根目录之外的路径，"
+                                 "已拒绝读取（不给出路径与内容）；"
+                                 "详见 memory_audit 的 quarantined_index_rows")})
+                    continue
+                first_obs = self._first_observation(trel)
                 related.append({"title": link, "path": target["path"],
                                 "via": "link", "note": first_obs or ""})
                 seen_paths.add(target["path"])
@@ -480,9 +645,7 @@ class Store:
     def save(self, path: str, content: str) -> dict:
         """Create-or-overwrite by exact path (WebUI editor, curator reports).
         Title follows the first `#` heading; index fully resynced."""
-        rel = path.replace("\\", "/").strip("/")
-        if not rel or ".." in rel.split("/"):
-            raise StoreError(f"非法路径: {path}")
+        rel = self._norm_rel(path)
         if not rel.endswith(".md"):
             rel += ".md"
         abs_path = self.root / rel
@@ -534,9 +697,7 @@ class Store:
              identity: Identity | None = None) -> dict:
         old_rel = self.resolve(path)
         self._require_agents_write(old_rel, identity)
-        new_rel = new_path.strip().replace("\\", "/").strip("/")
-        if ".." in new_rel.split("/"):
-            raise StoreError(f"目标路径不允许路径穿越: {new_path}")
+        new_rel = self._norm_rel(new_path, what="目标路径")
         if not new_rel.endswith(".md"):
             new_rel += ".md"
         if new_rel == old_rel:
@@ -570,13 +731,22 @@ class Store:
 
     def list_notes(self, sub: str = "", sort: str = "name",
                    identity: Identity | None = None) -> list[str]:
-        base = self.root / sub.strip("/").replace("\\", "/") if sub.strip() else self.root
+        # "/"、"//"、"." 规范化后为空 = 整个 root（收口前 sub.strip() 为假值
+        # 时走的就是 root 分支，memory_list(path="/") 是合理调用，不能因为
+        # 引入 _norm_rel 就报"空的路径"）。
+        base = self.root / self._norm_rel(sub, what="子目录", allow_empty=True)
         if not base.is_dir():
             raise StoreError(f"目录不存在: {sub}")
         entries = []
         for p in base.rglob("*.md"):
-            rel = p.relative_to(self.root).as_posix()
-            if "/.index/" in f"/{rel}" or rel.startswith(".index"):
+            raw = p.relative_to(self.root).as_posix()
+            if "/.index/" in f"/{raw}" or raw.startswith(".index"):
+                continue
+            # 符号链接形态的越界文件同样不进结果：read() 侧守卫会拒它读，
+            # memory_list 却把它当库内笔记报出来，只会让 agent 撞一堵墙
+            try:
+                rel = self._norm_rel(raw, what="库内文件路径")
+            except StoreError:
                 continue
             if not visible(rel, identity):
                 continue
@@ -593,8 +763,52 @@ class Store:
     def topics_file(self) -> Path:
         return self.root / TOPICS_FILE
 
+    def _topic_card(self, val: str) -> tuple[str, str, str]:
+        """注册表 `卡:` 字段的收口，返回 (card, card_invalid, card_error)。
+
+        `卡:` 不是"库自己写的数据"而是**外部可写内容**：TOPICS.md 落在注册
+        区内，匿名 agent 一次普通 memory_edit 就能把 `- 卡:` 改成任意串，
+        而消费端（memory_context / archive_topic / 审计 D5 /
+        curator.build_material）一律 `self.root / t["card"]` 裸拼。守卫
+        （_norm_rel）在这里从来没被调用过——六处外部路径入口收口之后，
+        唯一漏在守卫之外的一条（2026-10-03 审查 S3，实测
+        `- 卡: ../OUTSIDE/secret.md` 让越界内容进了每次冷启动的
+        memory_context 和 curator 的 LLM 提示词）。
+
+        非法时**不抛**：load_topics() 在 memory_context() 里，而
+        memory_context() 是每个 agent 冷启动都调的——因为注册表里一行字
+        格式坏就把整个记忆层下线，代价远大于那一张卡。改成卡置空 + 留证
+        （原值与理由进 card_invalid / card_error，审计另有 invalid_topic_cards
+        上报）。
+
+        card 置空后所有消费方都安全退化，这是本改动成立的前提（逐个核过）：
+        topic_name_map（`if t.get("card")` 过滤掉）、_topic_of_path、
+        memory_context、_path_covered、_near_miss_topics、审计 D5（都判假值）、
+        archive_topic（整段移动逻辑被跳过，不抛 ValueError）、
+        curator.build_material（`if t["card"] else None` → 读不到文件）。
+
+        allow_leading_slash=False 与索引行同理：`- 卡:` 的写入方是
+        topic_register，它落盘前已经过 _norm_rel，绝不会写出前导斜杠——
+        所以注册表里出现 "/abs/…/x.md" 不是"少写个斜杠"，是被改坏/被塞进来
+        的证据。容忍它等于把越界路径洗成一个**看起来在库内、实际指向别处**
+        的假路径（实测 archive_topic 会拿着 "private/var/…/secret.md" 去归档，
+        静默产生一条指向不存在文件的卡）。
+        """
+        raw = (val or "").strip()
+        if not raw:
+            return "", "", ""
+        try:
+            return self._norm_rel(raw, what="主题卡路径",
+                                  allow_leading_slash=False), "", ""
+        except StoreError as e:
+            return "", raw, str(e)
+
     def load_topics(self) -> list[dict]:
-        """Parse TOPICS.md registry: [{title, card, related[], status, registered}]."""
+        """Parse TOPICS.md registry: [{title, card, related[], status, registered}].
+
+        `卡:` 字段在解析入口就过 _norm_rel（见 _topic_card）：非法值置空并
+        记录在 card_invalid / card_error，而不是原样透传给消费端。
+        """
         p = self.topics_file()
         if not p.is_file():
             return []
@@ -603,7 +817,8 @@ class Store:
             if line.startswith("## "):
                 if cur:
                     topics.append(cur)
-                cur = {"title": line[3:].strip(), "card": "", "related": [],
+                cur = {"title": line[3:].strip(), "card": "", "card_invalid": "",
+                       "card_error": "", "related": [],
                        "status": "", "archived": False, "registered": "",
                        "tags": []}
             elif cur is not None:
@@ -611,7 +826,8 @@ class Store:
                 if m:
                     key, val = m.group(1), m.group(2).strip()
                     if key == "卡":
-                        cur["card"] = val
+                        (cur["card"], cur["card_invalid"],
+                         cur["card_error"]) = self._topic_card(val)
                     elif key == "相关":
                         cur["related"] = [x.strip().rstrip("/")
                                           for x in val.split(",") if x.strip()]
@@ -642,12 +858,16 @@ class Store:
             raise StoreError(f"主题已存在: {title}（如需更新请直接编辑主题卡）")
 
         if card_path:
-            card_path = card_path.replace("\\", "/").lstrip("/")
+            card_path = self._norm_rel(card_path, what="主题卡路径")
             if not (self.root / card_path).is_file():
                 raise StoreError(f"指定的主题 abstract 不存在: {card_path}")
         else:
+            # 生成的路径同样过收口：退化标题（如 ".."、"///"）在这里产出的
+            # 只能是空串，拼成 "topics//abstract.md" —— 同一个物理文件两个
+            # 索引路径，正是 _norm_rel 存在的理由，不能只查调用方给的参数
             folder = f"topics/{_ILLEGAL_FILENAME.sub('_', title).strip('. ')}"
-            card_path = f"{folder}/abstract.md"
+            card_path = self._norm_rel(
+                f"{folder}/abstract.md", what="主题卡路径")
             abs_card = self.root / card_path
             if abs_card.exists():
                 raise StoreError(f"abstract 文件已存在: {card_path}")
@@ -910,7 +1130,13 @@ class Store:
             moved = False
             if old_dir and (self.root / old_dir).is_dir():
                 for f in sorted((self.root / old_dir).rglob("*.md")):
-                    rel = f.relative_to(self.root).as_posix()
+                    raw = f.relative_to(self.root).as_posix()
+                    # 主题目录内的符号链接越界文件不搬：move 会把它的内容
+                    # 复制进 archive/，等于把 root 外的内容搬进记忆库
+                    try:
+                        rel = self._norm_rel(raw, what="库内文件路径")
+                    except StoreError:
+                        continue
                     sub = f.relative_to(self.root / old_dir).as_posix()
                     self.move(rel, f"{dest_dir}/{sub}")  # move() 逐个快照
                     moved = True
@@ -1093,6 +1319,10 @@ class Store:
         (每主题一目录，目录即归属)."""
         if rel in (TOPICS_FILE, PROFILE_FILE) or rel.startswith(FREE_ZONES):
             return True
+        # 免注册区（FREE_ZONES）刻意保持大小写敏感：把 Agents/… 漏判成
+        # "不在免注册区"只会多走一层注册表覆盖检查（更严），不会把 agents/
+        # 专属区放行。agents/ 的归属判定统一走 identity.in_agents_zone
+        # （折大小写，见该函数注释）——那是安全边界，不与这里混用。
         covered_files, covered_dirs = set(), set()
         for t in topics:
             if t["card"]:
@@ -1115,7 +1345,7 @@ class Store:
         """agents/ 专属区的写守卫。identity=None（人类/WebUI/服务端内部）
         不受限；identity 为空 agent（MCP 无 token，ANONYMOUS）与其他 agent /
         其他设备的专属区一律拒绝。user 层路径不经过本守卫。"""
-        if not rel.startswith(AGENTS_PREFIX):
+        if not in_agents_zone(rel):
             return
         if identity is None:  # 人类入口（WebUI/内部）：全库管理员
             return
@@ -1225,13 +1455,36 @@ class Store:
                 matched.append(t["title"])
         return lines, matched
 
+    def _iter_in_root_md(self) -> Iterator[tuple[str, Path]]:
+        """遍历 root 下的 *.md，只产出**经守卫判定仍在 root 内**的 (rel, 路径)。
+
+        rglob 本身不看路径语义：root 内一个指向库外的符号链接文件
+        （`notes/escape.md → /etc/passwd`）会被原样遍历出来，而消费端一律
+        `p.read_text()` / `self._index_note(rel, …)` —— 守卫在 read() 侧
+        拒掉的文件，审计却照样读进来进 FTS 与向量库（2026-10-03 审查 S5
+        实测）。"库内的相对路径"与"库内的物理文件"在这里才划等号。
+        （现代 Python 的 rglob 不跟随符号链接**目录**，暴露面是符号链接
+        **文件**——这正是上面那种形态。）
+
+        越界的一律跳过并记日志：内容不得进索引，日志里也不留越界路径的
+        原文（_log_safe 防伪造日志行）。
+        """
+        for p in sorted(self.root.rglob("*.md")):
+            rel = p.relative_to(self.root).as_posix()
+            if rel.startswith(".index") or "/.index/" in f"/{rel}":
+                continue
+            if ".git" in p.parts:
+                continue
+            try:
+                yield self._norm_rel(rel, what="库内文件路径"), p
+            except StoreError as e:
+                logger.warning("skipped out-of-root markdown (guard): %s (%s)",
+                               _log_safe(rel), _log_safe(e))
+
     def _stray_files(self, topics: list[dict]) -> list[str]:
         """Markdown files outside any registered topic (and outside free zones)."""
         strays = []
-        for p in sorted(self.root.rglob("*.md")):
-            rel = p.relative_to(self.root).as_posix()
-            if "/.index/" in f"/{rel}" or ".git" in p.parts:
-                continue
+        for rel, _p in self._iter_in_root_md():
             if self._path_covered(rel, topics):
                 continue
             strays.append(rel)
@@ -1240,16 +1493,35 @@ class Store:
     # ------------------------------------------------------------------ audit
 
     def audit(self) -> dict:
-        resynced, missing = self._resync_stale_notes()
+        resynced, missing, resync_quarantined = self._resync_stale_notes()
         added = self._sync_new_files()
         titles = self.db.all_titles()
+        # D1 只在**未隔离**的标题里配对：隔离行的 path 指向记忆库之外，让它
+        # 参与配对会产出一条 a_path/b_path 越界的假"标题重复"待办——人会去
+        # 处置它，处置记录还会写进 audit_actions，越界路径就此进入处置链。
+        # 两条循环看的是同一张 notes 表，resync_quarantined 已覆盖全部非法行。
+        _qpaths = {e["path"] for e in resync_quarantined}
+        if _qpaths:
+            titles = [t for t in titles if t["path"] not in _qpaths]
         d1 = d1_scan(titles, self.config.guard.title_similarity_threshold)
         pruned_stale = self.db.prune_stale_collisions()
         collisions = self.db.list_collisions(status="open")
 
+        # 两条循环（_resync_stale_notes 的自愈、这里的正文取样）看的是同一张
+        # notes 表，同一条越界行会被登记两次——按 path 去重、按路径序输出，
+        # 审计报告才可复现。
+        quarantined: list[dict] = list(resync_quarantined)
         contents = {}
         for row in titles:
-            p = self.root / row["path"]
+            # 索引行过路径守卫并**取回校验过的相对路径**：越界行不读盘（外部
+            # 文件内容绝不能进 FTS / 向量库），也不删行、也不写 audit_actions。
+            # notes 表是派生数据，库里可能还留着旧版本（有洞的）构建写进去的
+            # 越界 path——删行会毁掉证据，解析不了的行也不构成"文件被外部删除"
+            # 的证据。p 必须用返回值拼：拿原串 join 时 pathlib 会丢弃 root。
+            rel = self._index_row_ok(row["path"], quarantined)
+            if rel is None:
+                continue
+            p = self.root / rel
             if p.is_file():
                 contents[row["path"]] = p.read_text(encoding="utf-8")
         # 主题名也算合法链接目标（卡的索引标题会随 H1 漂移，
@@ -1264,18 +1536,31 @@ class Store:
         if self.emb and self.vectors:
             missing_vectors = self.db.notes_missing_vectors()
             if missing_vectors:
+                # 隔离行不进向量库（越界内容永远不该被向量化），也不计入
+                # "缺向量"——它每轮重试都不可能自愈，挂在那里只会训练人忽略审计
+                qpaths = {e["path"] for e in quarantined}
                 for row in missing_vectors:
+                    if row["path"] in qpaths:
+                        continue
                     content = contents.get(row["path"])
                     if content is not None:
                         self._index_note(row["path"], row["title"], content)
-                missing_vectors = [r["path"]
-                                   for r in self.db.notes_missing_vectors()]
+                missing_vectors = [r["path"] for r in self.db.notes_missing_vectors()
+                                   if r["path"] not in qpaths]
 
         # 空白处置行自清（body 解析失败等事故产物，处置表没有删除接口）
         pruned_blank = self.db.prune_blank_audit_actions()
 
         topics = self.load_topics()
         stray = self._stray_files(topics)
+        # 注册表里指向 root 之外的 `卡:`（load_topics 已置空防消费，见
+        # _topic_card）。与 quarantined_index_rows 分开报：来源不同（markdown
+        # 正文 vs 派生索引），且不可经 memory_audit_update 处置，也不写
+        # audit_actions——那是人的 D1/D3/D4 处置状态，混进去会污染它。
+        invalid_topic_cards = [{"title": t["title"],
+                                "card": t["card_invalid"],
+                                "reason": t["card_error"]}
+                               for t in topics if t["card_invalid"]]
 
         # 机器产物不参与 D1（归一化剥日期后标题互相近似，必然假阳性：
         # 快照标题同构、提案-0916 与 提案-0917 都归一为"提案"）。
@@ -1284,8 +1569,8 @@ class Store:
         d1 = [c for c in d1
               if not (c["a_path"].startswith(self._machine_zones)
                       or c["b_path"].startswith(self._machine_zones))
-              and not (c["a_path"].startswith(AGENTS_PREFIX)
-                       or c["b_path"].startswith(AGENTS_PREFIX))]
+              and not (in_agents_zone(c["a_path"])
+                       or in_agents_zone(c["b_path"]))]
 
         # 机器产物区同样不参与 D3：审计快照会引用上一轮悬空链接的原文，
         # 源笔记删除后快照自己被点名——审计追自己的尾巴（2026-09-18 实测）
@@ -1322,7 +1607,14 @@ class Store:
         verified = []
         for iid, st in exec_last.items():
             # P 类（提案条目）没有确定性复审检查，复审封口只属于 D 类
-            if iid.startswith("P:") or iid in current_ids or st["event"] == "verified":
+            #
+            # 必须以 executed 收口，否则"没修"和"修好了"在系统里长得一样：
+            # 只报 executing 就停手的 issue 会被永久封成"复审通过"，且封口
+            # 不可逆（下次 last event 变 verified，无条件跳过）——这一权失效
+            # 时还不报错。blocked 同理：仍需人工，不能算复审通过。
+            # 写成 != 而不是"跳过这几值"：将来新增事件类型默认不封口
+            # （守卫要 fail-closed，不能是白名单）。
+            if iid.startswith("P:") or iid in current_ids or st["event"] != "executed":
                 continue
             self.db.add_exec_event(iid, st["kind"], "verified",
                                    note="复审通过：本轮审计不再报告此问题")
@@ -1337,11 +1629,17 @@ class Store:
             self.snapshots.commit(
                 f"external: self-healed {healed} note(s) via audit")
 
+        # 越界索引行去重（resync 与正文取样各登记过一次）
+        _qseen: dict[str, dict] = {}
+        for e in quarantined:
+            _qseen.setdefault(e["path"], e)
+        quarantined_index_rows = [_qseen[k] for k in sorted(_qseen)]
+
         # 审计快照落盘（journal/audit/ 免注册区，markdown 审计轨迹 + git 快照）
         audit_file = self._write_audit_snapshot(
             resynced, missing, added, d1, collisions, dangling, stray,
             dangling_cards, missing_vectors, pruned_blank, pruned_stale,
-            verified, reconciled)
+            verified, reconciled, quarantined_index_rows, invalid_topic_cards)
 
         res = {"title_duplicates": d1,
                "collisions": collisions,
@@ -1354,6 +1652,11 @@ class Store:
                "missing_vectors": missing_vectors,
                "pruned_blank_actions": pruned_blank,
                "pruned_stale_collisions": pruned_stale,
+               # 越界索引行：永远上报、不给 issue_id、不进 exec 封口集合
+               # （它不可被 memory_audit_update 处置，也不该被复审"通过"掉）
+               "quarantined_index_rows": quarantined_index_rows,
+               # 注册表 `卡:` 越界：已置空防消费（见 _topic_card），这里只留证
+               "invalid_topic_cards": invalid_topic_cards,
                "exec_status": exec_status,
                "verified": verified,
                "reconciled_proposals": reconciled,
@@ -1382,14 +1685,16 @@ class Store:
     def _write_audit_snapshot(self, resynced, missing, added, d1, collisions,
                               dangling, stray, dangling_cards=(),
                               missing_vectors=None, pruned_blank=0,
-                              pruned_stale=0, verified=(), reconciled=0) -> str:
+                              pruned_stale=0, verified=(), reconciled=0,
+                              quarantined=(), invalid_cards=()) -> str:
         """每日一份审计快照（journal/audit/<YYYYMMDD>.md），同日重跑以"复审"
         小节追加进当天文件——对齐 curator 的同日合并，标题天然唯一不撞 D1，
         且 journal/audit/ 不会随审计频率无界膨胀（过期文件由 curator 清理）。"""
         body = self._audit_body(resynced, missing, added, d1, collisions,
                                 dangling, stray, dangling_cards,
                                 missing_vectors, pruned_blank, pruned_stale,
-                                verified, reconciled)
+                                verified, reconciled, quarantined,
+                                invalid_cards)
         day = datetime.now().strftime("%Y%m%d")
         rel = f"{self._audit_dir}{day}.md"
         abs_path = self.root / rel
@@ -1415,7 +1720,8 @@ class Store:
     def _audit_body(self, resynced, missing, added, d1, collisions,
                     dangling, stray, dangling_cards,
                     missing_vectors=None, pruned_blank=0, pruned_stale=0,
-                    verified=(), reconciled=0) -> str:
+                    verified=(), reconciled=0, quarantined=(),
+                    invalid_cards=()) -> str:
         guard = self.db.guard_stats()
 
         def _sec(title, items):
@@ -1427,6 +1733,8 @@ class Store:
                  f"- 新增文件（已入索引）：{len(added)}",
                  f"- 外部修改（已重建索引）：{len(resynced)}",
                  f"- 外部删除（已清理索引）：{len(missing)}",
+                 f"- 越界索引行（隔离·未读盘未删行）：{len(quarantined or [])}",
+                 f"- 注册表卡路径非法（已置空·未读盘）：{len(invalid_cards or [])}",
                  f"- 标题重复（D1）：{len(d1)}",
                  f"- 语义撞车（D2）：{len(collisions)}",
                  f"- 悬空链接（D3）：{len(dangling)}",
@@ -1451,6 +1759,16 @@ class Store:
             lines += _sec("外部修改", resynced)
         if missing:
             lines += _sec("外部删除", missing)
+        if quarantined:
+            lines += _sec("越界索引行（隔离·未读盘未删行）", [
+                f"`{e['path']}` — {e['reason']}" for e in quarantined])
+        if invalid_cards:
+            # 原文照抄（含换行/反引号）会破坏快照结构，所以只留可诊断的摘要
+            lines += _sec("注册表卡路径非法（已置空·未读盘）", [
+                f"主题《{e['title']}》的 `卡:` = `{_log_safe(e['card'])}`"
+                f" — {e['reason']}；该卡已置空，主题摘要/curator 材料均不再读它。"
+                "处置手段：手工把 TOPICS.md 的 `卡:` 改回库内路径"
+                for e in invalid_cards])
         if d1:
             lines += _sec("标题重复（D1）", [
                 f"`{_d1_id(c)}` — `{c['a_path']}` ↔ `{c['b_path']}`"
@@ -1485,7 +1803,7 @@ class Store:
         """
         kind = issue_id.split(":", 1)[0]
 
-        rel = audit_file.replace("\\", "/").strip("/")
+        rel = self._norm_rel(audit_file, what="审计文件")
         content = ""
         abs_path = self.root / rel
         if abs_path.is_file():
@@ -1527,7 +1845,7 @@ class Store:
           按留痕进行——curator 铁律的延伸：系统与 WebUI 都只记录裁决，
           不直接改动任何笔记内容。
         """
-        rel = file.replace("\\", "/").strip("/")
+        rel = self._norm_rel(file, what="提案文件")
         abs_path = self.root / rel
         if not abs_path.is_file():
             raise StoreError(f"提案文件不存在: {file}")
@@ -1572,11 +1890,29 @@ class Store:
         if event not in self._EXEC_EVENTS:
             raise StoreError(
                 f"event 非法: {event!r}（可用：{'/'.join(self._EXEC_EVENTS)}）")
+        # P 类的 issue_id 藏着第二条外部路径入口：P:<file>:<index> 的
+        # <file> 由 agent 提供，下游 _proposal_findings_indices /
+        # _mark_proposal_settled 直接 self.root / rel 读提案正文。写侧
+        # 已被 save() 挡住，读侧必须在这里自己收口——否则
+        # memory_audit_update(issue_id="P:../outside/secret.md:1")
+        # 就能把 root 之外的文件读进来解析成提案条目。
+        #
+        # 收口必须**先于**落事件（2026-10-03 审查 S1b）：原来校验排在
+        # add_exec_event 之后，一个被拒的越界 issue_id 照样在事件表里留下
+        # 一条"已执行/已忽略"，之后 exec_last_status 会拿它参与复审封口
+        # 与调和——守卫拒掉的东西不该在系统里看起来像发生过。
+        # 绝对路径同样拒（allow_leading_slash=False）：见 _norm_rel 文档。
+        # 返回值即下游唯一可用路径（prop_file），不再拿 issue_id 原串。
+        prop_file = None
+        if kind == "P":
+            prop_file = self._norm_rel(issue_id[2:].rsplit(":", 1)[0],
+                                       what="issue_id 中的提案文件",
+                                       allow_leading_slash=False)
         e = self.db.add_exec_event(issue_id, kind, event, (note or "").strip(),
                                    identity or "")
         if kind == "P":
             # P 类事件可能补全结案条件——汇报后顺手检查是否全部条目已结案
-            self._mark_proposal_settled(issue_id[2:].rsplit(":", 1)[0])
+            self._mark_proposal_settled(prop_file)
         return {"event": e, "timeline": self.db.list_exec_events(issue_id)}
 
     # ---- proposal settlement（提案全部条目执行/忽略后对 agent 隐去）----
@@ -1593,7 +1929,11 @@ class Store:
         if not d.is_dir():
             return 0
         for p in sorted(d.glob("提案-*.md")):
-            rel = p.relative_to(self.root).as_posix()
+            raw = p.relative_to(self.root).as_posix()
+            try:
+                rel = self._norm_rel(raw, what="库内文件路径")
+            except StoreError:
+                continue          # 越界的提案文件不读、不解析条目
             try:
                 content = p.read_text(encoding="utf-8")
             except OSError:
@@ -1671,17 +2011,15 @@ class Store:
         content = "\n".join(body) + "\n"
         content = content.replace("**状态：待裁决**", "**状态：已结案**", 1)
         self.save(rel, content)
-        logger.info("proposal settled: %s (%d findings)", rel, len(indices))
+        logger.info("proposal settled: %s (%d findings)",
+                    _log_safe(rel), len(indices))
         return True
 
     def _sync_new_files(self) -> list[str]:
         """Index .md files that exist on disk but were never ingested
         (created out-of-band before the server saw them)."""
         added = []
-        for p in sorted(self.root.rglob("*.md")):
-            rel = p.relative_to(self.root).as_posix()
-            if rel.startswith(".index") or "/.index/" in f"/{rel}":
-                continue
+        for rel, p in self._iter_in_root_md():
             if self.db.get_note(rel) is not None:
                 continue
             try:
@@ -1690,10 +2028,11 @@ class Store:
                 self._index_note(rel, title, content)
                 added.append(rel)
             except Exception as e:
-                logger.warning("audit: indexing new file %s failed: %s", rel, e)
+                logger.warning("audit: indexing new file %s failed: %s",
+                               _log_safe(rel), _log_safe(e))
         return added
 
-    def _resync_stale_notes(self) -> tuple[list[str], list[str]]:
+    def _resync_stale_notes(self) -> tuple[list[str], list[str], list[dict]]:
         """Self-healing: reconcile the index with out-of-band file changes.
 
         - externally edited (disk hash != notes.content_hash): rebuild that
@@ -1701,10 +2040,23 @@ class Store:
           observation lines; collisions involving it are recomputed.
         - externally deleted: drop its index rows (the user's deletion is the
           source of truth; the store itself never deletes files).
+        - index row whose path fails the guard: quarantined, never touched.
+
+        第三项不是"外部删除"的子类：notes 表是派生数据，库里可能还留着旧
+        版本（有洞的）构建写进去的越界 path。解析不了的行不能当"文件已被
+        用户删掉"的证据——落进下面的删行分支就再也看不到是谁写进去的，
+        证据也随之消失。返回的隔离名单由 audit() 汇总上报。
         """
-        resynced, missing = [], []
+        resynced, missing, quarantined = [], [], []
         for row in self.db.list_notes():
-            p = self.root / row["path"]
+            # 整索引循环同样要过路径守卫（与 resolve() 同一类洞）：越界行不
+            # stat、不读、不删、不向量化，只登记隔离上报；非规范但在库内的行
+            # 返回规范化路径，p 必须用它拼（拿原串拼时 pathlib 会丢弃 root）。
+            # 详见 _index_row_ok——它返回值而不只是判真假正是为了这里。
+            rel = self._index_row_ok(row["path"], quarantined)
+            if rel is None:
+                continue
+            p = self.root / rel
             if not p.is_file():
                 self.db.remove_note(row["path"])
                 self.db.remove_collisions_involving(row["path"])
@@ -1717,7 +2069,7 @@ class Store:
                 title = self._title_from_content(row["path"], content)
                 self._index_note(row["path"], title, content)
                 resynced.append(row["path"])
-        return resynced, missing
+        return resynced, missing, quarantined
 
     # ------------------------------------------------------------------ reindex
 
@@ -1727,10 +2079,7 @@ class Store:
             self.vectors.wipe()
         failed = []
         count = 0
-        for p in sorted(self.root.rglob("*.md")):
-            rel = p.relative_to(self.root).as_posix()
-            if rel.startswith(".index") or "/.index/" in f"/{rel}":
-                continue
+        for rel, p in self._iter_in_root_md():
             try:
                 content = p.read_text(encoding="utf-8")
                 title = self._title_from_content(rel, content)
@@ -1831,7 +2180,8 @@ class Store:
             # 由审计补位重试（见 audit 的 missing_vectors 自愈）
             self._last_cleared_collisions = pre_open
             self.db.set_vector_ok(rel, False)
-            logger.warning("Vector indexing failed for %s: %s", rel, e)
+            logger.warning("Vector indexing failed for %s: %s",
+                           _log_safe(rel), _log_safe(e))
 
     def _d2_check(self, rel: str, obs_list: list[dict], obs_vecs: list[list[float]]):
         """Incremental D2: compare new observations against existing ones."""

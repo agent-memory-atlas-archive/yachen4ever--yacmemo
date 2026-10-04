@@ -9,6 +9,7 @@ phrasing are identical across transports.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import posixpath
@@ -76,7 +77,19 @@ def _identity_from_ctx(ctx: Context | None) -> Identity:
 
 def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                    usage: UsageDB | None = None, user_id: str = "local") -> None:
-    """Register the 17 memory tools on an MCP server instance."""
+    """Register the 22 memory tools on an MCP server instance."""
+
+    # 全部工具一律 structured_output=False（2026-10-03 审查 §8.2）。
+    # 工具标注 `-> str` 时 FastMCP 会同时产出 text content 和
+    # structuredContent{"result": ...}，两份内容一模一样：实测每个工具的
+    # 返回体被完整塞两遍，waste 2.07x，memory_context 这种大 payload 每次
+    # 冷启动白烧一半 token。客户端读的本来就是 content[0].text。
+    #
+    # 注意：这个开关只能逐工具给。mcp 1.30 的 FastMCP.__init__ 没有这个参数
+    # （传了直接 TypeError），别再去 FastMCP(...) 上试。
+    # 收敛成局部 `tool` 而不是逐处写死：新加工具写 `@tool()` 就自动带上，
+    # 漏改一处就静默退回双份。
+    tool = functools.partial(mcp.tool, structured_output=False)
 
     @contextmanager
     def _logged(tool_name: str, ctx: Context | None, summary: str, out: dict):
@@ -103,6 +116,17 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                                before_hash=out.get("before_hash", ""),
                                identity=out["identity"].token)
 
+    def _card_line(t: dict) -> str:
+        """主题卡的一行展示。卡被路径守卫拒绝时 load_topics 会把它置空并留下
+        card_invalid / card_error——只打印空串的话，agent 看到的是"这个主题
+        没有卡"，查不出是注册表写坏了，更不会想到去修那一行。"""
+        if t.get("card"):
+            return t["card"]
+        if t.get("card_invalid"):
+            return (f"（已拒绝：{t.get('card_error', '路径非法')}；"
+                    f"原值 `{t['card_invalid']}`——修 TOPICS.md 的 `- 卡:` 行）")
+        return "（未指定）"
+
     def _fmt_search(results: list[dict]) -> str:
         if not results:
             return "未找到相关笔记。"
@@ -115,7 +139,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 lines.append(f"   {w}")
         return "\n".join(lines)
 
-    @mcp.tool()
+    @tool()
     def memory_search(query: str, limit: int = 10, kind: str = "hybrid",
                       ctx: Context = None) -> str:
         """混合检索记忆（FTS + 语义向量）。结果带 ⚠ 标注表示存在疑似重复/矛盾，先合并再回答。
@@ -144,7 +168,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"搜索失败: {e}"
 
-    @mcp.tool()
+    @tool()
     def memory_read(path_or_title: str, ctx: Context = None) -> str:
         """读取笔记全文，附相关笔记（wiki-links + 语义近邻）。
 
@@ -182,7 +206,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                         lines.append(f"- [[{rel['title']}]] ({rel['via']}){note}")
             return "\n".join(lines)
 
-    @mcp.tool()
+    @tool()
     def memory_write(title: str, content: str, force: bool = False,
                      force_confirm: bool = False, ctx: Context = None) -> str:
         """新建笔记（一篇一主题，标题即主题名）。近似标题会被拒绝；更新已有笔记请用 memory_edit。
@@ -225,7 +249,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                          + "\n建议与对方笔记合并（memory_edit），或确认为不同事实时留给审计裁决。")
             return f"已写入并索引: {r['path']}{note}"
 
-    @mcp.tool()
+    @tool()
     def memory_edit(path: str, old_string: str, new_string: str,
                     ctx: Context = None) -> str:
         """就地修改笔记（唯一文本锚点替换）。这是更新事实的正确方式，不要新建重复笔记。
@@ -252,7 +276,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"编辑失败: {e}"
 
-    @mcp.tool()
+    @tool()
     def memory_edit_section(path: str, heading: str, new_content: str,
                             ctx: Context = None) -> str:
         """按 "## 标题" 替换整个小节（保留标题行，替换到下一个同级标题或文末）。
@@ -280,7 +304,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"编辑失败: {e}"
 
-    @mcp.tool()
+    @tool()
     def memory_move(path: str, new_path: str, ctx: Context = None) -> str:
         """移动笔记到新路径（标题不变，[[链接]] 按标题解析不受影响）。
 
@@ -303,7 +327,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"移动失败: {e}"
 
-    @mcp.tool()
+    @tool()
     def memory_delete(path: str, ctx: Context = None) -> str:
         """删除笔记。仅在用户明确要求时调用（如"删掉 X"/"X 不用记了"）；git 历史可恢复。
 
@@ -324,7 +348,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"删除失败: {e}"
 
-    @mcp.tool()
+    @tool()
     def memory_audit(ctx: Context = None) -> str:
         """全量一致性审计：外部变更自愈、标题重复、语义撞车、悬空链接、
         悬空主题卡、游离文件、守卫统计与 git 快照状态。"""
@@ -380,6 +404,23 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             lines.append(f"== 缺向量笔记（{len(mv)}，已重试自愈）==")
             for p in mv[:10]:
                 lines.append(f"- {p}")
+            # 越界索引行：审计结果里新增的键必须在这里手渲染出来，否则
+            # MCP 侧完全看不见（本工具是逐字段拼文本，不吃 dict 的自动序列化）
+            qc = r.get("quarantined_index_rows") or []
+            if qc:
+                lines.append(f"== 越界索引行（隔离·未读盘未删行，{len(qc)}）=="
+                             "需 reindex() 重建索引")
+                for e in qc[:10]:
+                    lines.append(f"- `{e['path']}` — {e['reason']}")
+            # 非法主题卡：agent 改坏 TOPICS.md 的 `卡:` 行后，主题仍在注册表里
+            # 但卡被置空。不报出来的话 agent 只看到"主题没有卡"，查不出原因——
+            # 而且这一类恰恰是 agent 自己能用一次 memory_edit 修好的。
+            itc = r.get("invalid_topic_cards") or []
+            if itc:
+                lines.append(f"== 非法主题卡（{len(itc)}）== 修 TOPICS.md 的 `- 卡:` 行即可")
+                for e in itc[:10]:
+                    lines.append(f"- {e.get('title', '')}: 原值 `{e.get('card', '')}`"
+                                 f" — {e.get('reason', '')}")
             ex = r.get("exec_status") or {}
             if ex:
                 lines.append(f"== 执行进度（{len(ex)}）== agent 经 memory_audit_update 汇报")
@@ -403,7 +444,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 lines.append(f"== 审计快照 == {r['audit_file']}")
             return "\n".join(lines)
 
-    @mcp.tool()
+    @tool()
     def memory_audit_update(issue_id: str, event: str, note: str = "",
                             ctx: Context = None) -> str:
         """汇报审计问题的执行进度：执行记忆修复时向 server 留痕。
@@ -434,7 +475,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                      "完成后下次 memory_audit 不再报告此问题即复审通过。")
         return "\n".join(lines)
 
-    @mcp.tool()
+    @tool()
     def memory_list(path: str = "", sort: str = "name", ctx: Context = None) -> str:
         """列出笔记目录树。
 
@@ -458,7 +499,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
 
     # ------------------------------------------------------------ topics
 
-    @mcp.tool()
+    @tool()
     def topic_list(tag: str = "", ctx: Context = None) -> str:
         """列出当前注册的长期记忆主题（活跃 + 已归档分组，附 abstract 位置与标签）。
 
@@ -487,7 +528,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 tags = t.get("tags") or []
                 lines.append(f"- {t['title']} — {t['status']}"
                              + (f"    标签: {', '.join(tags)}" if tags else ""))
-                lines.append(f"    卡: {t['card']}")
+                lines.append(f"    卡: {_card_line(t)}")
             if archived:
                 lines.append(f"\n已归档（{len(archived)} 个，检索仍可用、context 不再注入）：")
                 for t in archived:
@@ -496,7 +537,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                          "——agents/ 另有 identity 专属守卫）")
             return "\n".join(lines)
 
-    @mcp.tool()
+    @tool()
     def topic_status(title: str, status: str, ctx: Context = None) -> str:
         """更新注册表该主题的「现状」一行（一句话定位，非进度流水）。
 
@@ -520,7 +561,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         return (f"已更新「{r['title']}」注册表现状：{r['status']}\n"
                 f"abstract 卡的现状若也已变化，请一并 memory_edit 同步。")
 
-    @mcp.tool()
+    @tool()
     def topic_tag(title: str, add: str = "", remove: str = "",
                   ctx: Context = None) -> str:
         """为主题增删标签（轻量可逆元数据，0-多个）。优先复用已有标签，
@@ -547,7 +588,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 f"全库现有标签：{all_tags}\n"
                 f"打标签优先复用已有标签，避免同义词蔓延。")
 
-    @mcp.tool()
+    @tool()
     def topic_register(title: str, description: str = "", related: str = "",
                        tags: str = "", ctx: Context = None) -> str:
         """注册一个新的长期记忆主题。仅在用户明确要求时调用（如"把 X 加入长期记忆"）。
@@ -580,7 +621,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             return (f"已注册主题「{r['title']}」，abstract: {r['card']}。"
                     f"该主题后续的笔记写入主题卡所在目录；现状变化就地更新 abstract。")
 
-    @mcp.tool()
+    @tool()
     def topic_unregister(title: str, ctx: Context = None) -> str:
         """注销一个长期记忆主题（仅在用户明确要求时调用，如"X 不用长期记录了"）。
         仅移出注册表，笔记文件一律不动；归档语义请用 archive_topic。
@@ -602,7 +643,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                     f"相关笔记现为游离文件（审计会点名），请与用户确认后用 "
                     f"memory_move 归位 archive/，或明确确认后用 memory_delete 删除。")
 
-    @mcp.tool()
+    @tool()
     def archive_note(path: str, reason: str = "", ctx: Context = None) -> str:
         """归档主题内的一篇笔记（不是整个主题）：移入 archive/<主题名>/。
         仅在用户明确要求时调用；abstract（主题卡）不可单独归档；
@@ -626,7 +667,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         return (f"已归档: {r['archived']} → {r['to']}\n"
                 f"检索仍可用；WebUI 已归档分组可见；取消归档用 unarchive_note。")
 
-    @mcp.tool()
+    @tool()
     def unarchive_note(path: str, ctx: Context = None) -> str:
         """取消单篇归档：archive/<主题名>/<文件> 移回 topics/<主题名>/。
         仅在用户明确要求时调用。
@@ -647,7 +688,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 return f"取消归档失败: {e}"
         return f"已取消归档: {r['unarchived']} → {r['to']}"
 
-    @mcp.tool()
+    @tool()
     def archive_topic(title: str, ctx: Context = None) -> str:
         """归档主题（仅在用户明确要求时调用，如"X 归档吧"）：abstract 移入 archive/，
         注册表标记为已归档——检索仍可用，memory_context 不再注入，不计游离。
@@ -669,7 +710,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
 
     # ------------------------------------------------------------ profile
 
-    @mcp.tool()
+    @tool()
     def get_user_preference(section: str = "", ctx: Context = None) -> str:
         """读取用户画像与偏好（PROFILE.md，记忆层功能而非主题记忆）。返回全文或指定小节。
 
@@ -686,7 +727,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"读取失败: {e}"
 
-    @mcp.tool()
+    @tool()
     def update_user_preference(section: str, content: str,
                                ctx: Context = None) -> str:
         """创建或替换用户画像/偏好的一个小节（agent 加以维护；写提炼结论，不贴对话原文）。
@@ -707,7 +748,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"更新失败: {e}"
 
-    @mcp.tool()
+    @tool()
     def memory_context(ctx: Context = None) -> str:
         """返回核心记忆上下文：主题注册表 + 各主题卡摘要头 + 你的专属必读。
         每次会话开始时先调用一次。
@@ -731,7 +772,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                     "integration_check(onboarded_version=\"<你的版本>\") 自主更新]\n\n"
                     + body)
 
-    @mcp.tool()
+    @tool()
     def integration_check(onboarded_version: str = "", ctx: Context = None) -> str:
         """Agent 接入契约版本核对：汇报你本地接入提示词所基于的契约版本。
         落后于服务端时返回增量变更与最新写入约定速览，据此自主更新本地提示词。

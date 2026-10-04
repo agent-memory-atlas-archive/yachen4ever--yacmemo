@@ -188,6 +188,7 @@ def test_init_inside_outer_repo_uses_own_git(tmp_path):
     user2 实爆：--is-inside-work-tree 向上命中外层仓库返回 true 跳过 init）。"""
     import os
     import subprocess
+
     from yacmemo.config import Config, MemoryConfig
     from yacmemo.index_db import IndexDB
 

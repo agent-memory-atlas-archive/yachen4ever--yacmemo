@@ -54,6 +54,7 @@ The audit page has a **two-tab** structure; each of the two audit engines gets o
 - Each issue can expand its **execution timeline**: every agent report (started / progress / done / blocked) is listed with identity and time;
 - **Verified on re-audit**: issues the agent executed and this round's audit no longer reports move here automatically (the system appends a `verified` closing event) — verification is deterministic and needs no human sign-off; a verified issue that reappears is flagged as regressed;
 - Self-healing cards (new file / external modification / external deletion / **notes missing vectors**) are display-only, with no disposition buttons — notes missing vectors were written while the embedding endpoint was down, and the audit has already retried and filled them in automatically;
+- **Out-of-root index row alert** (added 2026-10-03): `quarantined_index_rows` from the audit result renders as its own warning alert, a different severity from the self-healing cards above (those mean "content never reached the index"; this one means "the index itself contains a poisoned row"): it lists each `path` with its rejection reason and explains that the row was quarantined (not read, not deleted, not written to the disposition table). It has **no** "Ignore" / "Copy Execution Instruction" button, because it is not a problem an agent can dispose of; the only remedy is "Settings → Health Overview → Maintenance → Full Index Rebuild" (reindex, a dangerous maintenance operation). Older backends without this field make no error — the alert simply isn't shown.
 - When audit snapshot files are deleted (manually or by curator expiry cleanup), the most-recent-audit cache is cleared in step, and the page degrades to a notice rather than an error;
 - **Judgment & execution log**: human dispositions (`audit_actions` table) and agent execution reports (`audit_exec_events` table) merged in reverse chronological order — both lines leave a trail;
 - **Historical audit snapshots**: two columns — the left holds the snapshot list (`journal/audit/<date>.md`, one per day, same-day reruns appending under a 复审 (Re-review) subsection, newest first) and the right renders the selected snapshot's markdown side by side instead of stacking it below; expiry cleanup is handled by the curator timer according to `audit_retention_days` (default 7 days).
@@ -68,6 +69,7 @@ Disposition guidance per issue type:
 | Dangling link (D3) | the `[[target]]` resolves to neither a title nor a path | "Copy Execution Instruction" to dispatch an agent to fix it; "Ignore" if it is not a note reference |
 | Dangling topic card (D5) | the abstract the registry points to does not exist | dispatch an agent to fix the registry or rebuild the card |
 | Stray file (D4) | loose notes not filed under any registered topic | dispatch an agent to file it into place; or "Ignore" |
+| ⚠ Out-of-root index row (quarantined · not read, not deleted) | the `notes` index holds a row pointing outside the memory root (a leftover from an older build) | the system offers no button: only "Settings → Health Overview → Maintenance → Full Index Rebuild" |
 
 > Registry-free zones (journal/archive/curator) are never judged stray. Guard statistics (refused / forced counts) sit at the bottom of the cards.
 
@@ -107,7 +109,7 @@ Four tabs: **Users** (structured add/edit/delete), **Service Config** (embedding
 
 - **Usage log**: a trace of every MCP tool call — top cards (calls/errors/clients over the last 14 days) + a table (time/user/tool/summary/client UA/IP/duration), filterable by tool; guard refusals count as normal business results and are not logged as errors;
 - **Health overview**: embedding configuration status (unconfigured = FTS-only mode), plus per-user note counts / open collision counts / guard statistics / topic counts;
-- **config.toml online editing**: before saving it automatically validates TOML syntax + structure (invalid configs are rejected outright), backs up the original file as `config.toml.bak-<timestamp>`, and keeps the 600 permission; optional "save and restart service" (systemd restart, about 3 seconds offline). Deleting a user is a dangerous operation — no button is provided; handle it manually over SSH.
+- **config.toml online editing**: before saving it automatically validates TOML syntax + structure (invalid configs are rejected outright), backs up the original file as `config.toml.bak-<timestamp>`, and keeps the 600 permission; optional "save and restart service" (systemd restart, about 3 seconds offline). For deleting a user see the "Users" entry in §2.7: by default only the config entry is removed, and the memory directory is physically deleted (irreversible) only when "also delete the memory directory" is checked; the delete button exists, with the full danger confirmation (typing the user id).
 
 ## 3. API Reference
 
@@ -115,7 +117,12 @@ All responses are JSON; business failures return `{"ok": false, "error": "..."}`
 
 | Method | Path | Params | Description |
 |---|---|---|---|
-| GET | `/api/overview` | — | user list (notes/collisions/guard stats) + embedding status + today's call count |
+| GET | `/api/overview` | — | user list (notes/collisions/guard stats) + embedding status + today's call count; per user it also carries `topics` / `archived_topics` arrays (`title` / `card` / `status` + **`card_invalid` / `card_error`** — when the registry `卡:` is invalid the `card` is blanked, and these two fields say why, so the page doesn't just show "this topic has no card" with no sign that the registry is broken) |
+| GET | `/api/{user}/topics` | — | topic list (`active` / `archived`, same fields: `title` / `card` / `status` / `related` / `tags` + `card_invalid` / `card_error`) |
+| GET | `/api/users` | — | detailed user list (id / memory root / git identity / whether the directory exists / whether mounted) + the config.toml path |
+| POST | `/api/users/add` | `{id, root, git_user_name?, git_user_email?}` | Add a user (id limited to letters/digits/underscore/hyphen, system reserved words api/ui/health rejected); the memory directory is created automatically, and **a new user needs a restart before it is mounted** |
+| POST | `/api/users/update` | `{id, root?, git_user_name?, git_user_email?, restart?}` | Update a user; fully validated first, then written back with an annotated backup (comments and ordering preserved); a `root` change triggers a restart by default |
+| POST | `/api/users/delete` | `{id, confirm_id, purge?, restart?}` | Delete a user (**dangerous operation**): `confirm_id` must equal `id`; by default only the config entry is removed (memory directory and git history preserved), while `purge=true` physically deletes the memory directory via `rmtree` (irreversible); returns `purged` and the backup path |
 | GET | `/api/usage` | `limit` `user` `tool` | call log (default 100 entries, newest first) |
 | GET | `/api/usage/clients` | — | client summary (UA + IP + call count + last active) |
 | GET | `/api/usage/days` | — | per-day call/error counts for the last 14 days |

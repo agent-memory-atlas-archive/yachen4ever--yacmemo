@@ -52,6 +52,31 @@
             <AuditSection :title="t('外部修改（已自动重建索引）')" :items="auditData.resynced" />
             <AuditSection :title="t('外部删除（已清理索引）')" :items="auditData.missing" />
             <AuditSection :title="t('缺向量笔记（已重试自愈）')" :items="auditData.missing_vectors" />
+            <!-- 越界索引行：后端隔离上报（未读盘、未删行）。后端 /api/audit 已经
+                 带着这个字段返回，但页面只渲染写死的几个 section，不加这行就
+                 永远看不见——而它需要人处置（reindex），不能只躺在 API 里。
+                 严重性高于上面几节：那是"内容没进索引"，这是"索引里有毒行"。 -->
+            <n-alert v-if="quarantinedRows.length" type="warning" :bordered="false"
+              title="⚠ 越界索引行（隔离·未读盘未删行）" style="margin: 8px 0">
+              <div class="qc-hint">{{ t('这些索引行指向记忆库根目录之外的文件，已隔离：不读盘、不删行、不计入处置表。需要 reindex() 重建索引才能清除。') }}</div>
+              <n-list>
+                <n-list-item v-for="(r, i) in auditData.quarantined_index_rows" :key="i">
+                  <code>{{ r.path }}</code> — {{ t(r.reason) }}
+                </n-list-item>
+              </n-list>
+            </n-alert>
+            <!-- 非法主题卡：来源不同（TOPICS.md 正文，不是派生索引），
+                 处置也不同——改一行注册表就能修，agent 自己就能做。
+                 所以单独一节，不要混进上面的 reindex 类。 -->
+            <n-alert v-if="(auditData.invalid_topic_cards || []).length" type="error" :bordered="false"
+              :title="`⚠ ${t('非法主题卡')} (${auditData.invalid_topic_cards.length})`" style="margin: 8px 0">
+              <div class="qc-hint">{{ t('这些主题的 - 卡: 指向记忆库根目录之外，卡已被置空、主题仍在注册表里。修 TOPICS.md 对应那一行即可。') }}</div>
+              <n-list>
+                <n-list-item v-for="(r, i) in auditData.invalid_topic_cards" :key="i">
+                  {{ r.title }} — <code>{{ r.card }}</code> — {{ t(r.reason) }}
+                </n-list-item>
+              </n-list>
+            </n-alert>
 
             <!-- 问题列表：与提案页同一套两级语言——
                  行 = 状态 + 类型 + 一句话描述（行内按钮），展开看详情与时间线 -->
@@ -234,7 +259,7 @@
 import { ref, computed, watch, onMounted, defineComponent, h } from 'vue'
 import {
   NSpace, NCard, NButton, NList, NListItem, NText, NTag, NTabs, NTabPane,
-  NStatistic, NEmpty, NCollapse, NCollapseItem, NSelect, useMessage,
+  NStatistic, NEmpty, NCollapse, NCollapseItem, NSelect, NAlert, useMessage,
 } from 'naive-ui'
 import { marked } from 'marked'
 import { api, params } from '../composables/api.js'
@@ -249,6 +274,10 @@ const auditing = ref(false)
 const curatorRunning = ref(false)
 const auditData = ref(null)
 const lastAuditTs = ref(0)
+
+// 越界索引行（后端隔离上报）。键是可选的——旧版本后端没有这个字段，
+// 页面不能因此崩。
+const quarantinedRows = computed(() => auditData.value?.quarantined_index_rows ?? [])
 
 // ---- 审计历史 / 快照 ----
 const runs = ref([])

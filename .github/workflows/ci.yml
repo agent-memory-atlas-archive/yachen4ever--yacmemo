@@ -28,6 +28,11 @@ jobs:
           npm ci
           npm run build
 
+      # 前端单测（vitest run）：依赖已由上一步 npm ci 装好
+      - name: Test WebUI frontend
+        working-directory: frontend
+        run: npm test
+
       # 后端：安装 + lint + 全量测试
       - name: Install Python deps
         run: |

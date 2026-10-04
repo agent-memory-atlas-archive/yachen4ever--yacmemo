@@ -110,7 +110,7 @@ yacmemo-curator（systemd timer，每周）——读注册表/主题卡/审计 �
 
 The data model collapsed from v1's three tables (nodes/edges/events) into two levels, **notes + observations**: the note is the primary entity, and observations (when the agent uses the syntax) are fact lines inside a note, used for finer-grained retrieval and collision detection. No entity table, no edge table, no event table.
 
-The two users' memories are fully independent: each Store binds its own root at construction time (fixed boundary; no cross-directory bleed from lazy resolution); HTTP transport uses stateless sessions, so any MCP client needs no session affinity. The 13 tools are registered once in `yacmemo/tools.py`; the stdio (`yacmemo-mcp`) and HTTP (`yacmemo-server`) entry points share the same tool surface.
+The two users' memories are fully independent: each Store binds its own root at construction time (fixed boundary; no cross-directory bleed from lazy resolution); HTTP transport uses stateless sessions, so any MCP client needs no session affinity. The 22 tools are registered once in `yacmemo/tools.py`; the stdio (`yacmemo-mcp`) and HTTP (`yacmemo-server`) entry points share the same tool surface.
 
 ---
 
@@ -228,7 +228,7 @@ Beyond the body, `memory_read` also returns "related notes": `[[链接]]` target
 
 ---
 
-## 6. MCP tool surface (17 tools)
+## 6. MCP tool surface (22 tools)
 
 | Tool | Signature | Key behavior |
 |---|---|---|
@@ -240,6 +240,7 @@ Beyond the body, `memory_read` also returns "related notes": `[[链接]]` target
 | `memory_move` | `path, new_path` | Move + store-wide index updated to follow the path ([[链接]] resolves by title; moving does not change titles, so links need no rewriting); **the target path is subject to the same topic hard block** (moves into registry-free zones are allowed) |
 | `memory_delete` | `path` | **Call only when the user explicitly asks**; deletes the file + all its index rows; the git snapshot preserves history; when the deleted note is the most recent audit snapshot, the last_audit cache is cleared in tandem |
 | `memory_audit` | — | Self-healing (hash-level recomputation and cleanup for external modifications/deletions; retries embedding for notes missing vectors) + D1/D3/D4/D5 scans + collisions report + guard statistics + self-cleanup of blank disposition lines + git snapshot status line |
+| `memory_audit_update` | `issue_id, event, note=""` | Report **execution progress** on an audit issue (the agent-side entry point that separates judgement from execution): `event` is `executing`/`progress`/`executed`/`blocked`, identity is recorded into the timeline automatically; **re-verification is not the agent's job** — only an issue whose last execution event is `executed` and that a rerun no longer reports gets sealed automatically |
 | `memory_list` | `path="", sort="name"\|"mtime"` | Directory tree / recent changes |
 | `memory_context` | — | **Call first at session start**: PROFILE front-loaded + registry + abstract summary headers of active topics (cold-start recap) |
 | `topic_list` | `tag` | List active/archived topics (grouped, with tags; filterable by tag) |
@@ -247,9 +248,12 @@ Beyond the body, `memory_read` also returns "related notes": `[[链接]]` target
 | `topic_tag` | `title, add, remove` | Add/remove topic tags (lightweight reversible; response carries the full tag inventory) |
 | `topic_status` | `title, status` | Update the registry status line (sync after abstract changes) |
 | `topic_unregister` | `title` | Unregisters a topic (**only when the user explicitly asks**; only removed from the registry, notes untouched, adjudicated once stray) |
+| `archive_note` | `path, reason=""` | Archive a single note inside a topic (**only when the user explicitly asks**): moves it into `archive/<topic>/`, with `reason` optionally written into the header status line; an abstract cannot be archived on its own and an existing target is refused; **never move manually to the archive/ root with memory_move** |
+| `unarchive_note` | `path` | Undo a single-note archive: reverse-looks-up the active topic by directory name and moves it back to `topics/<topic>/`; a free-form archive directory (not topic-shaped) is an error |
 | `archive_topic` | `title` | Archives a topic (**only when the user explicitly asks**): the entire topic directory moves into archive/ (card paths rewritten in sync); retrieval keeps working, context no longer injects it |
 | `get_user_preference` | `section=""` | Reads the full profile & preferences or a specified section (PROFILE.md feature layer) |
 | `update_user_preference` | `section, content` | Creates/replaces one section of the profile & preferences (maintained by the agent) |
+| `integration_check` | `onboarded_version=""` | **Agent integration contract version check** ("teach the AI to self-update"): the agent reports the contract version recorded locally; when behind, the server returns incremental changes plus the write-convention quick reference, and the agent autonomously updates its local prompt from it |
 
 Full specifications: [02-mcp-tools.md](02-mcp-tools.md).
 
@@ -373,7 +377,7 @@ A list of `[[链接]]` pointing to nonexistent notes, output by audit. `memory_m
 删除：
 13. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 审计与提案：
-14. 执行审计问题（memory_audit 发现的、或 WebUI 执行指令派下的）时用 memory_audit_update 汇报：executing 接手 → progress 过程 → executed 完成（附摘要）/ blocked 受阻；复审由审计自动确认，不要声称"已验证"、不要代替人忽略。
+14. 执行审计问题（memory_audit 发现的、或 WebUI 执行指令派下的）时用 memory_audit_update 汇报：executing 接手 → progress 过程 → executed 完成（附摘要）/ blocked 受阻；复审由审计自动确认，但只有以 executed 收口的问题才可能被封口——停手前务必补一条 executed，不要声称"已验证"、不要代替人忽略。
 15. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读。
 ```
 
@@ -481,7 +485,7 @@ Each phase can be rolled back independently: the system is already usable after 
 - **Iron rule: propose only, never execute** — the final form of the v1 lesson about "auto-invalidation without asking": the maintainer LLM is back, but stripped of all write power (the sole exception: incidentally cleaning up expired journal/audit/ audit snapshots per `audit_retention_days` (default 7 days) — dispositions live in the audit_actions table and the full history in git; snapshot files are merely a view of the recent working set);
 - Approved proposals are executed by the agent or a human, and execution leaves a record in the report note.
 
-### Tool surface (17 tools in total)
+### Tool surface (22 tools in total)
 
 The topic-lifecycle quartet `topic_list` / `topic_register` / `topic_unregister` / `archive_topic` plus the cold-start `memory_context`, and the profile & preferences pair `get_user_preference` / `update_user_preference`; specifications in [02-mcp-tools.md](02-mcp-tools.md). Unregistering only removes from the registry and never touches notes (afterwards the notes become stray files, named by D4 for adjudication); archiving keeps retrieval working but withdraws context injection — guaranteeing no silent data loss across the whole topic lifecycle.
 

@@ -132,7 +132,7 @@ TeleAgent's MCP JSON (Settings → Tool Settings → Import from JSON) documents
 }
 ```
 
-**② If unsupported, use a stdio bridge** (verified end-to-end on Windows: stdio → mcp-proxy → HTTP → debsvc, with all 8 tools and vector retrieval working). Prerequisite: the machine running TeleAgent has [uv](https://docs.astral.sh/uv/) installed (a one-time `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"` will do):
+**② If unsupported, use a stdio bridge** (verified end-to-end on Windows: stdio → mcp-proxy → HTTP → debsvc, with the full tool surface and vector retrieval working). Prerequisite: the machine running TeleAgent has [uv](https://docs.astral.sh/uv/) installed (a one-time `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"` will do):
 
 ```json
 {

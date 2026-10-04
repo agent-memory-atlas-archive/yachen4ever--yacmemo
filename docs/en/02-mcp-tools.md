@@ -1,6 +1,6 @@
 > English | [简体中文](../02-mcp-tools.md)
 
-# MCP Tool Specifications (17 tools)
+# MCP Tool Specifications (22 tools)
 
 > Applicable transports: stdio (`yacmemo-mcp`) and HTTP (`yacmemo-server`); the tool surface is identical.
 > All tools return human-readable text; errors are returned directly as Chinese messages (no protocol errors are thrown), readable and self-correctable by the agent.
@@ -77,6 +77,7 @@ Return = `[正文开始 | path | 锚点提示]` + **verbatim body** + `[正文�
 - The "related notes" after `[正文结束]` are **tool-appended information, not file content** (no longer uses `##` heading syntax, to avoid being mistaken for note sections):
   - For `[[wiki-link]]` targets that exist: lists the title + the other note's first observation (`via: link`);
   - For missing targets: annotated "target does not exist" (the agent can create or clean it up in passing);
+  - When the target exists in the index but **that row's `path` is out-of-root** (quarantined, see `quarantined_index_rows` in §7): an entry carrying **neither a `path` nor an observation**, only `quarantined: true` plus the reason — the bad row's path and content are never disclosed, the caller just sees "this link sits on a bad row" (added 2026-10-03). Link targets come from the same derived index table, so an out-of-root row takes part in none of this section's reads;
   - Semantic nearest neighbors top-2 (`via: vector`, requires an embedding endpoint).
 
 ## 3. memory_write
@@ -186,7 +187,35 @@ Full consistency audit that also **self-heals**:
 7. D4 stray files (loose files outside the registry-free zones that belong to no registered topic — the agent uses this to prompt the user to file them back);
 8. **Missing-vector note call-outs + self-healing retry**: notes written during an embedding endpoint outage (vector_ok=0) have embedding retried at audit time; success means self-healed, continued failure keeps the call-out;
 9. Guard statistics (refused / forced / uncovered counts); all-empty disposition lines are cleaned up automatically;
-10. **Auto-cleared stale collision pair statistics** (added 2026-09-19): D2 old pairs that no longer match after note deletion or recomputation — an overview line + the `== auto-cleared stale collision pairs ==` line + a record in the audit snapshot.
+10. **Auto-cleared stale collision pair statistics** (added 2026-09-19): D2 old pairs that no longer match after note deletion or recomputation — an overview line + the `== auto-cleared stale collision pairs ==` line + a record in the audit snapshot;
+11. **Out-of-root index rows are reported as quarantined** (added 2026-10-03): the `notes` table is derived data, and it may still hold out-of-root paths written by older (holed) builds. Such rows are **reported, never disposed of** — never read from disk (outside content must never reach FTS / the vector store), never deleted, never rewritten, given no issue_id, never written to `audit_actions` (that table means "a human/agent has disposed of some D1/D3/D4"; mixing this in pollutes the disposition state and may even suppress a genuinely pending report), excluded from D1 pairing (otherwise it produces a bogus "duplicate title" todo whose a_path/b_path are out of root), and excluded from "missing vectors" (retrying it can never self-heal, and leaving it there only trains people to ignore the audit). The output section `== out-of-root index rows (quarantined · not read, not deleted, N) ==` lists each path with its reason and states that the **remedy is `reindex()`**, a human action: it cannot be disposed of via `memory_audit_update` (no issue_id) and is never sealed by re-audit, so an agent that sees it must tell the human rather than silently skip it. `memory_read` treats a link pointing at such a row the same way — reported, never disclosed (see §2);
+12. **Invalid registry `卡:` values are reported** (added 2026-10-03): the `- 卡:` line lives in the registry, so an agent can rewrite it with one ordinary `memory_edit`, and every consumer concatenates that value as a raw path. The parse entry funnels it through the same path guard (`store._topic_card`): an invalid value is **blanked** (`card=""`) and **not raised** — `load_topics()` runs inside `memory_context()`, and taking the whole memory layer down over one malformed registry line costs far more than that one card; the topic is **still listed**, it simply has no card. The offending raw value and the reason land in `card_invalid` / `card_error` (carried by `topic_list` / `memory_context` / the WebUI topic endpoints, so consumers degrade safely), and are preserved as the result key `invalid_topic_cards` plus a "registry card path invalid (blanked · not read)" section in the audit snapshot. The remedy is to hand-fix the `卡:` line in `TOPICS.md` back to an in-root path — **this one an agent can do itself** with a single `memory_edit`, the opposite of the previous item.
+
+**Audit result keys (what `Store.audit()` returns)**: the return value is a contract shared by three consumers — the MCP `memory_audit` assembles text field by field, the WebUI audit page reads the same dict, and the audit snapshot writes markdown from the same data. Every key therefore has a name in this spec (`tests/test_doc_truth.py` checks them one by one; a new key with no documentation turns the guard red immediately):
+
+| Key | Meaning | Appears in |
+|---|---|---|
+| `added` | Newly discovered files (indexed) | text section + snapshot |
+| `resynced` | External modifications (index rebuilt) | text section + snapshot |
+| `missing` | External deletions (index cleaned) | text section + snapshot |
+| `title_duplicates` | D1 duplicate titles | text section + snapshot + audit page |
+| `collisions` | D2 semantic collisions (open status, with both sides' text and scores) | text section + snapshot + audit page |
+| `dangling_links` | D3 dangling `[[link]]`s | text section + snapshot + audit page |
+| `stray` | D4 stray files | text section + snapshot + audit page |
+| `dangling_cards` | D5 dangling topic cards (a list of issue_ids) | text section + snapshot + audit page |
+| `missing_vectors` | Notes missing vectors (self-heal retried) | text section + snapshot + audit page |
+| `pruned_stale_collisions` | **Count** of auto-cleared stale collision pairs | text section + snapshot overview |
+| `pruned_blank_actions` | **Count** of auto-cleaned blank disposition lines | snapshot overview |
+| `quarantined_index_rows` | Quarantined out-of-root index rows (`path` + `reason`), remedy is reindex | text section + snapshot + audit-page alert |
+| `invalid_topic_cards` | Invalid registry `卡:` values (`title` / `card` / `reason`) | snapshot section (see the note below) |
+| `exec_status` | issue_id → latest execution event for this round (`event`/`identity`/`note`) | text section |
+| `verified` | issue_ids sealed by re-audit this round | text section + snapshot |
+| `reconciled_proposals` | Number of proposal-settlement backfills | text section |
+| `guard_stats` | refused / forced / uncovered counts | text section + audit-page health card |
+| `git` | Git snapshot status line | end of text section |
+| `audit_file` | Path of this round's audit snapshot (`journal/audit/<date>.md`) | end of text section |
+
+> The text output is **hand-assembled field by field** (not an automatic dict serialization), so a key existing ≠ a section existing in the text: today `invalid_topic_cards` only lands in the audit snapshot section, and neither the MCP text nor the WebUI audit page shows it — read the snapshot file when you need this item; `quarantined_index_rows` appears in all three.
 
 Fix suggestions are inlined throughout the output. Findings are shown as soon as discovered; **the system never auto-deletes or auto-invalidates anything**. External changes involved in self-healing are snapshotted into the repo uniformly as `external: self-healed N note(s)`, preserving the git-clean invariant (the end of the output carries a git snapshot status line and the current audit snapshot path `journal/audit/<date>.md` — one per day, with same-day re-audits appending; stale snapshots are cleaned up by curator according to `audit_retention_days`).
 
@@ -204,7 +233,7 @@ Reports **execution progress** for an audit issue (new in contract 0.3.3). This 
 - `event`: `executing` started / `progress` update / `executed` done / `blocked` stuck, needs a human;
 - `note`: one-line explanation (what was done / what is blocking);
 - identity is recorded automatically (which agent on which device reported); the timeline is append-only and rendered item by item on the WebUI audit page;
-- **re-verification is not the agent's job**: when done, re-run `memory_audit` — an issue no longer reported is verified automatically (the system appends the closing event); never claim "already verified" and never dismiss issues on a human's behalf.
+- **re-verification is not the agent's job**: when done, re-run `memory_audit` — an issue **must end on `executed`** (its last execution event is `executed`) and no longer be reported before it counts as verified (the system appends the closing event); reporting only `executing` or `blocked` never seals it. Never claim "already verified" and never dismiss issues on a human's behalf.
 
 ## 8. memory_list
 

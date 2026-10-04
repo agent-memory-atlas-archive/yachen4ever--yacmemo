@@ -17,7 +17,7 @@ def test_contract_version_is_package_version():
     from pathlib import Path
     pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
     v = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
-    assert AGENT_CONTRACT_VERSION == v
+    assert v == AGENT_CONTRACT_VERSION
     assert AGENT_CONTRACT_VERSION != "0.0.0"
 
 

@@ -16,6 +16,7 @@ import json
 import logging
 import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import httpx
 
@@ -23,8 +24,12 @@ from yacmemo.config import Config, UserEntry, load_config
 
 logger = logging.getLogger("yacmemo.curator")
 
+# 系统提示词里的超长行用行尾反斜杠续行（E501）——断的是源码行，不是提示词
+# 文本：反斜杠在字符串里不产生字符，`_SYSTEM_PROMPT` 的实际内容与续行前
+# 逐字节一致。改字面量内容会直接改变 LLM 的审查判据，谨慎补字。
 _SYSTEM_PROMPT = """你是个人记忆体系的质量审查员。
-你收到：主题注册表、各主题卡（现状手册）、各主题模块文件的小节标题、PROFILE.md（用户画像）、agents/ 强制注入必读的小节标题、审计结果。
+你收到：主题注册表、各主题卡（现状手册）、各主题模块文件的小节标题、\
+PROFILE.md（用户画像）、agents/ 强制注入必读的小节标题、审计结果。
 你的任务是发现记忆体系的质量问题并输出"提案"——你只提案，绝不执行，也绝不修改任何记忆。
 
 先理解记忆的分层模型（决定内容放对没放对）：
@@ -65,7 +70,8 @@ _SYSTEM_PROMPT = """你是个人记忆体系的质量审查员。
 
 输出严格 JSON（不要 markdown 代码块）：
 {"summary": "总体评价（2-3 句）",
- "findings": [{"type": "duplicate|outdated|stray|stale-card|merge|forget|misplaced|profile-overlap|tag-missing|tag-duplicate|tag-mismatch|other",
+ "findings": [{"type": "duplicate|outdated|stray|stale-card|merge|forget|\
+misplaced|profile-overlap|tag-missing|tag-duplicate|tag-mismatch|other",
                "severity": "high|medium|low",
                "paths": ["涉及笔记路径"],
                "reason": "判断依据",

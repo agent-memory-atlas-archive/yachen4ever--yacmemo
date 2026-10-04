@@ -27,11 +27,9 @@ codex mcp add yacmemo --url http://debsvc.local:9721/<用户ID>/mcp
 
 1. **会话开始**：先调 `memory_context` 冷启动回顾，然后向用户展示一行接入摘要，例如：
 
-   > ✅ 已接入 yacmemo 记忆层（用户：yachen，契约 v0.3.1）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；专属必读 2 份已注入；最近审计无待处理问题。
+   > ✅ 已接入 yacmemo 记忆层（用户：yachen，契约 v0.3.x）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；专属必读 2 份已注入；最近审计无待处理问题。
 
    携带 identity token（`Authorization: Bearer <device>_<agent>`，stdio 用环境变量 `YACMEMO_TOKEN`，token 由 WebUI「身份」页生成）的 agent 会自动获得 `agents/` 专属记忆区：`memory_context` 注入你的专属必读，`memory_search` 范围限定为 user 层 + 你的专属区。未配置 token 不影响 user 层使用。
-
-   > ✅ 已接入 yacmemo 记忆层（用户：yachen，契约 v0.1.3）——画像偏好 3 条；活跃主题 12 个：《yacmemo部署配置》《备份策略》……；最近审计无待处理问题。
 
 2. **日常遵循记忆纪律**（完整约定见 [01-architecture.md §八](01-architecture.md)，工具规格见 [02-mcp-tools.md](02-mcp-tools.md)）：
 
@@ -41,7 +39,9 @@ codex mcp add yacmemo --url http://debsvc.local:9721/<用户ID>/mcp
    - **专属必读写自己的 identity 区**：`agents/<agent>/shared/必读.md`（同 agent 跨设备共享）或 `agents/<agent>/<device>/必读.md`（本机专属）；只放指针与纪律，事实一律进 topics/；引用其他层路径必须代入真实设备名（agents/teleagent/r9000x/必读.md），模板占位一律写尖括号形式（agents/<agent>/<device>/…），禁止留空段——agents/teleagent//必读.md 会被当成真实路径、检索必然失败。
    - **abstract 是摘要卡**（`topics/<主题>/abstract.md`）：保持一句话现状，现状变化用 `memory_edit` 就地更新；详细内容写成模块笔记 `topics/<主题>/<笔记名>`，不要把长文塞进 abstract；
    - 事实行用 observation 语法：`- [配置] 服务端口为 9721`；
-   - **执行审计问题要汇报进度**：处理 `memory_audit` 发现的问题、或 WebUI「复制执行指令」派下的问题时，先 `memory_audit_update(issue_id, "executing")` 接手，关键动作 `"progress"` 汇报，完成 `"executed"` 附改动摘要，受阻 `"blocked"` 说明卡点；复审由审计自动确认（下轮不再报告即通过），不要声称"已验证"、不要代替人忽略问题；
+   - **执行审计问题要汇报进度**：处理 `memory_audit` 发现的问题、或 WebUI「复制执行指令」派下的问题时，先 `memory_audit_update(issue_id, "executing")` 接手，关键动作 `"progress"` 汇报，完成 `"executed"` 附改动摘要，受阻 `"blocked"` 说明卡点；复审由审计自动确认（**必须以 `executed` 收口、且下轮不再报告才封口**），不要声称"已验证"、不要代替人忽略问题；
+   - **`== 越界索引行 ==` 你修不了，要转告人**：这一节列出的索引行指向记忆库根目录之外的文件，已被隔离（不读盘、不删行、不给 issue_id）。没有 `issue_id` 就没有 `memory_audit_update` 可写，`reindex()` 又是维护动作——看到它不要自行"忽略"、也不要去改那些笔记；照实告诉用户「索引里有 N 行越界，需要重建索引」，然后继续做别的事；
+   - **主题没有卡 = 注册表 `卡:` 被判非法**：主题在 `topic_list` / `memory_context` 里照常出现、`卡:` 却是空的，说明有人把 `TOPICS.md` 那一行写成了越界路径（解析入口已置空，不会读盘）。**这一项你能自己修**：用 `memory_edit` 把那一行的 `卡:` 改回库内相对路径（如 `topics/<主题>/abstract.md`），主题摘要与 curator 材料随即恢复。原因写在审计快照的「注册表卡路径非法（已置空·未读盘）」小节里（路径见 `memory_audit` 输出的 `== 审计快照 ==` 行），被拒的原值与理由分别叫 `card_invalid` 与 `card_error`（注册表主题的载荷字段，WebUI 主题接口带着它们）。注意 `topic_list` 的文本输出只显示空的 `卡:`、不会告诉你原因——别把这个空值当成"这个主题没注册卡"，它意味着注册表那一行被判非法；
    - **已结案提案不再可检索**：curator/ 提案报告的全部条目执行完成或忽略后会被系统打结案标记，`memory_search` 默认不返回——不要去执行已结案提案里的条目；`memory_read` 按路径仍可读（那是明确查阅）；
    - 归档主题内的单篇笔记用 `archive_note`（取消用 `unarchive_note`）；不要手工 memory_move 到 archive/ 根目录（脱离主题归属、WebUI 主题树不可见）；
    - 注册 / 注销 / 归档主题、删除笔记：**仅在用户明确要求时执行**。

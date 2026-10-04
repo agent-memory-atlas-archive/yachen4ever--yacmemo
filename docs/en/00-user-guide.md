@@ -160,7 +160,7 @@ Once every finding is executed or dismissed, the proposal is **closed automatica
 "Run a memory audit for me."
 ```
 
-The agent calls `memory_audit`, which outputs six kinds of information:
+The agent calls `memory_audit`, which outputs eight kinds of information:
 
 | Output | Meaning | What you do |
 |---|---|---|
@@ -170,10 +170,12 @@ The agent calls `memory_audit`, which outputs six kinds of information:
 | Dangling links | A `[[link]]` points to a non-existent note | Have the agent create the target or remove the link |
 | Dangling topic cards | The abstract file pointed to by the registry does not exist (usually leftovers from manual registry edits / directory reorganization) | Have the agent fix the registry path or rebuild the card |
 | Stray files | Loose files that exist but belong to no registered topic | Decide whether to register them as a topic, relocate them into a topic directory, or delete them |
+| ⚠ Out-of-root index rows | The index still holds rows pointing outside the memory root (leftovers from out-of-root writes by an older build); quarantined — neither read nor deleted | The system offers no one-click button: have the agent report it, then you decide whether to use "Settings → Full Index Rebuild" |
+| Invalid registry card path | The registry's `卡:` was written as an out-of-root path, so the card is blanked (the topic is still listed, it just has no summary card) | Have the agent use memory_edit to set that line back to an in-root path (e.g. `topics/<topic>/abstract.md`) |
 
 Once a week is recommended, or anytime memory feels "a bit messy".
 
-> **The WebUI audit page is more convenient**, and the whole page follows one role split: **humans only judge (dismiss false positives / dispatch to agents), agents only execute (and report progress), the system only verifies (re-checks confirmed automatically)**. Each issue carries a status tag (pending / executing / executed / verified / dismissed) and two actions — "Copy Execution Instruction" embeds the reporting convention, so pasting it to any agent starts the work; "Ignore" settles a false positive permanently. For issues an agent has fixed, the next audit not reporting them anymore means automatic "verified" — no human sign-off needed; a verified issue that reappears is flagged as regressed. Filter by status; snapshots are taken **once per day** (`journal/audit/<date>.md`; re-running on the same day appends a "Re-review" section), the "Judgment & execution log" merges human dispositions and agent reports chronologically, and expired snapshots are auto-cleaned weekly by the curator (7 days kept by default) — see [07-webui.md](07-webui.md) §2.3 for details.
+> **The WebUI audit page is more convenient**, and the whole page follows one role split: **humans only judge (dismiss false positives / dispatch to agents), agents only execute (and report progress), the system only verifies (re-checks confirmed automatically)**. Each issue carries a status tag (pending / executing / executed / verified / dismissed) and two actions — "Copy Execution Instruction" embeds the reporting convention, so pasting it to any agent starts the work; "Ignore" settles a false positive permanently. For issues an agent has fixed and reported as executed, only a next audit no longer reporting them means automatic "verified" — no human sign-off needed; a verified issue that reappears is flagged as regressed. Filter by status; snapshots are taken **once per day** (`journal/audit/<date>.md`; re-running on the same day appends a "Re-review" section), the "Judgment & execution log" merges human dispositions and agent reports chronologically, and expired snapshots are auto-cleaned weekly by the curator (7 days kept by default) — see [07-webui.md](07-webui.md) §2.3 for details.
 
 ---
 

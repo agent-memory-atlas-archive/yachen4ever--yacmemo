@@ -433,6 +433,49 @@ def test_audit_auto_verifies_executed_issue(store: Store):
     assert r3["verified"] == []
 
 
+def test_audit_does_not_seal_issue_never_reported_executed(store: Store):
+    """复审封口必须以 executed 为前提（2026-10-03 审查 H1）。
+
+    修前跳过条件只有「P 类 / 本轮仍在报告 / 已封口」，唯独不查最后一条
+    事件是不是 executed——只报 executing 就停手的 issue 会被永久封成
+    「复审通过」，于是"没修"和"修好了"在系统里长得一样，且封口不可逆
+    （下次 last event 变成 verified，无条件跳过），失效时还不报错。
+    """
+    store.write("notes/a笔记", "# a笔记\n引用 [[ghost]]。\n")
+    d3 = "D3:notes/a笔记.md|ghost"
+    store.audit_exec_report(d3, "executing", note="准备改")
+    # 问题从本轮报告里消失（此处被别的改动顺手消掉）
+    store.write("notes/ghost", "# ghost\n目标出现了。\n")
+
+    r1 = store.audit()
+    assert r1["dangling_links"] == []
+    assert d3 not in r1["verified"], "只报了 executing 就被封成复审通过"
+    assert store.db.exec_last_status()[d3]["event"] == "executing"
+
+    # 反复审计不会自己封口——不可逆的那一步根本没发生
+    r2 = store.audit()
+    assert d3 not in r2["verified"]
+    assert store.db.exec_last_status()[d3]["event"] == "executing"
+
+    # 补上真正的执行汇报后才允许封口
+    store.audit_exec_report(d3, "executed", note="已补")
+    r3 = store.audit()
+    assert r3["verified"] == [d3]
+    assert store.db.exec_last_status()[d3]["event"] == "verified"
+
+
+def test_audit_does_not_seal_blocked_or_progress_only_issue(store: Store):
+    """blocked = 仍需人工介入，不能算复审通过；progress 同理。"""
+    for event in ("blocked", "progress"):
+        store.write(f"notes/笔记{event}", f"# 笔记{event}\n引用 [[ghost{event}]]。\n")
+        d3 = f"D3:notes/笔记{event}.md|ghost{event}"
+        store.audit_exec_report(d3, event, note="还没修完")
+        store.write(f"notes/ghost{event}", f"# ghost{event}\n目标出现了。\n")
+        r = store.audit()
+        assert d3 not in r["verified"], f"{event} 状态的 issue 被误封口"
+        assert store.db.exec_last_status()[d3]["event"] == event
+
+
 def _proposal_markdown() -> str:
     return (
         "# 记忆质量提案（测试，2026-09-25）\n\n"

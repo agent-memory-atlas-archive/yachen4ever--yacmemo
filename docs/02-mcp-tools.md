@@ -1,6 +1,6 @@
 > [English](en/02-mcp-tools.md) | 简体中文
 
-# MCP 工具规格（17 个）
+# MCP 工具规格（22 个）
 
 > 适用传输：stdio（`yacmemo-mcp`）与 HTTP（`yacmemo-server`），工具面完全一致。
 > 所有工具返回人类可读文本；错误以中文消息直接返回（不抛协议错误），agent 可读可自纠。
@@ -77,6 +77,7 @@ memory_read(path_or_title: str) -> str
 - `[正文结束]` 之后的"相关笔记"是**工具附加信息，非文件内容**（不再用 `##` 标题语法，避免被误认为笔记小节）：
   - `[[wiki-link]]` 目标存在的：列出标题 + 对方首条 observation（`via: link`）；
   - 目标不存在的：标注"目标不存在"（agent 可顺手创建或清理）；
+  - 目标在索引里、但**那一行的 `path` 越界**（被隔离，见 §7 的 `quarantined_index_rows`）：给一条**既没有 `path` 也没有 observation**、只带 `quarantined: true` 与原因的条目——坏行指向的路径与内容一律不外泄，只让调用方看见"这条链接背后有坏行"（2026-10-03 增补）。链接目标同样来自派生索引表，越界行不参与这一段的任何读取；
   - 语义近邻 top-2（`via: vector`，需要 embedding 端点）。
 
 ## 3. memory_write
@@ -186,7 +187,35 @@ memory_audit() -> str
 7. D4 游离文件（免注册区之外、不属于任何注册主题的散文件——agent 据此提示用户归位）；
 8. **缺向量笔记点名 + 自愈重试**：embedding 端点故障期间写入的笔记（vector_ok=0）审计时重试 embedding，成功即自愈、仍失败保持点名；
 9. 守卫统计（refused / forced / uncovered 次数）；全空处置行自动清理；
-10. **自动清除过期冲突对统计**（2026-09-19 增补）：笔记删除或重算后不再命中的 D2 旧对，概览行 + `== 自动清除过期冲突对 ==` 行 + 审计快照留痕。
+10. **自动清除过期冲突对统计**（2026-09-19 增补）：笔记删除或重算后不再命中的 D2 旧对，概览行 + `== 自动清除过期冲突对 ==` 行 + 审计快照留痕；
+11. **越界索引行隔离上报**（2026-10-03 增补）：`notes` 表是派生数据，库里可能还留着旧版本（有洞的）构建写进去的越界 path。这类行**只报不处置**——不读盘（外部文件内容绝不进 FTS / 向量库）、不删行、不重写行、不给 issue_id、不写 `audit_actions`（那张表的语义是"人/agent 已处置某个 D1/D3/D4"，混进去会污染处置状态、还可能压掉一条真正待办的报告）、不参与 D1 配对（否则会产出一条 a_path/b_path 越界的假"标题重复"待办）、也不计入"缺向量"（它每轮重试都不可能自愈，挂在那里只会训练人忽略审计）。输出节 `== 越界索引行（隔离·未读盘未删行，N）==` 逐行列出路径与理由，并注明**处置手段是 `reindex()` 重建索引**——那是人的动作：它不可被 `memory_audit_update` 处置（无 issue_id），也不会被复审封口，所以 agent 看到它只能转告人类，不能静默略过。`memory_read` 读到指向坏行的链接时同样只报不外泄（见 §2）；
+12. **注册表 `卡:` 非法值上报**（2026-10-03 增补）：`- 卡:` 落在注册表里，是 agent 一次普通 `memory_edit` 就能改到的外部可写内容，而消费端一律裸拼路径。解析入口即过同一把路径守卫（`store._topic_card`）：非法值**置空**（`card=""`）而**不抛错**——`load_topics()` 在 `memory_context()` 里，为注册表里一行字格式坏就把整个记忆层下线，代价远大于那一张卡；主题**照常列出**，只是没有卡。原值与理由进 `card_invalid` / `card_error`（topic_list / memory_context / WebUI 主题接口都带着这两个字段，消费方据此安全退化），并在结果键 `invalid_topic_cards` 与审计快照的「注册表卡路径非法（已置空·未读盘）」小节留证。处置是手工把 `TOPICS.md` 的 `卡:` 改回库内路径——**这一项能由 agent 自己做**（一次 memory_edit），与上一条相反。
+
+**审计结果键（`Store.audit()` 的返回值）**：`audit()` 的返回值是三处消费方共用的契约——MCP `memory_audit` 逐字段拼文本、WebUI 审计页读同一份字典、审计快照按同一份数据写 markdown。因此每个键在本规格里都有名字（`tests/test_doc_truth.py` 逐键核对，新增键漏写文档立刻红）：
+
+| 键 | 含义 | 出现在 |
+|---|---|---|
+| `added` | 新发现文件（已建索引） | 文本节 + 快照 |
+| `resynced` | 外部修改（已重建索引） | 文本节 + 快照 |
+| `missing` | 外部删除（已清理索引） | 文本节 + 快照 |
+| `title_duplicates` | D1 标题重复 | 文本节 + 快照 + 审计页 |
+| `collisions` | D2 语义撞车（open 状态，含双方文本与分数） | 文本节 + 快照 + 审计页 |
+| `dangling_links` | D3 悬空 `[[链接]]` | 文本节 + 快照 + 审计页 |
+| `stray` | D4 游离文件 | 文本节 + 快照 + 审计页 |
+| `dangling_cards` | D5 悬空主题卡（issue_id 列表） | 文本节 + 快照 + 审计页 |
+| `missing_vectors` | 缺向量笔记（已重试自愈） | 文本节 + 快照 + 审计页 |
+| `pruned_stale_collisions` | 自动清除的过期冲突对**数量** | 文本节 + 快照概览 |
+| `pruned_blank_actions` | 自动清理的空白处置行**数量** | 快照概览 |
+| `quarantined_index_rows` | 越界索引行隔离清单（`path` + `reason`），处置手段 reindex | 文本节 + 快照 + 审计页告警 |
+| `invalid_topic_cards` | 注册表 `卡:` 非法值（`title` / `card` / `reason`） | 快照小节（见下注） |
+| `exec_status` | 本轮 issue_id → 最新执行事件（`event`/`identity`/`note`） | 文本节 |
+| `verified` | 本轮被复审封口的 issue_id | 文本节 + 快照 |
+| `reconciled_proposals` | 提案结案补记条数 | 文本节 |
+| `guard_stats` | refused / forced / uncovered 计数 | 文本节 + 审计页健康卡 |
+| `git` | git 快照状态行 | 文本节末尾 |
+| `audit_file` | 本次审计快照路径（`journal/audit/<日期>.md`） | 文本节末尾 |
+
+> 文本输出是**逐字段手写**的（不是 dict 自动序列化），所以键存在 ≠ 文本里有对应节：目前 `invalid_topic_cards` 只落在审计快照小节里，MCP 文本与 WebUI 审计页都看不到它——需要这一项时请读快照文件；`quarantined_index_rows` 三处都有。
 
 修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行与当次审计快照路径 `journal/audit/<日期>.md`——每日一份、同日复审追加；过期快照由 curator 按 `audit_retention_days` 清理）。
 
@@ -204,7 +233,7 @@ memory_audit_update(issue_id: str, event: str, note: str = "") -> str
 - `event`：`executing` 开始执行 / `progress` 过程汇报 / `executed` 执行完成 / `blocked` 受阻需人工；
 - `note`：一句话说明（做了什么/卡在哪）；
 - identity 自动记录（哪个 agent 哪台设备汇报的）；时间线只追加不改写，WebUI 审计页逐条展示；
-- **复审不归 agent 管**：完成后重跑 `memory_audit`，问题不再被报告即为复审通过（系统自动追加封口事件）；不要声称"已验证"，也不要代替人做忽略。
+- **复审不归 agent 管**：完成后重跑 `memory_audit`，问题**必须以 `executed` 收口**（最后一条执行事件是 `executed`）且不再被报告，才判为复审通过（系统自动追加封口事件）；只报 `executing` 或 `blocked` 不会被封口。不要声称"已验证"，也不要代替人做忽略。
 
 ## 8. memory_list
 

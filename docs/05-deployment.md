@@ -132,7 +132,7 @@ TeleAgent 的 MCP JSON（设置 → 工具设置 → 从 JSON 导入）文档化
 }
 ```
 
-**② 不支持则用 stdio 桥接**（已在 Windows 上端到端验证：stdio → mcp-proxy → HTTP → debsvc，8 工具与向量检索均正常）。前提：运行 TeleAgent 的机器装有 [uv](https://docs.astral.sh/uv/)（`powershell -c "irm https://astral.sh/uv/install.ps1 | iex"` 一次即可）：
+**② 不支持则用 stdio 桥接**（已在 Windows 上端到端验证：stdio → mcp-proxy → HTTP → debsvc，完整工具面与向量检索均正常）。前提：运行 TeleAgent 的机器装有 [uv](https://docs.astral.sh/uv/)（`powershell -c "irm https://astral.sh/uv/install.ps1 | iex"` 一次即可）：
 
 ```json
 {

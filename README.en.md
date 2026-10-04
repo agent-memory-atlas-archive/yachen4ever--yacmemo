@@ -84,7 +84,7 @@ Agents on the same machine can also use stdio: `uv run yacmemo-mcp --root /path/
 
 **Using it for the first time?** Read the [user guide](docs/en/00-user-guide.md) first — onboarding, daily usage, and the FAQ are all in there.
 
-## MCP Tools (20)
+## MCP Tools (22)
 
 | Tool | Purpose |
 |---|---|
@@ -95,7 +95,7 @@ Agents on the same machine can also use stdio: `uv run yacmemo-mcp --root /path/
 | `memory_edit_section` | Replace an entire section in one go (a leading heading line in `new_content` identical to the target heading is stripped automatically) |
 | `memory_move` | Move a file, index follows; the destination path is bound by the same topic registry constraints |
 | `memory_delete` | Delete a note (**only when the user explicitly asks**; recoverable from git history) |
-| `memory_audit` | Self-healing consistency audit (self-heals external changes/deletions, D1–D5 consistency issues, names notes missing vectors + self-heal retry, guard statistics, expired conflict-pair cleanup counts, audit snapshot path); output includes "execution progress" and "verified on re-audit" sections |
+| `memory_audit` | Self-healing consistency audit (self-heals external changes/deletions, D1–D5 consistency issues, names notes missing vectors + self-heal retry, guard statistics, expired conflict-pair cleanup counts, reports out-of-root index rows as quarantined, audit snapshot path); output includes "execution progress" and "verified on re-audit" sections |
 | `memory_audit_update` | Report execution progress while fixing an audit issue (executing/progress/executed/blocked); identity is recorded into the timeline automatically; re-verification is confirmed by the audit |
 | `memory_list` | Directory tree / recent changes |
 | `memory_context` | **Call first at session start**: returns the integration contract version header + topic registry + each topic card's abstract header (cold-start review) |
@@ -104,6 +104,8 @@ Agents on the same machine can also use stdio: `uv run yacmemo-mcp --root /path/
 | `topic_status` | Update a topic's registry "status" line (one-sentence positioning; sync after the abstract changes so the registry never lags behind) |
 | `topic_register` | Register a new topic (**call only when the user explicitly asks**, e.g. "add X to long-term memory"); creates topics/<topic>/abstract.md; on success returns a copyable write template |
 | `topic_unregister` | Unregister a topic (**only on explicit user instruction**; only removes it from the registry, notes untouched, adjudicated as strays afterwards) |
+| `archive_note` | Archive a single note inside a topic (**only on explicit user instruction**): moves it into `archive/<topic>/`, with `reason` optionally written into the header status line; an abstract cannot be archived on its own; after archiving it stays searchable and shows under the topic tree's "single-note archive" group in WebUI |
+| `unarchive_note` | Undo a single-note archive: reverse-looks-up the active topic by directory name and moves it back to `topics/<topic>/` (a free-form archive directory is an error) |
 | `archive_topic` | Archive a topic (**only on explicit user instruction**): the whole topic directory moves into archive/ — still searchable, no longer injected into context |
 | `get_user_preference` | Read profile & preferences (PROFILE.md functional layer; full text or a specified section) |
 | `update_user_preference` | Create/replace one section of the profile & preferences (maintained by the agent) |

@@ -166,6 +166,14 @@ const treeData = computed(() => {
     isLeaf: true,
   })
   const dirOf = p => p.split('/').slice(0, -1).join('/')
+  // 坏卡的可见说明：后端把非法的 `卡:` 置空并把原值/理由留在
+  // card_invalid / card_error（见 store._topic_card）。前端必须把它显示出来，
+  // 否则树上只剩一个指向空路径的 abstract，人看不出注册表哪一行坏了。
+  // 参数名不能叫 t —— 会遮蔽模块顶层的 i18n t()，主题对象被当函数调用，
+  // 整个主题树渲染抛异常（build 与 vitest 都测不出来，只有真跑页面能看见）。
+  const badCardLabel = topic =>
+    `⚠ ${t('卡路径被拒绝')}: ${t('原值')} \`${topic.card_invalid}\``
+    + ` — ${topic.card_error || ''}`
   // 与后端 _path_covered 同款覆盖口径：注册主题的卡/相关文件及其所在目录
   const coveredFiles = new Set()
   const coveredDirs = new Set()
@@ -193,7 +201,12 @@ const treeData = computed(() => {
       key: `topic:${t.title}`,
       label: topicLabel(t),
       children: [
-        { key: `note:${t.card}`, label: 'abstract', isLeaf: true },
+        // 卡被后端路径守卫拒绝时会被置空（card_invalid/card_error 留证）。
+        // 这时挂一个 note: 空叶节点等于什么都不说——树上看不出这个主题坏了。
+        // 改成一条可见的坏卡说明，并去掉那个指向空路径的假 abstract 节点。
+        ...(t.card_invalid
+          ? [{ key: `badcard:${t.title}`, label: badCardLabel(t), isLeaf: true }]
+          : [{ key: `note:${t.card}`, label: 'abstract', isLeaf: true }]),
         ...topicNotes.map(noteNode),
       ],
     })
@@ -213,7 +226,9 @@ const treeData = computed(() => {
           key: `topic:${t.title}`,
           label: topicLabel(t),
           children: [
-            { key: `note:${t.card}`, label: 'abstract', isLeaf: true },
+            ...(t.card_invalid
+              ? [{ key: `badcard:${t.title}`, label: badCardLabel(t), isLeaf: true }]
+              : [{ key: `note:${t.card}`, label: 'abstract', isLeaf: true }]),
             ...files.map(noteNode),
           ],
         }

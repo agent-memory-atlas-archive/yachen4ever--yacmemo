@@ -39,7 +39,7 @@ from starlette.responses import (
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from ..config import Config, UserEntry, _RESERVED_IDS
+from ..config import _RESERVED_IDS, Config, UserEntry
 from ..identity import IdentityError, make_identity
 from ..store import StoreError
 
@@ -375,9 +375,15 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                     "note_count": len(c["store"].list_notes()),
                     "open_collisions": len(c["db"].list_collisions(status="open")),
                     "guard": c["db"].guard_stats(),
+                    # card_invalid/card_error 一并带出：非法 `卡:` 会被置空，
+                    # 只给空串的话前端看到的是"主题没有卡"，看不出注册表坏了
                     "topics": [{"title": t["title"], "card": t["card"],
+                                "card_invalid": t.get("card_invalid", ""),
+                                "card_error": t.get("card_error", ""),
                                 "status": t["status"]} for t in active],
-                    "archived_topics": [{"title": t["title"], "card": t["card"]}
+                    "archived_topics": [{"title": t["title"], "card": t["card"],
+                                         "card_invalid": t.get("card_invalid", ""),
+                                         "card_error": t.get("card_error", "")}
                                         for t in archived],
                     "curator_proposals": proposals,
                     "git_status": c["store"].snapshots.status_line(),
@@ -724,10 +730,14 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err("未知用户", 404)
         topics = await run_in_threadpool(c["store"].load_topics)
         active = [{"title": t["title"], "card": t["card"],
+                   "card_invalid": t.get("card_invalid", ""),
+                   "card_error": t.get("card_error", ""),
                    "status": t["status"], "related": t["related"],
                    "tags": t.get("tags") or []}
                   for t in topics if not t.get("archived")]
         archived = [{"title": t["title"], "card": t["card"],
+                     "card_invalid": t.get("card_invalid", ""),
+                     "card_error": t.get("card_error", ""),
                      "status": t["status"], "tags": t.get("tags") or []}
                     for t in topics if t.get("archived")]
         return _ok({"active": active, "archived": archived})
