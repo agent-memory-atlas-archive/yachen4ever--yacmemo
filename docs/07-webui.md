@@ -11,6 +11,7 @@
 
 - WebUI 与 MCP 端点共享同一 Starlette 应用和同一批用户上下文（Store/Searcher/IndexDB 实例）——**网页上看到和改到的就是 agent 在用的那份数据**，没有第二条数据路径；
 - 路由顺序：`/api/*`、`/ui/*` 先于用户 MCP 挂载注册；配置层同时把 `api`/`ui`/`health` 设为用户 id 保留字，杜绝遮蔽；
+- **二级路径（base_path）**：`[server].base_path` 设置后（如 `/yacmemo`），WebUI 全部路由在前缀下**额外**挂一份（根上原路由保留，直连 `:9721/ui` 向后兼容）；页面内绝对路径引用由服务端注入前缀（见 §五），前端经 `window.__BASE_PATH__` 取前缀调 API；MCP 与 `/health` 不挂前缀；默认空 = 行为与无此功能完全一致。部署与 nginx 参考配置见 [05-deployment.md](05-deployment.md) §1.5；
 - 错误约定：业务性拒绝（如守卫拦截）返回 HTTP 200 + `{"ok": false, "error": "..."}`；未知用户返回 404；
 - 无独立鉴权，遵循"内网自用"信任边界（见 [05-deployment.md](05-deployment.md) 安全边界）。
 
@@ -169,7 +170,8 @@ curl -s -X POST http://debsvc.local:9721/api/yachen/audit
 - **未构建行为**：`dist/` 不存在时服务正常启动，`/ui/` 返回 503 + 构建指引（PlainTextResponse），MCP/API 全功能可用；
 - **服务器无 npm**：在开发机构建后 scp：`scp -r yacmemo/webui/dist <server>:/srv/yacmemo/yacmemo/webui/`（dist 不进 git）；
 - 后端 handler 为 async，Store 的阻塞操作经 `run_in_threadpool` 执行，不会阻塞 MCP 事件循环；跨线程安全由 IndexDB/VectorStore/Store 的实例锁保证；
-- 静态资源仅挂载 `/ui/assets`（Vite 产物）；`/ui/` 由 handler 直接回 `index.html`。
+- 静态资源仅挂载 `/ui/assets`（Vite 产物）；`/ui/` 由 handler 直接回 `index.html`；
+- **base_path 透传改写**：Vite 固定 `base: '/ui/'` 出包；`base_path` 生效时 `ui_index` 响应期对 index.html 做两步改写——资源引用 `"/ui/…` 整串换 `"{base}/ui/…`、`</head>` 前注入 `<script>window.__BASE_PATH__="<base>"</script>`，`api.js` 的 `BASE` 读该注入值拼 API 路径。base_path 为空时 index.html 原样 `FileResponse`（逐字节与改动前一致）。单次构建适配任意前缀，改 `base_path` 无需重新构建前端。
 
 ## 六、常见操作
 

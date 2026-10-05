@@ -71,6 +71,10 @@ class ServerConfig:
     host: str = "0.0.0.0"  # LAN-exposed so any machine's agent can reach it
     port: int = 9721
     data_dir: str = "data"  # server-level state (usage log); relative to cwd
+    # Reverse-proxy sub-path for the WebUI (e.g. "/yacmemo" behind
+    # https://host/yacmemo/ with prefix-passthrough nginx). Empty = no prefix,
+    # routes behave exactly as before. MCP and /health stay unprefixed.
+    base_path: str = ""
 
 
 @dataclass
@@ -94,6 +98,39 @@ class UserEntry:
 
 # ids that would shadow server routes
 _RESERVED_IDS = {"api", "ui", "health"}
+
+
+def normalize_base_path(raw: str, user_ids: "list[str] | tuple[str, ...]" = ()) -> str:
+    """Normalize a WebUI base path to a Mount()-ready prefix ("" = disabled).
+
+    Accepts sloppy input ("yacmemo/", "/yacmemo/", "/") and returns either ""
+    or a leading-slash, no-trailing-slash ASCII path. Rejects segments that
+    could not survive Starlette route compilation (charset) and first segments
+    that would shadow reserved routes or a user MCP mount — raising ValueError
+    rather than silently mis-mounting.
+    """
+    import re
+
+    p = (raw or "").strip().replace("\\", "/")
+    if p in ("", "/"):
+        return ""
+    if not p.startswith("/"):
+        p = "/" + p
+    p = p.rstrip("/")
+    segments = p[1:].split("/")
+    for seg in segments:
+        # "."/".." fail the leading-alphanumeric rule too (traversal, empty
+        # and "." segments included)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", seg):
+            raise ValueError(
+                f"base_path 非法（每段限 ASCII 字母/数字开头，可含 . _ -，"
+                f"以 / 分隔）: {raw!r}")
+    first = segments[0]
+    if first in _RESERVED_IDS:
+        raise ValueError(f"base_path 首段不能是保留路径: {p}")
+    if first in set(user_ids):
+        raise ValueError(f"base_path 首段与用户 MCP 挂载冲突: {p}")
+    return p
 
 
 @dataclass
@@ -198,6 +235,8 @@ def load_config(path: str | None = None) -> Config:
             host=srv.get("host", ServerConfig.host),
             port=srv.get("port", ServerConfig.port),
             data_dir=srv.get("data_dir", ServerConfig.data_dir),
+            base_path=normalize_base_path(str(srv.get("base_path", "")),
+                                          [u.id for u in users]),
         ),
         webui=WebUIConfig(
             password=str(web.get("password", "")),

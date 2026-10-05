@@ -11,6 +11,7 @@
 
 - The WebUI and the MCP endpoints share the same Starlette application and the same user contexts (Store/Searcher/IndexDB instances) — **what you see and change in the browser is exactly the data the agents are using**; there is no second data path;
 - Route order: `/api/*` and `/ui/*` are registered before the per-user MCP mounts; the config layer also reserves `api`/`ui`/`health` as user-id reserved words, ruling out shadowing;
+- **Sub-path (base_path)**: once `[server].base_path` is set (e.g. `/yacmemo`), every WebUI route is **additionally** mounted under the prefix (the original root routes stay, so direct `:9721/ui` access remains compatible); all absolute path references inside the page get the prefix injected by the server (see §5), and the frontend reads `window.__BASE_PATH__` to build API paths; MCP and `/health` are never prefixed; empty by default = behavior identical to not having the feature. Deployment and nginx reference configuration: [05-deployment.md](05-deployment.md) §1.5;
 - Error convention: business-level refusals (e.g. guard interception) return HTTP 200 + `{"ok": false, "error": "..."}`; unknown users return 404;
 - No separate authentication; follows the "personal use on the internal network" trust boundary (see the security boundary in [05-deployment.md](05-deployment.md)).
 
@@ -169,7 +170,8 @@ curl -s -X POST http://debsvc.local:9721/api/yachen/audit
 - **Unbuilt behavior**: when `dist/` does not exist the service starts normally and `/ui/` returns 503 + build instructions (PlainTextResponse); MCP/API remain fully functional;
 - **No npm on the server**: build on a dev machine, then scp: `scp -r yacmemo/webui/dist <server>:/srv/yacmemo/yacmemo/webui/` (dist is not in git);
 - Backend handlers are async; Store's blocking operations run via `run_in_threadpool` and never block the MCP event loop; cross-thread safety is guaranteed by the IndexDB/VectorStore/Store instance locks;
-- Static assets are mounted only at `/ui/assets` (Vite output); `/ui/` is served `index.html` directly by the handler.
+- Static assets are mounted only at `/ui/assets` (Vite output); `/ui/` is served `index.html` directly by the handler;
+- **base_path passthrough rewriting**: Vite always builds with `base: '/ui/'`; when `base_path` is in effect, `ui_index` rewrites index.html at response time in two steps — asset refs `"/ui/…` become `"{base}/ui/…` wholesale, and `<script>window.__BASE_PATH__="<base>"</script>` is injected before `</head>`; `api.js` reads that injected value as `BASE` to build API paths. With an empty base_path, index.html is served via plain `FileResponse` (byte-identical to before the feature). One build fits any prefix; changing `base_path` never requires rebuilding the frontend.
 
 ## 6. Common Operations
 

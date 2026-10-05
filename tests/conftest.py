@@ -129,7 +129,7 @@ def _free_port() -> int:
     return port
 
 
-def _start_http_server(tmp_path, password: str = ""):
+def _start_http_server(tmp_path, password: str = "", base_path: str = ""):
     """Two-user HTTP server (FTS-only: no embedding endpoint configured)."""
     config_file = tmp_path / "config.toml"
     config_file.write_text(
@@ -140,6 +140,7 @@ model = ""
 
 [server]
 data_dir = "{(tmp_path / "server-data").as_posix()}"
+base_path = "{base_path}"
 
 [webui]
 password = "{password}"
@@ -189,3 +190,16 @@ def http_server(tmp_path):
 def http_server_auth(tmp_path):
     """同 http_server，但启用 [webui].password（WebUI 登录鉴权测试用）。"""
     yield from _start_http_server(tmp_path, password="secret")
+
+
+@pytest.fixture
+def http_server_base(tmp_path):
+    """同 http_server，但 base_path=/yacmemo（WebUI 二级路径前缀测试用）。"""
+    yield from _start_http_server(tmp_path, base_path="/yacmemo")
+
+
+@pytest.fixture
+def http_server_base_auth(tmp_path):
+    """base_path=/yacmemo + 密码鉴权（登录页前缀测试用）。"""
+    yield from _start_http_server(tmp_path, password="secret",
+                                  base_path="/yacmemo")

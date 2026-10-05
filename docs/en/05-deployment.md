@@ -26,6 +26,7 @@ dimensions = 1024
 [server]
 host = "0.0.0.0"    # 供局域网各机器访问
 port = 9721
+# base_path = "/yacmemo"  # reverse-proxy sub-path (see §1.5); empty = no prefix
 
 [[users]]
 id = "yachen"
@@ -87,6 +88,43 @@ The memory directory is a git repository: every write/edit/move/delete/topic ope
 - When git is unavailable, only the snapshot is skipped and writes are never blocked; the `== git ==` line at the end of the audit output shows the most recent failure reason — after deployment, glance at it once to confirm the feature is "enabled";
 - **The unit must have HOME** (see the comment in 1.3);
 - No remote: the memory repository is purely local; remote backup (private remote / periodic `git bundle`) is listed as a follow-up feature.
+
+### 1.5 Reverse-Proxy Sub-Path (base_path, Optional)
+
+When consolidating services behind one entry point (e.g. each service under a sub-path of `https://192.168.5.7/`), the WebUI can be mounted under a sub-path while **MCP endpoints stay untouched** (agents on every device keep connecting directly to `:9721/{user}/mcp`). Two equivalent ways to configure it:
+
+```toml
+[server]
+base_path = "/yacmemo"
+```
+
+```ini
+# Or append to ExecStart of the systemd unit (CLI overrides the config file):
+ExecStart=/srv/yacmemo/.venv/bin/yacmemo-server --config /srv/yacmemo/config.toml --base-path /yacmemo
+```
+
+nginx reference configuration (**no trailing slash on `proxy_pass` = prefix passthrough**; the server recognizes the prefix itself, and the proxy performs no URL rewriting):
+
+```nginx
+location /yacmemo/ {
+    proxy_pass http://127.0.0.1:9721;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+```
+
+Behavior boundaries (when `base_path` is in effect):
+
+| Path | Available entries |
+|---|---|
+| WebUI and API (`/ui`, `/api/*`) | `https://<host>/yacmemo/ui` (via proxy) and `http://<host>:9721/ui` (direct) **both work** — the original root routes are kept, so old links/bookmarks stay compatible |
+| MCP (`/{user}/mcp`) and `/health` | direct `:9721` only, **never prefixed** |
+
+- All absolute path references inside the page (static assets, redirects, API calls) get the prefix injected by the server when serving index.html (asset refs rewritten + `window.__BASE_PATH__`); the frontend uses it to build API paths — **one build fits any base_path**, changing the prefix never requires rebuilding the frontend;
+- Normalization and validation (at startup): leading `/` added, trailing slash stripped; empty/`.`-like/non-ASCII segments rejected; the first segment must not collide with reserved paths (`api`/`ui`/`health`) or any user id;
+- Empty by default = behavior identical to not having the feature at all;
+- Portal cards and other entries can switch from `:9721/ui` to `https://<host>/yacmemo/ui/`; not switching also keeps working (direct-connect compatibility);
+- Do not copy Gitea's "proxy strips the prefix + app re-adds it via ROOT_URL" pattern — yacmemo uses passthrough; if `proxy_pass` mistakenly carries a trailing slash (`http://127.0.0.1:9721/`), nginx strips the `/yacmemo` prefix and the prefixed routes all miss.
 
 ## 2. Clients (Every Computer of Yours, Any Agent)
 
@@ -198,7 +236,7 @@ Without a build the service still runs normally, `/ui/` returns a 503 with build
 - **Profile**: view/edit/create each section of PROFILE.md;
 - **Settings**: usage log (tool filter, last-14-days overview) + health overview + full index rebuild (maintenance card) + config.toml online editing (validation + backup + optional restart).
 
-For a complete description of the pages and APIs see [07-webui.md](07-webui.md). The WebUI shares the process and port with MCP and has no separate authentication — it follows the "personal use on the internal network" trust boundary; if broader exposure is needed, put an authenticating reverse proxy in front (same security boundary as below).
+For a complete description of the pages and APIs see [07-webui.md](07-webui.md). The WebUI shares the process and port with MCP and has no separate authentication — it follows the "personal use on the internal network" trust boundary; if broader exposure is needed, put an authenticating reverse proxy in front (same security boundary as below). To mount the console under a reverse-proxy sub-path (e.g. `https://<host>/yacmemo/`) see §1.5.
 
 ### 2.3 curator Quality Curation (Optional)
 

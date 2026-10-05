@@ -38,6 +38,12 @@ host = "0.0.0.0"
 port = 9721
 # Server-level state (usage log); relative to the server's working directory.
 data_dir = "data"
+# Reverse-proxy sub-path for the WebUI (e.g. "/yacmemo" behind
+# https://<host>/yacmemo/ with prefix-passthrough nginx; see docs/05 §1.5).
+# Empty = no prefix (default). MCP and /health are never prefixed;
+# CLI override: --base-path. One build fits any prefix — no frontend rebuild
+# needed when changing it.
+# base_path = ""
 
 [webui]
 # WebUI/API 登录密码；空 = 不启用鉴权（LAN 信任模式）。

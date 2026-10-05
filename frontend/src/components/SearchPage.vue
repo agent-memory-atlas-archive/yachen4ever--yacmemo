@@ -36,7 +36,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { NSpace, NInputGroup, NInput, NSelect, NButton, NCard, NTag, NText, NProgress, NAlert, NEmpty, useMessage } from 'naive-ui'
-import { api, params } from '../composables/api.js'
+import { api, params, BASE } from '../composables/api.js'
 import { t } from '../composables/i18n.js'
 
 const props = defineProps({ user: String })
@@ -75,7 +75,7 @@ async function doSearch() {
 }
 
 async function openNote(path) {
-  window.open(`/ui/#note=${encodeURIComponent(path)}`, '_self')
+  window.open(`${BASE}/ui/#note=${encodeURIComponent(path)}`, '_self')
 }
 </script>
 

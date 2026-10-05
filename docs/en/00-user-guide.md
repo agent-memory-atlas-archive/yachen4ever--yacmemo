@@ -228,7 +228,7 @@ root = "/srv/yacmemo/user2/memory"
 
 ## 6. WebUI Console
 
-Open `http://debsvc.local:9721/ui/` in a browser (bundled with the server, nothing to install):
+Open `http://debsvc.local:9721/ui/` in a browser (bundled with the server, nothing to install; with `[server].base_path` configured it is `https://<host>/<base_path>/ui/`, while the old direct address keeps working):
 
 - **Notes**: browse by user in the left-hand list; the body renders as markdown; "Edit" modifies the source file directly and syncs the index; "＋" creates a new note (the near-duplicate-title guard applies here too; if rejected, tick "Force" and save again — clicking the button on the web page counts as the human confirmation; **a note whose title is exactly identical to an existing one is always refused** — update it via "Edit" instead, `force` does not override this); "Delete" also cleans the index (still recoverable from git);
 - **Search**: manually verify retrieval quality anytime; supports switching between the hybrid/fts/vector channels; ⚠ markers are directly visible; clicking a result jumps to the note;

@@ -6,6 +6,11 @@
   Any MCP-capable agent on any machine connects with just a URL.
 - WebUI: `/ui/` — notes browse/edit, search, audit, usage log, health.
 - Health: `GET /health`.
+- Optional base_path (`--base-path` / `[server].base_path`, e.g. `/yacmemo`):
+  the whole WebUI is additionally mounted under the prefix for reverse-proxy
+  sub-paths (prefix passthrough — no URL rewriting in nginx); direct
+  unprefixed access keeps working. MCP and /health stay at the root so
+  agent endpoints are unaffected.
 
 Nothing to install client-side; no per-machine processes.
 For a same-box stdio agent use `yacmemo-mcp`.
@@ -24,7 +29,8 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from yacmemo.config import Config, UserEntry, load_config, resolve_git_identity
+from yacmemo.config import (Config, UserEntry, load_config,
+                            normalize_base_path, resolve_git_identity)
 from yacmemo.embedding import EmbeddingClient
 from yacmemo.index_db import IndexDB
 from yacmemo.search import Searcher
@@ -77,6 +83,10 @@ def build_user_mcp(config: Config, user: UserEntry, usage: UsageDB | None
 
 
 def create_app(config: Config) -> Starlette:
+    # Re-normalize here (idempotent): config may come from TOML, the CLI
+    # override, or direct construction in tests.
+    base = normalize_base_path(config.server.base_path,
+                               [u.id for u in config.users])
     usage = UsageDB(str(Path(config.server.data_dir) / "usage.db"))
 
     servers: dict[str, FastMCP] = {}
@@ -102,24 +112,40 @@ def create_app(config: Config) -> Starlette:
 
     # WebUI/API routes go FIRST so /api, /ui can never be shadowed by a
     # user mount (config additionally reserves those ids).
-    routes = [
-        Route("/health", health, methods=["GET"]),
-        *create_webui_routes(config, contexts),
-    ]
+    # base_path set: the whole WebUI (static assets, pages, redirects — not
+    # MCP, not /health) is ALSO mounted under the prefix, so a reverse proxy
+    # can pass the path through unrewritten while direct :9721 access keeps
+    # working (backward compat). The base-prefixed page refs land on the
+    # prefixed mount, old unprefixed bookmarks on the root copy. Empty
+    # base_path: routes only at the root, byte-identical behavior.
+    webui_routes = create_webui_routes(config, contexts)
+    routes: list = [Route("/health", health, methods=["GET"])]
+    if base:
+        routes.extend(webui_routes)
+        routes.append(Mount(base, routes=webui_routes, name="webui"))
+    else:
+        routes.extend(webui_routes)
     for uid, mcp in servers.items():
         routes.append(Mount(f"/{uid}", app=mcp.streamable_http_app()))
 
     logger.info("Mounted users: %s", [f"/{uid}/mcp" for uid in servers])
-    logger.info("WebUI at /ui/")
+    logger.info("WebUI at %s", (f"{base}/ui/" if base else "/ui/"))
     return Starlette(routes=routes, lifespan=lifespan)
 
 
 def main():
     parser = argparse.ArgumentParser(description="yacmemo HTTP MCP server + WebUI")
     parser.add_argument("--config", default=None, help="Path to config.toml")
+    parser.add_argument("--base-path", default=None,
+                        help="Reverse-proxy sub-path for the WebUI "
+                             "(e.g. /yacmemo); overrides [server].base_path. "
+                             "Empty = no prefix (default)")
     args = parser.parse_args()
 
     config = load_config(args.config)
+    if args.base_path is not None:
+        config.server.base_path = normalize_base_path(
+            args.base_path, [u.id for u in config.users])
     app = create_app(config)
     logger.info("yacmemo HTTP server on %s:%d", config.server.host, config.server.port)
     uvicorn.run(app, host=config.server.host, port=config.server.port,

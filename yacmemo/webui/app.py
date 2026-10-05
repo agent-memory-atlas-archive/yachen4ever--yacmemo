@@ -39,7 +39,7 @@ from starlette.responses import (
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from ..config import _RESERVED_IDS, Config, UserEntry
+from ..config import (_RESERVED_IDS, Config, UserEntry, normalize_base_path)
 from ..identity import IdentityError, make_identity
 from ..store import StoreError
 
@@ -174,7 +174,18 @@ async def _body(request: Request) -> dict:
 
 
 def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route]:
-    """Build the WebUI routes. contexts: {user_id: {store, searcher, db, usage}}."""
+    """Build the WebUI routes. contexts: {user_id: {store, searcher, db, usage}}.
+
+    When [server].base_path is set every route here is registered under that
+    prefix (server.py wraps the returned list in one Mount). All page-facing
+    absolute URLs — the "/" redirect, the login page's fetch, and the built
+    index.html's asset refs — carry the prefix too; the frontend reads the
+    injected `window.__BASE_PATH__` for its API calls. Empty base_path keeps
+    every response byte-identical to the unprefixed behavior.
+    """
+    # Idempotent re-normalization: safe for direct construction in tests.
+    base = normalize_base_path(config.server.base_path,
+                               [u.id for u in config.users])
 
     def _ctx(user_id: str) -> dict:
         ctx = contexts.get(user_id)
@@ -201,7 +212,7 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         async def wrapped(request: Request):
             if not _authed(request):
                 if html:
-                    return HTMLResponse(_LOGIN_PAGE)
+                    return HTMLResponse(login_page)
                 return JSONResponse(
                     {"ok": False, "error": "未登录：WebUI 已启用密码访问"},
                     status_code=401)
@@ -338,8 +349,11 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                     "填写前注入会持续提醒",
         })
 
+    # base_path 为空时与原常量逐字节一致（replace 无命中即原样返回）
+    login_page = _LOGIN_PAGE.replace("/api/login", f"{base}/api/login")
+
     async def index(request: Request):
-        return RedirectResponse("/ui/", status_code=307)
+        return RedirectResponse(f"{base}/ui/", status_code=307)
 
     async def ui_index(request: Request):
         index_file = STATIC_DIR / "index.html"
@@ -349,7 +363,17 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                 "（或 cd frontend && npm run build）后重试",
                 status_code=503,
             )
-        return FileResponse(index_file)
+        if not base:
+            return FileResponse(index_file)
+        # 前缀模式下的服务期改写（单次构建适配任意 base_path，无需重新打包）：
+        # 1) Vite 以 base='/ui/' 出包，index.html 里全部资源引用形如 "/ui/…"
+        #    ——整串换前缀；2) 注入 __BASE_PATH__ 供前端 API 调用取前缀。
+        html = index_file.read_text(encoding="utf-8")
+        html = html.replace('"/ui/', f'"{base}/ui/')
+        html = html.replace(
+            "</head>",
+            f'<script>window.__BASE_PATH__="{base}"</script></head>', 1)
+        return HTMLResponse(html)
 
     async def overview(request: Request):
         def _collect():

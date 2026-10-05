@@ -26,6 +26,7 @@ dimensions = 1024
 [server]
 host = "0.0.0.0"    # 供局域网各机器访问
 port = 9721
+# base_path = "/yacmemo"  # 反代二级路径（见 §1.5）；默认空 = 不挂前缀
 
 [[users]]
 id = "yachen"
@@ -87,6 +88,43 @@ memory 目录就是 git 仓库，每次写入/编辑/移动/删除/主题操作�
 - git 不可用时只跳过快照、不阻塞写入；audit 输出末尾的 `== git ==` 行会显示最近一次失败原因，部署后建议看一眼确认"启用"；
 - **unit 必须有 HOME**（见 1.3 注释）；
 - 无远程：记忆仓库纯本地，远程备份（私有 remote / 定期 `git bundle`）列为后续功能。
+
+### 1.5 反向代理二级路径（base_path，可选）
+
+服务收敛到统一入口（如 `https://192.168.5.7/` 各服务挂二级路径）时，WebUI 可整体挂到子路径下，**MCP 端点不动**（各设备 agent 仍直连 `:9721/{user}/mcp`）。两种配置方式等价：
+
+```toml
+[server]
+base_path = "/yacmemo"
+```
+
+```ini
+# 或 systemd unit 的 ExecStart 追加（CLI 覆盖配置文件）：
+ExecStart=/srv/yacmemo/.venv/bin/yacmemo-server --config /srv/yacmemo/config.toml --base-path /yacmemo
+```
+
+nginx 参考配置（**`proxy_pass` 不带尾斜杠 = 前缀透传**，server 端自己认前缀，反代不做任何 URL 改写）：
+
+```nginx
+location /yacmemo/ {
+    proxy_pass http://127.0.0.1:9721;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+```
+
+行为边界（`base_path` 生效时）：
+
+| 路径 | 可用入口 |
+|---|---|
+| WebUI 与 API（`/ui`、`/api/*`） | `https://<host>/yacmemo/ui`（经反代）与 `http://<host>:9721/ui`（直连）**同时可用**——根上原路由保留，旧链接/旧书签向后兼容 |
+| MCP（`/{user}/mcp`）与 `/health` | 仅 `:9721` 直连，**不挂前缀** |
+
+- 页面内所有绝对路径引用（静态资源、跳转、API 调用）由服务端响应 index.html 时统一注入前缀（资源引用改写 + `window.__BASE_PATH__`），前端据此拼 API 路径——**一次构建适配任意 base_path**，改前缀无需重新构建前端；
+- 归一化与校验（启动时）：自动补前导 `/`、剥尾斜杠；空段/点段/非 ASCII 段拒绝；首段不得与保留路径（`api`/`ui`/`health`）或任何用户 id 冲突；
+- 默认空 = 行为与无此功能完全一致；
+- 门户卡片等入口从 `:9721/ui` 改指 `https://<host>/yacmemo/ui/` 即可，不改也能用（直连兼容）；
+- 不要学 Gitea 的「反代剥前缀 + 应用 ROOT_URL 自己拼」模式——yacmemo 用透传；若 `proxy_pass` 误带尾斜杠（`http://127.0.0.1:9721/`），nginx 会剥掉 `/yacmemo` 前缀，前缀路由全部落空。
 
 ## 二、客户端（你的每台电脑，任意 agent）
 
@@ -198,7 +236,7 @@ scp -r yacmemo/webui/dist debsvc:/srv/yacmemo/yacmemo/webui/   # dist 不进 git
 - **画像**：PROFILE.md 各小节的查看/编辑/新建；
 - **设置**：使用记录（工具过滤、近 14 天概览）+ 健康总览 + 全量重建索引（维护卡片）+ config.toml 在线编辑（校验 + 备份 + 可选重启）。
 
-页面与 API 的完整说明见 [07-webui.md](07-webui.md)。WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。
+页面与 API 的完整说明见 [07-webui.md](07-webui.md)。WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。需要把控制台挂到反代二级路径下（如 `https://<host>/yacmemo/`）见 §1.5。
 
 ### 2.3 curator 质量策展（可选）
 
