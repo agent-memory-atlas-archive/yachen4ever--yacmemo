@@ -45,6 +45,14 @@ AGENT_CONTRACT_VERSION = _package_version()
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.16": (
+        "- memory_list 对 curator/ 提案就地标注结案状态：文件头部带"
+        "「> 状态：已结案」标记的提案，列表行会缀「（已结案）」——标注不是"
+        "路径的一部分（memory_read 仍用原路径）。找待办提案时只读未标注的"
+        "行，不要把全部提案逐份 memory_read 来确认是否结案（判定实时读盘"
+        "不缓存，复审撤标后标注即刻消失）；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.15": (
         "- MCP 响应体：全部工具改用 structured_output=False，响应里不再带 "
         "structuredContent，tools/list 也不再广告 outputSchema——"

@@ -95,3 +95,34 @@ def test_tool_result_is_not_duplicated(store: Store, searcher: Searcher):
     text = r.content[0].text
     assert "notes/a.md" in text, "text content 必须原样保留"
     assert len(r.content) == 1
+
+
+def test_memory_list_annotates_settled_proposals(store: Store, searcher: Searcher):
+    """0.3.16：curator/ 已结案提案在 memory_list 输出里就地标注「（已结案）」
+    ——agent 找待办提案只读未标注的行，不必全量列出后逐份 memory_read
+    确认结案状态（2026-10-07 审计会话实爆的浪费模式）。"""
+    from yacmemo.store import PROPOSAL_SETTLED_MARKER
+
+    settled = "curator/提案-20260925已结.md"
+    pending = "curator/提案-20261007待裁.md"
+    store.save(settled, f"# 提案A\n\n{PROPOSAL_SETTLED_MARKER}（2026-09-25）\n")
+    store.save(pending, "# 提案B\n\n**状态：待裁决**\n")
+    # 标注只对 curator/ 生效：库内其他位置出现同字样（如演示文档）不标注
+    quoted = "notes/引用结案标记.md"
+    store.save(quoted, f"# 笔记\n提到 {PROPOSAL_SETTLED_MARKER} 只是引用。\n")
+
+    _, r = _probe(store, searcher, "memory_list", {"path": "curator"})
+    text = r.content[0].text
+    assert f"{settled}（已结案）" in text
+    assert f"{pending}（已结案）" not in text and pending in text, \
+        "未结案提案必须保持裸路径（逐字节不变），让 agent 知道它要处理"
+
+    _, r = _probe(store, searcher, "memory_list", {"path": ""})
+    text = r.content[0].text
+    assert f"{settled}（已结案）" in text, "根目录递归列出同样要标注"
+    assert f"{quoted}（已结案）" not in text
+
+    # 判定实时读盘不缓存：撤标（复审追加新条目的 curator 行为）后标注即刻消失
+    store.save(settled, "# 提案A\n\n**状态：待裁决**\n")
+    _, r = _probe(store, searcher, "memory_list", {"path": "curator"})
+    assert f"{settled}（已结案）" not in r.content[0].text

@@ -479,6 +479,10 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
     def memory_list(path: str = "", sort: str = "name", ctx: Context = None) -> str:
         """列出笔记目录树。
 
+        curator/ 下已结案的提案（文件头部带「> 状态：已结案」标记）会在
+        列表行尾就地标注「（已结案）」——标注不是路径的一部分，memory_read
+        仍用原路径。找待办提案时只读未标注的行，不必逐份打开确认结案状态。
+
         Args:
             path: 子目录（空 = 根目录）
             sort: "name" 或 "mtime"（最近变更优先）
@@ -495,7 +499,13 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             except Exception as e:
                 out["ok"], out["error"] = False, str(e)
                 return f"列出失败: {e}"
-            return "\n".join(entries) if entries else "（空）"
+            lines = [
+                f"{rel}（已结案）"
+                if rel.startswith("curator/") and store.proposal_is_settled(rel)
+                else rel
+                for rel in entries
+            ]
+            return "\n".join(lines) if lines else "（空）"
 
     # ------------------------------------------------------------ topics
 

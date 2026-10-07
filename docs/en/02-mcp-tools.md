@@ -243,6 +243,8 @@ memory_list(path: str = "", sort: str = "name") -> str
 
 Lists all `.md` files under memory_root (or a subdirectory); with `sort="mtime"` the most recently changed come first. `.index/` is never listed.
 
+Settled proposals under curator/ (files carrying the `> 状态：已结案` marker) get a `（已结案）` suffix appended to their list line — the suffix is not part of the path; `memory_read` still uses the bare path. When looking for open proposals, skip the suffixed lines instead of opening every proposal to check settlement; the check reads the file live, so the suffix disappears as soon as a re-audit unstamps the proposal.
+
 ## Decision tree for agent tool selection
 
 ```

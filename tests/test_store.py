@@ -520,6 +520,21 @@ def test_proposal_not_settled_until_all_findings_done(store: Store):
     assert PROPOSAL_SETTLED_MARKER not in (store.root / rel).read_text(encoding="utf-8")
 
 
+def test_proposal_is_settled_reads_live(store: Store):
+    """0.3.16 memory_list 标注的判定源：实时读盘、不缓存（结案可逆——
+    复审撤标后标记消失）；文件缺失/不可读按未结案处理，宁可多读一份，
+    不漏一份活提案。"""
+    from yacmemo.store import PROPOSAL_SETTLED_MARKER
+
+    rel = "curator/提案-20260926d.md"
+    assert not store.proposal_is_settled(rel)
+    assert not store.proposal_is_settled("../outside")  # 越界路径拒绝判定，不当成库内文件读
+    store.save(rel, f"# 提案\n\n{PROPOSAL_SETTLED_MARKER}（2026-09-26）\n")
+    assert store.proposal_is_settled(rel)
+    store.save(rel, "# 提案\n\n**状态：待裁决**\n")  # 复审撤标
+    assert not store.proposal_is_settled(rel)
+
+
 def test_audit_reconciles_hand_stamped_settled_proposal(store: Store):
     """0.3.4 之前完成的工作：agent 手工打了结案标、无执行事件——审计补记
     executed（含旧口径「已采纳」条目）；dismissed 不翻转；幂等；P 类不产生

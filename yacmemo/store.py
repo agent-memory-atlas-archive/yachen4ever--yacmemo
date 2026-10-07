@@ -2015,6 +2015,26 @@ class Store:
                     _log_safe(rel), len(indices))
         return True
 
+    def proposal_is_settled(self, rel: str) -> bool:
+        """提案文件是否带已结案标记（实时读盘，不缓存）。
+
+        结案不是单向状态：复审给提案追加新条目时标记会被撤销——缓存会把
+        已复活的提案当已结案，agent 就永远看不到它了（searcher 0.3.6 的
+        同款教训）。rel 须是 list_notes 产出的已规范化库内相对路径，这里
+        仍过一遍 _norm_rel 作防御纵深（S3 教训：公开方法不该假设调用方
+        已守卫）；越界/缺失/不可读一律按未结案处理——宁可多读一份，
+        不漏一份活提案。"""
+        try:
+            p = self.root / self._norm_rel(rel, what="库内文件路径")
+        except StoreError:
+            return False
+        if not p.is_file():
+            return False
+        try:
+            return PROPOSAL_SETTLED_MARKER in p.read_text(encoding="utf-8")
+        except OSError:
+            return False
+
     def _sync_new_files(self) -> list[str]:
         """Index .md files that exist on disk but were never ingested
         (created out-of-band before the server saw them)."""

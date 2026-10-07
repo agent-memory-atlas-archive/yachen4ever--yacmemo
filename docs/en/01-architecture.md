@@ -380,7 +380,7 @@ A list of `[[链接]]` pointing to nonexistent notes, output by audit. `memory_m
 13. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 审计与提案：
 14. 执行审计问题（memory_audit 发现的、或 WebUI 执行指令派下的）时用 memory_audit_update 汇报：executing 接手 → progress 过程 → executed 完成（附摘要）/ blocked 受阻；复审由审计自动确认，但只有以 executed 收口的问题才可能被封口——停手前务必补一条 executed，不要声称"已验证"、不要代替人忽略。
-15. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读。
+15. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读；memory_list 对已结案提案就地标注（已结案），找待办提案只处理未标注的行，不要逐份打开确认。
 ```
 
 The conventions still go into the prompt (items 1, 2 and 4 reduce wasted round-trips), but the system no longer **relies** on the model honoring them — guards and detectors provide the backstop. This is the essential difference between this design and v1.
