@@ -115,3 +115,19 @@ def test_vector_outage_sets_degradation_notice(store: Store, searcher: Searcher)
     # 恢复后提示清空
     searcher.search("restic", limit=5)
     assert searcher.last_notice is None
+
+
+def test_search_archive_hidden_only_on_request(store: Store, searcher: Searcher):
+    """0.3.17：归档笔记（archive/）默认仍在检索结果里（WebUI 视野不变），
+    include_archived=False（MCP 工具层）时隐去并留提示。"""
+    store.write("notes/live.md", "# live\n\n- [配置] 服务端口为 8080\n")
+    store.write("notes/old.md", "# old\n\n- [配置] 服务端口为 9090\n")
+    ar = store.note_archive("notes/old.md", reason="旧")
+
+    default = searcher.search("服务端口", kind="fts")
+    assert ar["to"] in [r["path"] for r in default]
+
+    searcher.last_notice = None
+    kept = searcher.search("服务端口", kind="fts", include_archived=False)
+    assert [r["path"] for r in kept] == ["notes/live.md"]
+    assert searcher.last_notice and "归档" in searcher.last_notice

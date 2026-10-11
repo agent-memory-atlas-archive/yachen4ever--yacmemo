@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 
 from yacmemo.fs_utils import content_hash
-from yacmemo.store import AnchorError, Store, StoreError, TitleConflict
+from yacmemo.store import (AnchorError, Store, StoreError, TitleConflict,
+                          in_archive_zone)
 
 NOTE_A = """# yacmemo部署配置
 
@@ -714,3 +715,33 @@ def test_title_to_path_strips_md_suffix(store: Store):
     assert store.title_to_path("topics/zcodium/笔记.md") == \
         "topics/zcodium/笔记.md"
     assert store.title_to_path("笔记.MD") == "笔记.md"
+
+
+def test_write_md_suffix_title_registers_stem(store: Store):
+    """0.3.17：memory_write 的索引标题与落盘路径同源（文件名 stem）。
+
+    openviking 实爆：memory_write(title="topics/T/openviking.md") 落盘路径
+    剥了 .md、索引注册的 title 没剥（注册成 "openviking.md"）——按标题读取
+    与 [[openviking]] wiki-link 全部失联，而路径/检索/向量/出链都正常。"""
+    r = store.write("notes/openviking.md", "# openviking\n\n- [部署] x\n")
+    assert r["path"] == "notes/openviking.md"
+    assert store.db.get_note(r["path"])["title"] == "openviking"
+    # 按标题读取（resolve 的标题精确匹配分支）
+    assert store.resolve("openviking") == "notes/openviking.md"
+    # 被别的笔记用 [[标题]] 引用可解析（read 的 via=link 相关笔记）
+    store.write("notes/linker.md", "# linker\n\n- 见 [[openviking]]\n")
+    res = store.read("notes/linker.md")
+    link = next(x for x in res["related"] if x.get("via") == "link")
+    assert link["path"] == "notes/openviking.md"
+
+
+def test_resolve_by_title_of_archived_note_hints_unarchive(store: Store):
+    """0.3.17：归档笔记对客户端不可见——按标题解析不再命中，给出归档
+    位置与出口（取消归档需要确切路径）；按归档路径显式访问仍可。"""
+    r = store.write("notes/archived-note.md",
+                    "# archived-note\n\n- [网络] 端口 8080\n")
+    ar = store.note_archive(r["path"], reason="旧")
+    assert in_archive_zone(ar["to"])
+    with pytest.raises(StoreError, match="已归档"):
+        store.resolve("archived-note")
+    assert store.resolve(ar["to"]) == ar["to"]

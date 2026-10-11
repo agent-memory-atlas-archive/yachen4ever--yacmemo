@@ -60,6 +60,18 @@ PROFILE_FILE = "PROFILE.md"
 # 免注册区：不参与主题注册与游离检测的目录（agents/ 另有 identity 写守卫，
 # 见 _require_agents_write——免注册 ≠ 任意可写）
 FREE_ZONES = ("journal/", "archive/", "curator/", AGENTS_PREFIX)
+# 归档区（archive/）：记忆的"人的收纳层"——对 MCP 客户端不可见（0.3.17 起）：
+# 检索/列表/相关笔记全部隐去、按标题解析不再命中；WebUI 已归档分组不受影响；
+# 按归档路径的显式 memory_read 仍可读（那是明确查阅，与已结案提案同款）。
+ARCHIVE_DIR = "archive"
+
+
+def in_archive_zone(rel: str) -> bool:
+    """rel 是否落在归档区（archive/ 或其子树）。"""
+    r = (rel or "").strip()
+    return r == ARCHIVE_DIR or r.startswith(ARCHIVE_DIR + "/")
+
+
 _TOPIC_FIELD_RE = re.compile(r"^-\s*(卡|相关|现状|注册|状态|标签):\s*(.*)$")
 # 盘符绝对路径（"C:/x/y.md"）。pathlib 判定它是绝对路径，`root / rel`
 # 会直接把 root 丢弃——Windows 上的越界向量，靠末尾的包含性断言兜住，
@@ -266,6 +278,15 @@ class Store:
             return rel
         row = self.db.get_note_by_title(p)
         if row:
+            stored = row["path"] or ""
+            if in_archive_zone(stored):
+                # 归档笔记对客户端不可见（0.3.17）：标题解析不再命中。
+                # 不静默当"未找到"——取消归档需要确切路径，这里给出归档
+                # 位置与出口；按归档路径的显式访问仍可（那是明确查阅）。
+                raise StoreError(
+                    f"「{p}」已归档（{stored}）：归档笔记对客户端不可见，"
+                    "标题不再解析。取消归档用 unarchive_note（仅用户明确"
+                    "要求时），或按归档路径显式读取。")
             # 索引行也要过 _norm_rel：notes 表是派生数据，库里可能还留着旧
             # 版本（有洞的）构建写进去的越界 path——那种行只靠一个标题就能
             # 把调用者带到 root 之外，而 read/edit/delete_note/move 拿到
@@ -351,7 +372,12 @@ class Store:
         rel = self.title_to_path(title)
         self._require_agents_write(rel, identity)
         self._require_covered(rel)
-        _, name = self._split_title(title)
+        # 索引注册的标题与落盘路径同源：rel 恒以 .md 结尾（title_to_path
+        # 统一追加），stem 即清洗后的主题名。不能直接取 _split_title 的原始
+        # 切分——title 尾部带 .md 时路径剥了、注册的 title 没剥，两处分叉
+        # （openviking 实爆：注册成 "openviking.md"，按标题读取与
+        # [[openviking]] wiki-link 全部失联，路径/检索/向量/出链均正常）。
+        name = Path(rel).stem
         is_journal = rel.startswith(self.config.journal_prefix)
         # agents/ 专属区的标题是文件名语义（必读/环境……），跨 identity 同构，
         # 与 journal 一样跳过全局唯一标题守卫（D1 审计侧同步排除）

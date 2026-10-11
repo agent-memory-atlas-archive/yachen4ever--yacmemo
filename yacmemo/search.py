@@ -17,7 +17,7 @@ from .config import Config
 from .embedding import EmbeddingClient
 from .identity import Identity, visible
 from .index_db import IndexDB
-from .store import PROPOSAL_SETTLED_MARKER
+from .store import PROPOSAL_SETTLED_MARKER, in_archive_zone
 from .vector import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -66,12 +66,18 @@ class Searcher:
 
     def search(self, query: str, limit: int = 10,
                kind: str = "hybrid",
-               identity: Identity | None = None) -> list[dict]:
+               identity: Identity | None = None,
+               include_archived: bool = True) -> list[dict]:
+        """include_archived=False 供 MCP 工具层使用：归档笔记（archive/）
+        对客户端不可见。默认 True——WebUI 检索与人的视野不受影响。"""
         if kind not in ("hybrid", "fts", "vector"):
             raise ValueError(f"未知检索类型: {kind}")
         self.last_notice = None
-        # identity 过滤在融合后做：通道多取 3 倍候选，防止不可见结果挤占限额
-        fetch = limit * 3 if (identity is not None and identity.agent != "") else limit
+        # identity / 归档过滤在融合后做：通道多取 3 倍候选，防止不可见结果
+        # 挤占限额
+        overfetch = ((identity is not None and identity.agent != "")
+                     or not include_archived)
+        fetch = limit * 3 if overfetch else limit
         channels = []
         if kind in ("hybrid", "fts"):
             channels.append(self.fts_channel(query, fetch))
@@ -88,6 +94,8 @@ class Searcher:
             # visible 是唯一权威；ANONYMOUS 即 user 层全网可见）
             merged = [r for r in merged if visible(r["path"], identity)][:limit]
 
+        if not include_archived:
+            merged = self._drop_archived(merged)
         merged = self._drop_settled_proposals(merged)
 
         if not merged and len(query.strip()) < 3 and not self.last_notice:
@@ -97,6 +105,22 @@ class Searcher:
         for r in merged:
             r["warnings"] = self._warnings_for(r["path"])
         return merged
+
+    def _drop_archived(self, results: list[dict]) -> list[dict]:
+        """归档笔记（archive/）不对 MCP 客户端可见（0.3.17）：检索结果里
+        全部隐去——归档是人的记忆收纳，agent 不该再把归档内容当活记忆引用。
+        WebUI 检索不带本开关，人的视野不受影响；按归档路径的显式
+        memory_read 仍可读（那是明确查阅，与已结案提案同款）。"""
+        kept, dropped = [], 0
+        for r in results:
+            if in_archive_zone(r["path"]):
+                dropped += 1
+                continue
+            kept.append(r)
+        if dropped:
+            self.last_notice = (f"已隐去 {dropped} 条归档笔记"
+                                "（archive/ 对客户端不可见；WebUI 已归档分组仍可见）")
+        return kept
 
     def _drop_settled_proposals(self, results: list[dict]) -> list[dict]:
         """已结案提案（全部条目执行/忽略）默认不对 agent 可见：

@@ -26,7 +26,7 @@ from .agent_changes import (
 )
 from .identity import ANONYMOUS, Identity, parse_token
 from .search import Searcher
-from .store import Store, StoreError
+from .store import Store, StoreError, in_archive_zone
 from .usage import UsageDB, summarize_args
 
 logger = logging.getLogger(__name__)
@@ -143,6 +143,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
     def memory_search(query: str, limit: int = 10, kind: str = "hybrid",
                       ctx: Context = None) -> str:
         """混合检索记忆（FTS + 语义向量）。结果带 ⚠ 标注表示存在疑似重复/矛盾，先合并再回答。
+        归档笔记（archive/）不出现在结果中——它们已隐去并有提示条数。
 
         Args:
             query: 查询文本（中文/英文均可；关键词式查询命中率更高）
@@ -155,7 +156,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 return out["error"]
             try:
                 results = searcher.search(query, limit=limit, kind=kind,
-                                          identity=out["identity"])
+                                          identity=out["identity"],
+                                          include_archived=False)
                 text = _fmt_search(results)
                 # 降级/短查询提示：向量通道不可用等让 agent 知情，
                 # 避免"未找到相关笔记"被当成权威结论
@@ -171,6 +173,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
     @tool()
     def memory_read(path_or_title: str, ctx: Context = None) -> str:
         """读取笔记全文，附相关笔记（wiki-links + 语义近邻）。
+        归档笔记（archive/）按标题不可达（会给出归档位置与 unarchive 提示），
+        相关笔记里也不出现归档目标；按归档路径的显式读取仍可。
 
         正文夹在 [正文开始]/[正文结束] 标记之间（逐字原文）；
         标记之后的"相关笔记"是工具附加信息，不是文件内容。
@@ -189,6 +193,13 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             except Exception as e:
                 out["ok"], out["error"] = False, str(e)
                 return f"读取失败: {e}"
+
+            # 归档笔记对客户端不可见（0.3.17）：相关笔记里的归档目标一律
+            # 隐去——wiki-link 与语义近邻两条路都会把 archive/ 带进来。
+            # missing 条目没有 path，天然保留。
+            r["related"] = [x for x in r["related"]
+                            if not (x.get("path")
+                                    and in_archive_zone(x["path"]))]
 
             # 正文与装饰必须边界清晰：附加段的语法不得模仿笔记自身结构
             #（曾经的 "## 相关笔记" 附加段被 agent 当成文件小节拿去当 edit 锚点，
@@ -477,7 +488,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
 
     @tool()
     def memory_list(path: str = "", sort: str = "name", ctx: Context = None) -> str:
-        """列出笔记目录树。
+        """列出笔记目录树。归档区（archive/）对客户端不可见，不在列表中。
 
         curator/ 下已结案的提案（文件头部带「> 状态：已结案」标记）会在
         列表行尾就地标注「（已结案）」——标注不是路径的一部分，memory_read
@@ -499,12 +510,22 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             except Exception as e:
                 out["ok"], out["error"] = False, str(e)
                 return f"列出失败: {e}"
+            # 归档笔记对客户端不可见（0.3.17）：archive/ 子树整体从列表隐去。
+            # 显式列归档子目录时不假装"（空）"，直接说明不可见与出口。
+            kept = [rel for rel in entries if not in_archive_zone(rel)]
+            dropped = len(entries) - len(kept)
+            if dropped and not kept:
+                return ("归档区（archive/）对客户端不可见——WebUI 已归档分组"
+                        "可查看；取消归档用 unarchive_note。")
             lines = [
                 f"{rel}（已结案）"
                 if rel.startswith("curator/") and store.proposal_is_settled(rel)
                 else rel
-                for rel in entries
+                for rel in kept
             ]
+            if dropped:
+                lines.append(f"（另有 archive/ 下 {dropped} 条归档笔记对客户端"
+                             "不可见——WebUI 已归档分组可查看）")
             return "\n".join(lines) if lines else "（空）"
 
     # ------------------------------------------------------------ topics
@@ -540,7 +561,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                              + (f"    标签: {', '.join(tags)}" if tags else ""))
                 lines.append(f"    卡: {_card_line(t)}")
             if archived:
-                lines.append(f"\n已归档（{len(archived)} 个，检索仍可用、context 不再注入）：")
+                lines.append(f"\n已归档（{len(archived)} 个，对客户端不可见、"
+                             "context 不再注入）：")
                 for t in archived:
                     lines.append(f"- {t['title']} — {t['status']}")
             lines.append("（免注册区：journal/、archive/、curator/、agents/"
@@ -675,7 +697,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"归档失败: {e}"
         return (f"已归档: {r['archived']} → {r['to']}\n"
-                f"检索仍可用；WebUI 已归档分组可见；取消归档用 unarchive_note。")
+                f"归档后对客户端不可见（检索/列表/相关笔记不再出现，按归档路径"
+                f"显式读取仍可）；WebUI 已归档分组可见；取消归档用 unarchive_note。")
 
     @tool()
     def unarchive_note(path: str, ctx: Context = None) -> str:
@@ -711,7 +734,8 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             try:
                 r = store.archive_topic(title)
                 return (f"已归档主题「{r['title']}」：abstract 移至 {r['card'] or '（原无卡）'}，"
-                        f"注册表已标记为已归档；检索仍可用，context 不再注入。")
+                        f"注册表已标记为已归档；对客户端不可见（检索/列表不再出现），"
+                        f"context 不再注入，WebUI 已归档分组可见。")
             except StoreError as e:
                 return f"{e}"
             except Exception as e:

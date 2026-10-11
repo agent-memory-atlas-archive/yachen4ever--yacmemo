@@ -126,3 +126,55 @@ def test_memory_list_annotates_settled_proposals(store: Store, searcher: Searche
     store.save(settled, "# 提案A\n\n**状态：待裁决**\n")
     _, r = _probe(store, searcher, "memory_list", {"path": "curator"})
     assert f"{settled}（已结案）" not in r.content[0].text
+
+
+def test_memory_search_hides_archive(store: Store, searcher: Searcher):
+    """0.3.17：归档笔记（archive/）对 MCP 客户端不可见——检索不再出现。"""
+    store.write("notes/live.md", "# live\n\n- [配置] 服务端口为 8080\n")
+    store.write("notes/old.md", "# old\n\n- [配置] 服务端口为 9090\n")
+    ar = store.note_archive("notes/old.md", reason="旧")
+
+    _, r = _probe(store, searcher, "memory_search",
+                  {"query": "服务端口", "kind": "fts"})
+    text = r.content[0].text
+    assert ar["to"] not in text and "notes/live.md" in text
+    assert "归档" in text, "隐去条数要对 agent 留痕（提示条）"
+
+
+def test_memory_list_hides_archive(store: Store, searcher: Searcher):
+    """0.3.17：memory_list 不列 archive/；显式列归档子目录说明不可见。"""
+    store.write("notes/gone.md", "# gone\n\n- [配置] x\n")
+    ar = store.note_archive("notes/gone.md", reason="旧")
+
+    _, r = _probe(store, searcher, "memory_list", {"path": ""})
+    text = r.content[0].text
+    assert ar["to"] not in text, "归档笔记的路径不得出现在列表里"
+    assert "归档笔记对客户端不可见" in text, "根列出时对隐去条数留痕"
+
+    _, r = _probe(store, searcher, "memory_list", {"path": "archive"})
+    text = r.content[0].text
+    assert ar["to"] not in text and "不可见" in text
+
+
+def test_memory_read_hides_archive_related_and_title(store: Store,
+                                                     searcher: Searcher):
+    """0.3.17：相关笔记不含归档目标（wiki-link 与向量两条路都隐）；
+    按标题解析归档笔记给出归档提示；按归档路径显式读取仍可。"""
+    store.write("notes/hub.md", "# hub\n\n- 见 [[target-note]]\n")
+    store.write("notes/target-note.md",
+                "# target-note\n\n- [配置] 服务端口为 8080\n")
+    ar = store.note_archive("notes/target-note.md", reason="旧")
+
+    _, r = _probe(store, searcher, "memory_read", {"path_or_title": "notes/hub.md"})
+    text = r.content[0].text
+    # hub 正文里本身写着 [[target-note]]，只断言附加的"相关笔记"段
+    _, _, related_section = text.partition("[正文结束")
+    assert "target-note" not in related_section, "归档目标不得经相关笔记外泄"
+
+    _, r = _probe(store, searcher, "memory_read",
+                  {"path_or_title": "target-note"})
+    text = r.content[0].text
+    assert "已归档" in text and ar["to"] in text, "标题解析给归档位置与出口"
+
+    _, r = _probe(store, searcher, "memory_read", {"path_or_title": ar["to"]})
+    assert "[正文开始" in r.content[0].text, "按归档路径显式读取是明确查阅，仍可"

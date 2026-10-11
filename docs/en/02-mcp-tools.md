@@ -52,6 +52,7 @@ Dual-channel retrieval + Reciprocal Rank Fusion (k=60, using only ranks, never s
 - **Short-query fallback**: queries shorter than 3 characters cannot be hit by trigram; the tool automatically falls back to a LIKE substring scan; when LIKE also misses, it outputs the hint "please switch to longer keywords".
 - **Degradation notice**: when the vector channel fails, the tool outputs `⚠ vector channel unavailable (reason); this round's results are FTS only` — "no relevant notes found" is no longer treated as an authoritative conclusion (the silent-degradation problem observed in the real 2026-09-18 endpoint outage).
 - **Settled proposals hidden** (added 2026-09-25): once every finding of a curator/ proposal report is executed or dismissed, a `> 状态：已结案` (settled) marker is stamped at the top of the file and search results no longer return it by default (with the notice "N settled proposal(s) hidden"); explicit `memory_read` still works — that is deliberate lookup. Never execute findings from a settled proposal.
+- **Archived notes hidden** (added 0.3.17): notes under `archive/` no longer appear in search results (with the notice "N archived note(s) hidden") — archiving is the human's filing layer, and agents must not keep citing archived content as live memory. WebUI search is unaffected; explicit `memory_read` by archive path still works.
 
 Return format:
 
@@ -78,7 +79,8 @@ Return = `[正文开始 | path | 锚点提示]` + **verbatim body** + `[正文�
   - For `[[wiki-link]]` targets that exist: lists the title + the other note's first observation (`via: link`);
   - For missing targets: annotated "target does not exist" (the agent can create or clean it up in passing);
   - When the target exists in the index but **that row's `path` is out-of-root** (quarantined, see `quarantined_index_rows` in §7): an entry carrying **neither a `path` nor an observation**, only `quarantined: true` plus the reason — the bad row's path and content are never disclosed, the caller just sees "this link sits on a bad row" (added 2026-10-03). Link targets come from the same derived index table, so an out-of-root row takes part in none of this section's reads;
-  - Semantic nearest neighbors top-2 (`via: vector`, requires an embedding endpoint).
+  - Semantic nearest neighbors top-2 (`via: vector`, requires an embedding endpoint);
+  - Related notes **never include archived targets** (0.3.17): `archive/` notes brought in via wiki-links or semantic neighbors are always dropped. Resolving an archived note **by title** is refused with the archive location and the `unarchive_note` exit; explicit reads by archive path still work (deliberate lookup).
 
 ## 3. memory_write
 
@@ -87,7 +89,7 @@ memory_write(title: str, content: str, force: bool = False,
              force_confirm: bool = False) -> str
 ```
 
-Creates a new note. `title` may include a directory prefix; **within a topic directory, write as `topics/<topic>/<note-name>`** (a missing `topics/` prefix is hard-blocked by the topic registry, and the block message provides the corrected title). The directory is only for archiving; **the note's title is the topic name with the directory stripped**. Filenames are sanitized by replacing illegal characters (`\ / : * ? " < > |`).
+Creates a new note. `title` may include a directory prefix; **within a topic directory, write as `topics/<topic>/<note-name>`** (a missing `topics/` prefix is hard-blocked by the topic registry, and the block message provides the corrected title). The directory is only for archiving; **the note's title is the topic name with the directory stripped**. Filenames are sanitized by replacing illegal characters (`\ / : * ? " < > |`). **The registered index title shares one source with the on-disk path** (tightened in 0.3.17): a trailing `.md` in `title` is stripped before the extension is appended uniformly, so the registered title is always the filename stem — previously a `.md`-suffixed title got registered with the suffix, silently breaking read-by-title and `[[title]]` wiki-links (the openviking incident).
 
 **Create-only, never overwrite** (added 0.3.12; `force` not exempt): if the target path already exists (same rule for topics/, journal/ and archive/), the write is refused and the existing note is left untouched — update via `memory_edit` / `memory_edit_section`; to rebuild an entire note, `memory_delete` first (only at the user's explicit request). The same-name block runs **before** the near-duplicate title guard: the exact match is excluded from near-duplicate candidates by `exclude_path`, so without this block the message would only point at `-2`-style near-duplicates and miss the truly identically-named note.
 
@@ -245,6 +247,8 @@ Lists all `.md` files under memory_root (or a subdirectory); with `sort="mtime"`
 
 Settled proposals under curator/ (files carrying the `> 状态：已结案` marker) get a `（已结案）` suffix appended to their list line — the suffix is not part of the path; `memory_read` still uses the bare path. When looking for open proposals, skip the suffixed lines instead of opening every proposal to check settlement; the check reads the file live, so the suffix disappears as soon as a re-audit unstamps the proposal.
 
+The `archive/` zone is **invisible to clients** (0.3.17): it never appears in listings (the root listing notes how many entries were dropped); listing an archive subdirectory explicitly returns an invisibility notice. Archived paths come from the WebUI archived group or the archive receipt; unarchive with `unarchive_note`.
+
 ## Decision tree for agent tool selection
 
 ```
@@ -356,7 +360,7 @@ archive_topic(title: str) -> str
 Archives a topic (lifecycle: register → active → archive → unregister): the **entire topic directory** moves into `archive/<topic>/` (the directory is the membership — every module note in the topic goes along with the abstract, leaving no strays); inside the registry block, `- 状态: archived` is set and the `- 卡:` path is rewritten in sync.
 
 - **Invocation gate**: call only when the user explicitly asks ("archive X" / "this project is behind us");
-- Difference from unregistration: **archiving does not lose retrievability** — the topic's notes remain searchable in the index; only memory_context stops injecting the abstract and topic_list groups it under archived; archive/ is a registry-free zone and does not count as strays;
+- Difference from unregistration: **archiving does not lose data** — the topic's notes stay in the index and in the WebUI archived group (the human's view); they only become invisible to clients (0.3.17: no longer in search/listings), memory_context stops injecting the abstract and topic_list groups it under archived; archive/ is a registry-free zone and does not count as strays;
 - Reversibility: git history can be rolled back; manually deleting the registry status line restores active status.
 
 ## 14.5 archive_note / unarchive_note
@@ -370,7 +374,7 @@ Archive/unarchive **a single note inside a topic** (contract 0.3.9; whole-topic 
 
 - archive_note moves the note into `archive/<topic>/`, optionally writing a status line with `reason` at the top of the note;
 - The abstract (topic card) cannot be archived alone; an existing destination is refused;
-- After archiving the note stays searchable and is visible under the "archived notes" group in the WebUI topic tree;
+- After archiving the note is **invisible to clients** (0.3.17: gone from search/listings/related notes; title resolution no longer hits; explicit reads by archive path still work) and visible under the "archived notes" group in the WebUI topic tree;
 - unarchive_note resolves the active topic from the directory name and moves the note back to `topics/<topic>/`; free-form archive directories raise an error;
 - Only on explicit user request; **never hand-move notes into archive/ root with memory_move** (it breaks topic ownership and the topic tree).
 

@@ -45,6 +45,20 @@ AGENT_CONTRACT_VERSION = _package_version()
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.17": (
+        "- 归档笔记（archive/）对客户端不可见：memory_search / memory_list / "
+        "memory_read 的相关笔记都不再出现 archive/ 下的内容；按标题解析也"
+        "不再命中，会给出归档位置与 unarchive 提示。按归档路径的显式 "
+        "memory_read 仍可读（那是明确查阅）。归档笔记的取消归档要靠 WebUI "
+        "已归档分组或归档回执里的路径；\n"
+        "- memory_write 标题注册修复：title 尾部带 .md 时，此前索引注册的"
+        "标题也带 .md（如注册成 \"openviking.md\"）——按标题读取与 "
+        "[[标题]] wiki-link 全部失联，而路径/检索/向量/出链都正常，极具"
+        "迷惑性。现在注册标题与落盘路径同源（文件名 stem，.md 一律剥除）。"
+        "存量带 .md 标题的笔记：用 memory_delete 后以不带 .md 的 title 重写"
+        "（仅用户明确要求时删）；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.16": (
         "- memory_list 对 curator/ 提案就地标注结案状态：文件头部带"
         "「> 状态：已结案」标记的提案，列表行会缀「（已结案）」——标注不是"
@@ -272,6 +286,8 @@ AGENT_CONTRACT_DIGEST = (
     "真实路径、检索必然失败）；\n"
     "- journal/、archive/、curator/、agents/ 免注册区不受限"
     "（agents/ 另有 identity 专属守卫）；\n"
+    "- 归档笔记（archive/）对客户端不可见：检索/列表/相关笔记不出现，"
+    "按标题解析不命中；按归档路径显式读取仍可，取消归档用 unarchive_note；\n"
     "- 审计问题执行：修复时用 memory_audit_update 汇报进度"
     "（executing / progress / executed / blocked），复审由审计自动确认；\n"
     "- 主题标签=视角归类（如 工作/开发/生活），一般 1–2 个；不是关键词/"
