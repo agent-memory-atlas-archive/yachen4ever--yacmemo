@@ -13,7 +13,7 @@
 - 路由顺序：`/api/*`、`/ui/*` 先于用户 MCP 挂载注册；配置层同时把 `api`/`ui`/`health` 设为用户 id 保留字，杜绝遮蔽；
 - **二级路径（base_path）**：`[server].base_path` 设置后（如 `/yacmemo`），WebUI 全部路由在前缀下**额外**挂一份（根上原路由保留，直连 `:9721/ui` 向后兼容）；页面内绝对路径引用由服务端注入前缀（见 §五），前端经 `window.__BASE_PATH__` 取前缀调 API；MCP 与 `/health` 不挂前缀；默认空 = 行为与无此功能完全一致。部署与 nginx 参考配置见 [05-deployment.md](05-deployment.md) §1.5；
 - 错误约定：业务性拒绝（如守卫拦截）返回 HTTP 200 + `{"ok": false, "error": "..."}`；未知用户返回 404；
-- 无独立鉴权，遵循"内网自用"信任边界（见 [05-deployment.md](05-deployment.md) 安全边界）。
+- 默认无鉴权（LAN 信任）；配置 `[webui].password` 后启用登录（HMAC 会话 cookie，未登录 API 返回 401），遵循"内网自用"信任边界（见 [05-deployment.md](05-deployment.md) 安全边界）。
 
 ## 二、页面导览
 
@@ -32,7 +32,7 @@
 右侧选中即看，合并了旧"笔记"页的全部能力：
 
 - **查看**：正文默认 markdown 渲染，`编辑` 切到源码 textarea，`预览` 切回渲染；
-- **编辑**：`保存` 走 `store.save`——整篇覆盖，标题跟随首行 `# 标题`，索引同步重建（FTS/向量/冲突重算）；
+- **编辑**：`保存` 走 `store.save`——整篇覆盖，标题跟随首行 `# 标题`，索引同步重建（FTS/向量/冲突重算）。**保存冲突检测**（0.3.18）：客户端带回读取时的 hash，期间被其他会话改过则返回 409 + 冲突确认（强制覆盖可越过）——此前双开标签页是静默 last-write-wins；
 - **删除**：需 confirm 确认；删除文件 + 清理全部索引。git 里仍可找回。abstract.md 不可从 UI 删除；
 - **单篇归档**：选中活跃主题内的模块笔记可直接「归档」（移入 archive/<主题名>/，WebUI 树「单篇归档」分组可见），归档笔记可「取消归档」移回主题。归档笔记**对 MCP 客户端不可见**（0.3.17：检索/列表/相关笔记不再出现），WebUI 检索与浏览不受影响；
 - **主题标签**：树工具栏可按标签过滤主题，主题节点带标签后缀（〔工作·开发〕样式）；「标签管理」弹层支持标签重命名/删除（全库批量改写注册表）与按主题增删标签（输入时自动补全已有标签）；
@@ -78,7 +78,7 @@
 
 **Tab 2「质量提案」**——curator 深度审查工作流：
 
-- 「立即深度审查」把注册表、主题卡、模块文件小节标题、PROFILE.md、agents/ 强制注入必读标题与审计结果交给 `[curator]` 配置的 LLM（约 1–3 分钟；每周 timer 自动执行）；报告落盘 `curator/提案-<日期>.md`，同日重跑以"复审"小节追加（标题保持每日唯一，不触发 D1）；
+- 「立即深度审查」把注册表、主题卡、模块文件小节标题、PROFILE.md、agents/ 强制注入必读标题与审计结果交给 `[curator]` 配置的 LLM（约 1–2 分钟；每周 timer 自动执行）；报告落盘 `curator/提案-<日期>.md`，同日重跑以"复审"小节追加（标题保持每日唯一，不触发 D1）；
 - **两级结构**：第一层是提案列表，每份提案带**提案级状态**（受阻·需要你介入 / 待处理·等你决定 / 执行中·agent 正在做 / 已结案·全部完成，按此优先级排序置顶）与各状态条目计数；点开才是**条目级**明细（severity / 类型 / 复审徽标 / 条目状态 / 建议 / 执行时间线）——默认展开需要你关注的提案，已结案的折叠收起；统计行走完整状态机（待处理 → 执行中 → 已执行 / 受阻 / 已忽略），右上角可按状态筛选；
 - **没有「采纳」按钮——派发即采纳**：待处理条目直接「复制执行指令」粘给任意 agent（指令内嵌 `memory_audit_update` 汇报约定），误报/不做点「忽略」（写入 `audit_actions` 表 P 类条目 + 提案笔记「裁决记录」节，git 自动快照）；agent 执行进度以事件时间线展示在条目下方；
 - 历史遗留的「已采纳·未执行」条目（旧口径的派发意图）显式标出，仍可派发或忽略收口；
@@ -118,8 +118,13 @@ PROFILE.md 的可视化编辑：左侧列出全部小节（身份 / 沟通风格
 
 | 方法 | 路径 | 参数 | 说明 |
 |---|---|---|---|
+| POST | `/api/login` | `{password}` | WebUI 登录（配置了 `[webui].password` 时）：密码正确则种 HMAC 会话 cookie（30 天有效，重启不失效）；未配置密码时返回错误提示 |
 | GET | `/api/overview` | — | 用户列表（笔记数/撞车数/守卫统计）+ embedding 状态 + 今日调用数；每用户另带 `topics` / `archived_topics` 数组（`title` / `card` / `status` + **`card_invalid` / `card_error`**——注册表 `卡:` 非法时 `card` 被置空，这两个字段说明原因，免得页面只显示"主题没有卡"而看不出注册表坏了） |
 | GET | `/api/{user}/topics` | — | 主题清单（`active` / `archived`，字段同上：`title` / `card` / `status` / `related` / `tags` + `card_invalid` / `card_error`） |
+| POST | `/api/{user}/topics/archive` | `{title}` | 归档整个主题（等价 MCP `archive_topic`） |
+| POST | `/api/{user}/topics/tag` | `{title, add, remove}` | 主题标签增删（等价 MCP `topic_tag`） |
+| POST | `/api/{user}/topics/tag-rename` | `{old, new}` | 标签重命名（全库批量改写，重名等价合并） |
+| POST | `/api/{user}/topics/tag-delete` | `{tag}` | 删除标签（从所有主题的标签行移除，主题本身不动） |
 | GET | `/api/users` | — | 用户明细列表（id / 记忆根 / git 身份 / 目录是否存在 / 是否已挂载）+ config.toml 路径 |
 | POST | `/api/users/add` | `{id, root, git_user_name?, git_user_email?}` | 新增用户（id 限字母数字下划线连字符，禁系统保留字 api/ui/health）；自动创建记忆目录，**新用户需重启才挂载** |
 | POST | `/api/users/update` | `{id, root?, git_user_name?, git_user_email?, restart?}` | 修改用户；先完整校验再备份写回 `[[users]]`（注释与顺序保留）；`root` 变更默认触发重启 |
@@ -127,13 +132,20 @@ PROFILE.md 的可视化编辑：左侧列出全部小节（身份 / 沟通风格
 | GET | `/api/usage` | `limit` `user` `tool` | 调用日志（默认 100 条，按时间倒序） |
 | GET | `/api/usage/clients` | — | 客户端汇总（UA + IP + 调用数 + 最近活跃） |
 | GET | `/api/usage/days` | — | 近 14 天每日调用/错误数 |
+| GET | `/api/{user}/identities` | — | identity 列表（扫描 `agents/` 目录 + 已创建登记：agent / shared 文件数与 mtime / 各设备笔记数与激活状态） |
+| POST | `/api/{user}/identities` | `{agent, device}` | 铸造 identity（确定性 token）并登记，自动预创建 `shared/必读.md` 占位模板 |
 | GET | `/api/{user}/notes` | `path` `sort` | 笔记列表（含 mtime/size） |
 | POST | `/api/{user}/notes` | `{title, content, force, force_confirm}` | 新建（走写路径守卫） |
 | GET | `/api/{user}/note` | `path` | 读取单篇（path 或标题） |
 | PUT | `/api/{user}/note` | `{path, content}` | 整篇保存（标题随首行标题） |
 | DELETE | `/api/{user}/note` | `path` | 删除（文件 + 全部索引） |
+| POST | `/api/{user}/note/archive` | `{path, reason?}` | 归档主题内单篇笔记（等价 MCP `archive_note`） |
+| POST | `/api/{user}/note/unarchive` | `{path}` | 取消单篇归档（等价 MCP `unarchive_note`） |
+| GET | `/api/{user}/profile` | `section` | 读取画像/偏好（全文或指定小节） |
+| PUT | `/api/{user}/profile` | `{section, content}` | 创建/替换画像小节（等价 `update_user_preference`，走写路径自动 git 快照） |
 | GET | `/api/{user}/search` | `q` `limit` `kind` | 检索（含 ⚠ warnings） |
 | POST | `/api/{user}/audit` | — | 运行审计（含自愈，会改动索引）；返回 `audit_file`（本次快照路径） |
+| POST | `/api/{user}/reindex` | — | 全量重建索引（危险维护操作：运行指标一并清零），设置页「维护」卡片调用 |
 | GET | `/api/{user}/audit/last` | — | 最近一次审计结果（内存缓存，重启即失效） |
 | GET | `/api/{user}/audit/runs` | — | 历史审计快照列表（journal/audit/*.md，时间倒序） |
 | GET | `/api/{user}/audit/actions` | — | 处置/裁决历史全量（audit_actions 表） |
@@ -163,7 +175,7 @@ curl -s -X POST http://debsvc.local:9721/api/yachen/audit
 
 ## 五、构建与实现说明
 
-- **前端工程**：Vue 3 + Naive UI + Vite（`frontend/`），源码 `src/App.vue` + `src/components/`（五页组件）+ `src/composables/api.js`（统一 fetch 封装）；
+- **前端工程**：Vue 3 + Naive UI + Vite（`frontend/`），源码 `src/App.vue` + `src/components/`（七个页面组件）+ `src/composables/api.js`（统一 fetch 封装）；
 - **构建**：`scripts/build_webui.sh`（npm ci + vite build）→ 产物落 `yacmemo/webui/dist/`，与 `app.py` 的 `STATIC_DIR` 一致；vite outDir 用 `new URL('../yacmemo/webui/dist', import.meta.url)`，相对 `frontend/vite.config.js` 解析（上一级即仓库根），别改成 `../../yacmemo/webui/dist`（跑到仓库外面去了）；
 - **分包**：manualChunks 把 `vue` 与 `naive-ui` 各自成 chunk——业务代码迭代不会使大依赖缓存失效；
 - **开发模式**：`cd frontend && npm run dev`（Vite dev server 端口 5173，`/api` 代理到本机 9721）；

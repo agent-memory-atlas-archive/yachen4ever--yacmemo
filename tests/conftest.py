@@ -63,8 +63,11 @@ class FakeEmbedding:
                 v[idx] = 1.0
                 hit = True
         if not hit:
-            # orthogonal junk bucket, deterministic per text
-            v[100 + (abs(hash(text)) % 800)] = 1.0
+            # orthogonal junk bucket — hashlib 而非内置 hash()：PYTHONHASHSEED
+            # 跨进程随机会把"确定性夹具"变成每次运行的随机碰撞源（0.13%/对，
+            # 精确撞车计数断言偶发假阳）
+            import hashlib as _hl
+            v[100 + (int(_hl.md5(text.encode()).hexdigest(), 16) % 800)] = 1.0
         return v
 
     def embed(self, texts: list[str]) -> list[list[float]]:

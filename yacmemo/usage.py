@@ -81,6 +81,11 @@ class UsageDB:
             self.conn.commit()
 
     def _trim(self):
+        # 计数越阈值才裁：每次 INSERT 都跑全表 NOT IN 排序是纯写放大
+        # （2 万行级），绝大多数调用什么都不用做
+        n = self.conn.execute("SELECT COUNT(*) FROM call_log").fetchone()[0]
+        if n <= _MAX_ROWS:
+            return
         self.conn.execute(
             "DELETE FROM call_log WHERE id NOT IN "
             "(SELECT id FROM call_log ORDER BY ts DESC LIMIT ?)", (_MAX_ROWS,)

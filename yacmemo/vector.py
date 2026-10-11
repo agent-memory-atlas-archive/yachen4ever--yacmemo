@@ -19,12 +19,13 @@ from lancedb.expr import col, lit
 
 logger = logging.getLogger(__name__)
 
-_VECTOR_SCHEMA = pa.schema([
-    pa.field("id", pa.string()),
-    pa.field("vector", pa.list_(pa.float32(), 1024)),
-    pa.field("text", pa.string()),
-    pa.field("source_path", pa.string()),
-])
+def _vector_schema(dimensions: int) -> pa.Schema:
+    return pa.schema([
+        pa.field("id", pa.string()),
+        pa.field("vector", pa.list_(pa.float32(), dimensions)),
+        pa.field("text", pa.string()),
+        pa.field("source_path", pa.string()),
+    ])
 
 _TABLES = ("note_vectors", "obs_vectors")
 
@@ -48,15 +49,27 @@ class VectorStore:
     """LanceDB wrapper. `id` of a note vector IS its memory-root-relative path."""
 
     def __init__(self, lancedb_path: str, dimensions: int = 1024):
+        if dimensions <= 0:
+            raise ValueError(f"向量维度非法: {dimensions}")
         self.db = lancedb.connect(lancedb_path)
         self.dimensions = dimensions
         self._lock = threading.Lock()
+        schema = _vector_schema(dimensions)
         for name in _TABLES:
             try:
-                self.db.open_table(name)
+                tbl = self.db.open_table(name)
             except Exception:
-                self.db.create_table(name, schema=_VECTOR_SCHEMA)
+                self.db.create_table(name, schema=schema)
                 logger.info("Created LanceDB table: %s", name)
+                continue
+            # 已有表的维度与配置不一致：每个 add 都会失败到重建为止——启动时
+            # 快速失败并指出出口，别让用户在设置页改完 dimensions 后静默坏掉
+            existing = tbl.schema.field("vector").type.list_size
+            if existing != dimensions:
+                raise RuntimeError(
+                    f"LanceDB 表 {name} 的向量维度是 {existing}，配置要求 "
+                    f"{dimensions}——改维度需删除 .index/lancedb 后 reindex 重建"
+                    "（或把配置改回原值）")
 
     def _upsert(self, table: str, item_id: str, text: str,
                 embedding: list[float], source_path: str):
@@ -111,4 +124,4 @@ class VectorStore:
                 with contextlib.suppress(Exception):
                     self.db.drop_table(name)
             for name in _TABLES:
-                self.db.create_table(name, schema=_VECTOR_SCHEMA)
+                self.db.create_table(name, schema=_vector_schema(self.dimensions))

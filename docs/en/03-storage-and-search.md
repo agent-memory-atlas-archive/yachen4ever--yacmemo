@@ -31,10 +31,12 @@ Data flows one way: files → indexes. The write order is **files first, then in
 ### 3.1 SQLite (index.db)
 
 ```sql
-notes(path PK, title, content_hash, updated_at)   -- 一行一篇笔记
+notes(path PK, title, content_hash, updated_at, vector_ok)  -- 一行一篇笔记；vector_ok=0 供缺向量审计点名/自愈
 fts(FTS5: title, body, path UNINDEXED, tokenize='trigram')
 collisions(id, kind, a_path, b_path, a_text, b_text, score, detected_at, status)
 guard_events(id, ts, kind, attempted_title, matched_path)   -- refused / forced
+audit_actions(id, kind, a_path, b_path, action, note, acted_at)    -- D1–D4 处置留痕（防复发）
+audit_exec_events(seq, issue_id, kind, event, note, identity, ts)  -- 审计执行进度时间线
 vec_cache(content_hash PK, vector BLOB)                     -- float32 向量缓存
 ```
 

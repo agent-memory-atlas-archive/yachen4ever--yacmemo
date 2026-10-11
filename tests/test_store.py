@@ -745,3 +745,94 @@ def test_resolve_by_title_of_archived_note_hints_unarchive(store: Store):
     with pytest.raises(StoreError, match="已归档"):
         store.resolve("archived-note")
     assert store.resolve(ar["to"]) == ar["to"]
+
+
+def test_read_link_related_respects_identity(store: Store):
+    """0.3.18 审计 B1：read() 的 wiki-link 相关笔记此前不做 visible 检查，
+    其他专属区的路径+首条 observation 经 [[链接]] 外泄（向量分支有检查、
+    链接分支漏了）。不可见时必须静默跳过——报 missing 也是泄漏存在性。"""
+    from yacmemo.identity import ANONYMOUS, Identity
+    other = Identity(agent="bob", device="r9000x")
+    store.write("agents/bob/shared/环境.md",
+                "# 环境\n\n- [机密] bob 主机上的机密观察行内容XYZ\n")
+    store.write("notes/链接页.md", "# 链接页\n\n- 见 [[环境]]\n")
+    # MCP 无 token = ANONYMOUS（agents/ 区不可见）；identity=None 是人类/
+    # 服务端内部语义，恒可见——两者必须区分
+    r = store.read("notes/链接页.md", identity=ANONYMOUS)
+    assert all(x.get("path") != "agents/bob/shared/环境.md" for x in r["related"])
+    r = store.read("notes/链接页.md", identity=Identity(agent="zcode", device="m5air"))
+    assert all("机密" not in (x.get("note") or "") for x in r["related"])
+    r = store.read("notes/链接页.md", identity=other)   # 本人可见
+    assert any(x.get("path") == "agents/bob/shared/环境.md" for x in r["related"])
+
+
+def test_mutating_guard_covers_webui_channels(store: Store):
+    """0.3.18 审计 B4：save/delete_note 此前不在 _MUTATING，WebUI 编辑与
+    持锁的 edit/audit 交错可丢更新。守卫名单用包装痕迹钉住。"""
+    assert hasattr(store.save, "__wrapped__")
+    assert hasattr(store.delete_note, "__wrapped__")
+    assert hasattr(store.note_archive, "__wrapped__")
+    assert hasattr(store.update_preference, "__wrapped__")
+
+
+def test_reindex_preserves_d2_dispositions(store: Store):
+    """0.3.18 审计 B5：clear_all 抹掉 resolved/dismissed 撞车对，重建后以
+    新 id 复活为 open，人的处置蒸发。reindex 必须保留处置并在重检出时抑制。"""
+    store.write("notes/撞车A.md", "# 撞车A\n\n- [撞车] 服务器端口配置为 8080 并对外暴露\n")
+    store.write("notes/撞车B.md", "# 撞车B\n\n- [撞车] 服务器端口配置为 8080 并对外暴露\n")
+    cols = store.db.list_collisions()
+    assert cols, "两条同内容 observation 应检出撞车"
+    cid = cols[0]["id"]
+    store.db.resolve_collision(cid, "dismissed")
+    r = store.reindex()
+    assert r.get("restored_dispositions") == 1
+    after = store.db.list_collisions()
+    kept = [c for c in after if c["id"] == cid]
+    assert kept and kept[0]["status"] == "dismissed", "处置对必须按原 id 回填"
+    # 抑制集生效：同内容重检出不再以 open 复活
+    open_pairs = [{c["a_path"], c["b_path"]}
+                  for c in after if c["status"] == "open"]
+    assert {"notes/撞车A.md", "notes/撞车B.md"} not in open_pairs
+
+
+def test_edit_section_ignores_code_fence_headings(store: Store):
+    """0.3.18 审计 P2：edit_section 此前不感知代码围栏——围栏内的伪标题
+    既会顶替真目标（命中 2 处拒绝），也会被当小节终点截断替换体。"""
+    body = ("# fenced\n\n```md\n## 目标\n```\n\n## 目标\n\n"
+            "```python\n## 伪标题\nprint('hi')\n```\n\n## 尾节\n\n- x\n")
+    store.write("notes/fenced.md", body)
+    # 围栏内的"目标"不参与匹配：唯一命中真小节（旧代码这里报命中 2 处）
+    r = store.edit_section("notes/fenced.md", "目标", "- 新内容")
+    assert r["heading"] == "目标"
+    text = (store.root / "notes/fenced.md").read_text(encoding="utf-8")
+    # 小节终点不被围栏内伪标题截断：替换体直达真 ## 尾节（旧代码会把
+    # 伪标题/print/闭合 ``` 残留成顶层内容）
+    assert "伪标题" not in text
+    assert "## 尾节" in text and "- 新内容" in text
+    assert "```md" in text, "目标之前的围栏是别的小节内容，不得波及"
+
+
+def test_move_rejects_stale_index_row(store: Store):
+    """0.3.18 审计 P2：文件被外部删、索引行还在时，move 到该路径会在
+    rename 成功后才撞主键（裸 IntegrityError + 索引失配）——必须提前拒绝。"""
+    from yacmemo.store import StoreError
+    store.write("notes/mover.md", "# mover\n\n- x\n")
+    store.db.upsert_note("notes/ghost.md", "ghost", "x")
+    with pytest.raises(StoreError, match="陈旧索引行"):
+        store.move("notes/mover.md", "notes/ghost")
+
+
+def test_archive_zone_case_insensitive(store: Store):
+    """0.3.18 审计 P2：macOS/Windows 大小写不敏感盘上 Archive/ 就是
+    archive/——字符串精确比对会让归档隐形被大小写变体绕过。"""
+    assert in_archive_zone("Archive/主题/x.md")
+    assert in_archive_zone("ARCHIVE")
+    assert not in_archive_zone("archivex/x.md")
+
+
+def test_save_md_case_no_double_extension(store: Store):
+    """0.3.18 审计 P3：save("x.MD") 此后落成 x.MD.md 双扩展名。"""
+    r = store.save("notes/大写.MD", "# 大写\n")
+    assert r["path"] == "notes/大写.MD"
+    assert (store.root / "notes/大写.MD").is_file()
+    assert not (store.root / "notes/大写.MD.md").exists()

@@ -9,7 +9,12 @@ export async function api(path, opts = {}) {
     ...opts,
   })
   const data = await res.json()
-  if (!data.ok && data.error) throw new Error(data.error)
+  if (!data.ok && data.error) {
+    const err = new Error(data.error)
+    if (data.conflict) err.conflict = true   // 保存冲突（409）：调用方可引导覆盖
+    err.status = res.status
+    throw err
+  }
   return data
 }
 

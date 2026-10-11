@@ -261,7 +261,7 @@ import {
   NSpace, NCard, NButton, NList, NListItem, NText, NTag, NTabs, NTabPane,
   NStatistic, NEmpty, NCollapse, NCollapseItem, NSelect, NAlert, useMessage,
 } from 'naive-ui'
-import { marked } from 'marked'
+import { renderMarkdown as sharedRenderMarkdown } from '../composables/markdown.js'
 import { api, params } from '../composables/api.js'
 import { parseFindings } from '../composables/proposal-parse.js'
 import { t } from '../composables/i18n.js'
@@ -354,8 +354,10 @@ const openItems = computed(() => {
   for (const p of a.stray || [])
     push(d4Id(p), 'D4', p, [t('散文件不属于任何注册主题——归位到主题目录，或删除')], t('无需归位'))
   for (const c of a.dangling_cards || []) {
-    const t = d5Parts(c)
-    push(c, 'D5', `${t.title}：卡路径不存在（${t.card}）`,
+    // 局部变量不能叫 t——会遮蔽 i18n 的 t()，下一行把对象当函数调用，
+    // 有 D5 时整个问题列表渲染崩溃（2026-10-11 审计 P1；TopicsPage 同款已修）
+    const d5 = d5Parts(c)
+    push(c, 'D5', `${d5.title}：卡路径不存在（${d5.card}）`,
       [t('注册表指向的 abstract 不存在——修正注册表路径或重建卡')], t('暂不处理'))
   }
   return items
@@ -547,8 +549,8 @@ const pCount = computed(() => (key) => {
 const proposalFilterOptions = computed(() => {
   const opts = [{ label: t('全部状态'), value: 'all' }]
   const meta = {
-    pending: '待处理', executing: '执行中', executed: '已执行',
-    blocked: '受阻', adopted: '已采纳·未执行', dismissed: '已忽略',
+    pending: t('待处理'), executing: t('执行中'), executed: t('已执行'),
+    blocked: t('受阻'), adopted: t('已采纳·未执行'), dismissed: t('已忽略'),
   }
   for (const [key, label] of Object.entries(meta))
     if (pCount.value(key)) opts.push({ label: `${label} (${pCount.value(key)})`, value: key })
@@ -598,7 +600,7 @@ function fmtRunName(file) {
   const base = `${m[2]}-${m[3]}`
   return m[4] ? `${base} ${m[4]}:${m[5]}` : base
 }
-function renderMarkdown(text) { return marked.parse(text || '') }
+function renderMarkdown(text) { return sharedRenderMarkdown(text) }
 // 事件时间统一转本地时区显示（后端存 UTC ISO，新手看 04:02 会懵）
 function fmtTs(ts) {
   if (!ts) return ''
@@ -659,11 +661,11 @@ async function viewRun(r) {
 async function loadProposals() {
   try {
     const data = await api(`/api/${props.user}/proposals`)
-    const loaded = []
-    for (const p of data.proposals) {
+    // 串行 N+1 → 并行：提案一多首屏线性变慢
+    const loaded = await Promise.all(data.proposals.map(async (p) => {
       const note = await api(`/api/${props.user}/note${params({ path: p.path })}`)
-      loaded.push({ ...p, content: note.content, findings: parseFindings(note.content) })
-    }
+      return { ...p, content: note.content, findings: parseFindings(note.content) }
+    }))
     proposals.value = loaded
     autoExpandProposals()
   } catch (e) { /* */ }

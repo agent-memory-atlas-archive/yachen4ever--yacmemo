@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -40,6 +41,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from ..config import (_RESERVED_IDS, Config, UserEntry, normalize_base_path)
+from ..fs_utils import content_hash
 from ..identity import IdentityError, make_identity
 from ..store import StoreError
 
@@ -165,6 +167,22 @@ def _set_toml_key(content: str, section: str, key: str, value) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _trusted_host(request: Request) -> bool:
+    """Host 是否为 IP/localhost——无密码（LAN 信任）模式下防 DNS rebinding：
+    跨站页把 evil.com 解析到本机 IP 后，浏览器视角的"同源"fetch 能读走全部
+    API（含 /api/config 明文 key）；域名 Host 在这里被拒。配了密码时 cookie
+    不属于攻击者域，天然免疫。"""
+    host = (request.headers.get("host") or "").rsplit(":", 1)[0]
+    host = host.strip("[]").lower()
+    if host in ("localhost", ""):
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
 async def _body(request: Request) -> dict:
     try:
         data = await request.json()
@@ -216,6 +234,24 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                 return JSONResponse(
                     {"ok": False, "error": "未登录：WebUI 已启用密码访问"},
                     status_code=401)
+            # 无密码（LAN 信任）模式的跨站防线：API 一律拒域名 Host（防
+            # DNS rebinding 读走 /api/config 明文 key 与全部笔记）；带请求体
+            # 的 POST 还必须 application/json（跨站 no-cors 表单发不出这个头）。
+            # 配了密码时 samesite=strict cookie 已挡跨站，不再重复检查。
+            if not html and not _webui_password and not _trusted_host(request):
+                return JSONResponse(
+                    {"ok": False,
+                     "error": "Host 不是 IP/localhost——无密码模式下 API 拒绝"
+                              "域名访问（防 DNS rebinding）；请用 IP 直连或配置"
+                              " [webui].password"},
+                    status_code=403)
+            if (request.method == "POST"
+                    and int(request.headers.get("content-length") or 0) > 0
+                    and (request.headers.get("content-type") or "").split(";")[0]
+                    .strip().lower() != "application/json"):
+                return JSONResponse(
+                    {"ok": False, "error": "需要 application/json 请求体"},
+                    status_code=415)
             return await handler(request)
         return wrapped
 
@@ -223,7 +259,8 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         if not _webui_password:
             return _err("服务未配置 [webui].password，无需登录")
         body = await _body(request)
-        if str(body.get("password", "")) != _webui_password:
+        supplied = str(body.get("password", "")).encode("utf-8")
+        if not hmac.compare_digest(supplied, _webui_password.encode("utf-8")):
             return _err("密码不正确", 401)
         resp = _ok({"login": True})
         resp.set_cookie(_COOKIE, _session_value, max_age=60 * 60 * 24 * 30,
@@ -375,6 +412,8 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             f'<script>window.__BASE_PATH__="{base}"</script></head>', 1)
         return HTMLResponse(html)
 
+    _overview_cache: dict = {"ts": 0.0, "users": None}
+
     async def overview(request: Request):
         def _collect():
             users = []
@@ -416,7 +455,14 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                 })
             return users
 
-        users = await run_in_threadpool(_collect)
+        # 仪表盘 overview 每次全用户全库 rglob + load_topics + collisions——
+        # 30s 缓存挡住连点（写操作路径不经过这里，新鲜度损失可接受）
+        now = time.monotonic()
+        if (_overview_cache["users"] is None
+                or now - _overview_cache["ts"] > 30):
+            _overview_cache["users"] = await run_in_threadpool(_collect)
+            _overview_cache["ts"] = now
+        users = _overview_cache["users"]
         emb = config.embedding
         return _ok({
                 "users": users,
@@ -424,7 +470,7 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                               "model": emb.model, "dimensions": emb.dimensions},
                 "curator": {"enabled": config.curator.enabled,
                             "model": config.curator.model},
-                "calls_today": usage_day_total(contexts),
+                "calls_today": await run_in_threadpool(usage_day_total, contexts),
             })
 
     def usage_db(config) -> object | None:
@@ -474,16 +520,24 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                                            request.query_params.get("sort", "name"))
         except StoreError as e:
             return _err(str(e))
-        items = []
-        for rel in rows:
-            p = c["store"].root / rel
-            row = c["db"].get_note(rel)
-            items.append({
-                "path": rel,
-                "title": row["title"] if row else rel.rsplit("/", 1)[-1].removesuffix(".md"),
-                "mtime": int(p.stat().st_mtime) if p.is_file() else 0,
-                "size": p.stat().st_size if p.is_file() else 0,
-            })
+
+        def _enrich():
+            # 逐笔记 get_note + 2×stat 在事件循环上跑是 N+1 阻塞（上千笔记
+            # 卡 UI）——整段下沉线程池
+            items = []
+            for rel in rows:
+                p = c["store"].root / rel
+                row = c["db"].get_note(rel)
+                items.append({
+                    "path": rel,
+                    "title": (row["title"] if row
+                              else rel.rsplit("/", 1)[-1].removesuffix(".md")),
+                    "mtime": int(p.stat().st_mtime) if p.is_file() else 0,
+                    "size": p.stat().st_size if p.is_file() else 0,
+                })
+            return items
+
+        items = await run_in_threadpool(_enrich)
         return _ok({"notes": items})
 
     async def note_get(request: Request):
@@ -496,7 +550,10 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             r = await run_in_threadpool(c["store"].read, path)
         except Exception as e:
             return _err(str(e))
-        return _ok({"path": r["path"], "title": r["title"], "content": r["content"]})
+        # content_hash 供保存冲突检测（前端原样带回 expected_hash）
+        return _ok({"path": r["path"], "title": r["title"],
+                    "content": r["content"],
+                    "hash": content_hash(r["content"])})
 
     def _log_call(c: dict, request: Request, tool: str, summary: str,
                   t0: float, ok: bool = True, error: str = "",
@@ -520,6 +577,21 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err("未知用户", 404)
         body = await _body(request)
         t0 = time.monotonic()
+        # 并发编辑冲突检测：客户端带读取时的 hash，不匹配返 409（conflict 标记，
+        # 前端确认覆盖时带 force=true 重发）——此前 before_hash 只留痕，
+        # 双开标签页是静默 last-write-wins
+        expected = str(body.get("expected_hash") or "")
+        if expected and not bool(body.get("force")):
+            def _cur_hash():
+                p = c["store"].root / c["store"]._norm_rel(body.get("path", ""))
+                return content_hash(p.read_text(encoding="utf-8")) if p.is_file() else ""
+            cur = await run_in_threadpool(_cur_hash)
+            if cur and cur != expected:
+                return JSONResponse(
+                    {"ok": False, "conflict": True,
+                     "error": "笔记已被其他会话修改——确认覆盖请重试并勾选强制保存",
+                     "current_hash": cur},
+                    status_code=409)
         try:
             r = await run_in_threadpool(c["store"].save,
                                         body.get("path", ""), body.get("content", ""))
@@ -577,18 +649,24 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         if not q.strip():
             return _err("空的查询")
         try:
+            limit = int(request.query_params.get("limit", 10))
+        except ValueError:
+            return _err("limit 必须是整数")
+        notices: list[str] = []
+        try:
             results = await run_in_threadpool(
-                c["searcher"].search, q,
-                int(request.query_params.get("limit", 10)),
+                c["searcher"].search, q, max(1, limit),
                 request.query_params.get("kind", "hybrid"),
+                None, True, notices,
             )
         except Exception as e:
             return _err(str(e))
         return _ok({"results": [
             {k: r.get(k) for k in ("path", "title", "score", "channels", "warnings")}
             for r in results],
-            # 向量通道降级 / 短查询提示（MCP/WebUI 同源，见 searcher.last_notice）
-            "notice": c["searcher"].last_notice})
+            # 向量通道降级 / 短查询提示（notice_out 逐次返回，不读共享
+            # last_notice——无状态并发下会被别的请求覆盖）
+            "notice": "；".join(notices) if notices else None})
 
     async def audit(request: Request):
         try:
@@ -619,7 +697,8 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             c = _ctx(request.path_params["user"])
         except KeyError:
             return _err("未知用户", 404)
-        return _ok({"actions": c["db"].list_audit_actions()})
+        actions = await run_in_threadpool(c["db"].list_audit_actions)
+        return _ok({"actions": actions})
 
     async def audit_exec_events(request: Request):
         """agent 执行时间线（audit_exec_events 全量，倒序）——
@@ -660,12 +739,15 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             c = _ctx(request.path_params["user"])
         except KeyError:
             return _err("未知用户", 404)
-        d = c["store"].root / "journal" / "audit"
-        files = sorted(d.glob("*.md"), reverse=True) if d.is_dir() else []
-        return _ok({"runs": [
-            {"file": f.name, "path": f"journal/audit/{f.name}",
-             "mtime": int(f.stat().st_mtime), "size": f.stat().st_size}
-            for f in files]})
+
+        def _collect():
+            d = c["store"].root / "journal" / "audit"
+            files = sorted(d.glob("*.md"), reverse=True) if d.is_dir() else []
+            return [{"file": f.name, "path": f"journal/audit/{f.name}",
+                     "mtime": int(f.stat().st_mtime), "size": f.stat().st_size}
+                    for f in files]
+
+        return _ok({"runs": await run_in_threadpool(_collect)})
 
     async def audit_action(request: Request):
         """记录人类对审计问题的处置（追加进快照 + 持久化，D2 同步撞车状态）。"""
@@ -726,7 +808,10 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
 
         def _run():
             from yacmemo.curator import run_check
-            return run_check(config, c["user"], dry_run=False)
+            # 复用常驻 Store 实例：run_check 自建第二套 Store/IndexDB/向量库
+            # 会与常驻实例并行写同一 SQLite/LanceDB/git（无 busy_timeout，
+            # database is locked / index.lock 竞态）
+            return run_check(config, c["user"], dry_run=False, store=c["store"])
 
         try:
             report = await run_in_threadpool(_run)
@@ -739,11 +824,14 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             c = _ctx(request.path_params["user"])
         except KeyError:
             return _err("未知用户", 404)
-        d = c["store"].root / "curator"
-        files = sorted(d.glob("提案-*.md"), reverse=True) if d.is_dir() else []
-        return _ok({"proposals": [
-            {"file": f.name, "path": f"curator/{f.name}",
-             "mtime": int(f.stat().st_mtime)} for f in files]})
+
+        def _collect():
+            d = c["store"].root / "curator"
+            files = sorted(d.glob("提案-*.md"), reverse=True) if d.is_dir() else []
+            return [{"file": f.name, "path": f"curator/{f.name}",
+                     "mtime": int(f.stat().st_mtime)} for f in files]
+
+        return _ok({"proposals": await run_in_threadpool(_collect)})
 
     # ---- 主题 ----
 
@@ -903,15 +991,19 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
     # ---- 用户管理（config.toml [[users]] 的结构化增删改）----
 
     def _persist_config(content: str) -> str | None:
-        """校验 → 备份 → 原子写回（600）。校验失败抛 ValueError，不落盘。"""
+        """校验 → 备份 → 原子写回（600）。校验失败抛 ValueError，不落盘。
+        tmp + os.replace：写一半崩溃/断电不能留下半截 config.toml——那会让
+        服务起不来（docstring 一直声称原子写，实现此前是裸 write_text）。"""
         _validate_config_text(content)
         target = Path(config.config_path)
         backup = None
         if target.exists():
             backup = f"{target.name}.bak-{time.strftime('%Y%m%d%H%M%S')}"
             shutil.copy2(target, target.parent / backup)
-        target.write_text(content, encoding="utf-8")
-        os.chmod(target, 0o600)
+        tmp = target.parent / f".{target.name}.tmp"
+        tmp.write_text(content, encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, target)
         return backup
 
     def _maybe_restart(restarting: bool) -> None:
@@ -941,8 +1033,11 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         body = await _body(request)
         uid = str(body.get("id", "")).strip()
         root = str(body.get("root", "")).strip()
-        if not uid or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", uid):
-            return _err("用户 id 非法：仅限字母/数字/下划线/连字符，且以字母或数字开头")
+        # 长度上限与 config.load_config 的校验对齐：松一档的 id 写进
+        # config.toml 后重启即 ValueError，服务起不来
+        if not uid or len(uid) > 32 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", uid):
+            return _err("用户 id 非法：仅限字母/数字/下划线/连字符，且以字母或数字开头"
+                        "（长度 ≤ 32）")
         if uid in _RESERVED_IDS:
             return _err(f"id「{uid}」是系统保留字（api / ui / health）")
         if any(u.id == uid for u in config.users):
@@ -1038,14 +1133,17 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err(str(e))
         purged = False
         if purge:
-            root_path = Path(config.user_root_abs(cur))
-            if root_path.is_dir():
-                shutil.rmtree(root_path)
-                purged = True
+            def _purge():
+                rp = Path(config.user_root_abs(cur))
+                if not rp.is_dir():
+                    return False
+                shutil.rmtree(rp)
                 # 若父目录是为该用户专建（现已空），一并收尾
-                parent = root_path.parent
+                parent = rp.parent
                 if parent != Path(config.root_abs) and not any(parent.iterdir()):
                     parent.rmdir()
+                return True
+            purged = await run_in_threadpool(_purge)
         config.users.remove(cur)
         _maybe_restart(bool(body.get("restart", True)))
         return _ok({"deleted": uid, "purged": purged, "backup": backup,
@@ -1058,15 +1156,21 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             return _err("服务未使用配置文件启动")
         data = tomllib.loads(_read_config_text())
         emb, cur = data.get("embedding", {}), data.get("curator", {})
+
+        def _mask(v: str) -> str:
+            # api_key 明文不进浏览器/截图：只回掩码；保存端把含掩码的值视为
+            # "未改动"跳过
+            return f"••••{v[-4:]}" if v else ""
+
         return _ok({
             "embedding": {"base_url": emb.get("base_url", ""),
-                          "api_key": emb.get("api_key", ""),
+                          "api_key": _mask(emb.get("api_key", "")),
                           "model": emb.get("model", ""),
                           "dimensions": emb.get("dimensions", 1024),
                           "timeout": emb.get("timeout", 30)},
             "curator": {"enabled": cur.get("enabled", False),
                         "base_url": cur.get("base_url", ""),
-                        "api_key": cur.get("api_key", ""),
+                        "api_key": _mask(cur.get("api_key", "")),
                         "model": cur.get("model", ""),
                         "max_tokens": cur.get("max_tokens", 4096),
                         "timeout": cur.get("timeout", 180),
@@ -1089,6 +1193,9 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                 if key not in payload:
                     continue
                 v = payload[key]
+                # 掩码值 = GET 回显被脱敏的 api_key 原样传回 → 视为未改动
+                if key == "api_key" and "••••" in str(v):
+                    continue
                 try:
                     v = typ(v)
                 except (TypeError, ValueError):

@@ -228,15 +228,17 @@ scp -r yacmemo/webui/dist debsvc:/srv/yacmemo/yacmemo/webui/   # dist 不进 git
 
 > `/ui/assets` 的挂载在 `create_app()` 时按 `dist/assets` 是否存在条件注册（`webui/app.py`）。**重复部署已实测无需重启**（2026-10-04 于 debsvc 验证：dist 就位后未重启，`/ui/assets/*` 即返回 200 且带正确 content-type）。但「目标主机从未有过 dist」的首次部署是否需要重启**未实测**——此时若资源 404，`systemctl restart yacmemo` 即可；`scripts/deploy_webui.sh` 末尾的 `curl /ui/` 自检是这条路径的兜底。
 
-未构建时服务照常运行，`/ui/` 返回 503 构建指引，MCP/API 不受影响。构建完成后浏览器打开 `http://debsvc.local:9721/ui/`（`/` 自动跳转），五页：
+未构建时服务照常运行，`/ui/` 返回 503 构建指引，MCP/API 不受影响。构建完成后浏览器打开 `http://debsvc.local:9721/ui/`（`/` 自动跳转），七页（仪表盘/主题/搜索/审计/画像/身份/设置）：
 
+- **仪表盘**：默认落地页——系统状态与各用户概览（笔记数/活跃主题/审计待办）+ 最近活动调用流；
 - **主题**：主题树（注册主题 → 主题内笔记），右侧 markdown 渲染、在线编辑（整篇保存，索引同步）/删除（confirm），abstract 不可从 UI 删；
 - **搜索**：手动验证三通道检索，⚠ 撞车标注可见；
 - **审计**：双 Tab——「确定性审计」（D1–D5 分组处置卡片、处置历史、历史快照）与「质量提案」（curator 深度审查、条目结构化展示、人工采纳/忽略 + 复制执行指令交 agent 落实）；详见 [07-webui.md](07-webui.md) §2.3；
 - **画像**：PROFILE.md 各小节的查看/编辑/新建；
+- **身份**：agents/<agent>/ 专属记忆区管理（identity token、shared/ 共享子树与本机专属子树）；
 - **设置**：使用记录（工具过滤、近 14 天概览）+ 健康总览 + 全量重建索引（维护卡片）+ config.toml 在线编辑（校验 + 备份 + 可选重启）。
 
-页面与 API 的完整说明见 [07-webui.md](07-webui.md)。WebUI 与 MCP 同进程同端口，无独立鉴权——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。需要把控制台挂到反代二级路径下（如 `https://<host>/yacmemo/`）见 §1.5。
+页面与 API 的完整说明见 [07-webui.md](07-webui.md)。WebUI 与 MCP 同进程同端口，默认无鉴权（LAN 信任）；配置 `[webui].password` 后启用登录（HMAC 会话 cookie，未登录 API 返回 401）——遵循"内网自用"的信任边界；如需暴露更广，前置反代加认证（同下文安全边界）。需要把控制台挂到反代二级路径下（如 `https://<host>/yacmemo/`）见 §1.5。
 
 ### 2.3 curator 质量策展（可选）
 
@@ -274,7 +276,7 @@ systemctl enable --now yacmemo-curator.timer
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
 主题：
 9. 主题的注册、注销与归档都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了" / "X 归档吧"）→ topic_register / topic_unregister / archive_topic；主题现状写入 abstract（topics/<主题>/abstract.md）并就地更新，目录内可按模块增设详细 md。
-10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
+10. 只在注册主题内写笔记；journal/、archive/、curator/、agents/ 之外发现游离文件时提示用户归位。
 删除：
 11. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 ```
@@ -286,12 +288,12 @@ systemctl enable --now yacmemo-curator.timer
 - **git**：每个 memory_root 一个仓库（`.index/` 已 ignore）。**快照全自动**：每次写入/编辑/删除/主题操作自动 commit，仓库永远 git-clean（见 1.4），无需人工维护；
 - **备份**：备份两个 memory 目录（含 `.index` 可省，索引可重建）；
 - **Obsidian**：Syncthing/共享挂载把 memory 目录同步到桌面机，直接打开浏览；
-- **索引重建**：删除 `.index/` 后由任意一次 `memory_audit` 触发的自愈或重启即可全量重建（内容多时用 `reindex`）；
+- **索引重建**：重启不重建索引；重建靠 `memory_audit` 的自愈（新发现文件入库）或 WebUI 设置页的 reindex；
 - **迁移**：换机 = 拷贝 memory 目录 + 改 config 路径。
 
 ## 五、安全边界（内网自用假设）
 
-- 服务无鉴权，绑定 `0.0.0.0` 意味着 LAN 内任意设备可读写对应记忆——家庭内网是信任边界；若需暴露更广，前置反代加认证；
+- 默认无鉴权（LAN 信任）；配置 `[webui].password` 后启用登录（HMAC 会话 cookie，未登录 API 返回 401）。绑定 `0.0.0.0` 意味着 LAN 内任意设备可读写对应记忆——家庭内网是信任边界；若需暴露更广，前置反代加认证；
 - 用户隔离 = URL 路径 = 磁盘目录，Store 构造时固定边界（有测试覆盖双用户互不可见）；
 - `memory_read`/`memory_search` 只在绑定 root 内活动，无路径穿越出口（`..` 与根外路径拒绝）。
 

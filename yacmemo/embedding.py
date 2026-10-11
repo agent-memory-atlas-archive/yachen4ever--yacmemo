@@ -17,24 +17,37 @@ class EmbeddingClient:
         self.timeout = timeout
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Batch embed texts. Returns list of embedding vectors."""
+        """Batch embed texts. Returns list of embedding vectors.
+
+        瞬时失败（网络抖动/端点重启）重试一次——写路径的向量失败会把笔记
+        标成缺向量等审计补位，一次重试能省掉整轮延迟。"""
         if not texts:
             return []
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        resp = httpx.post(
-            f"{self.base_url}/embeddings",
-            headers=headers,
-            json={
-                "model": self.model,
-                "input": texts,
-                "dimensions": self.dimensions,
-            },
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        payload = {
+            "model": self.model,
+            "input": texts,
+            "dimensions": self.dimensions,
+        }
+        data = None
+        for attempt in (1, 2):
+            try:
+                resp = httpx.post(
+                    f"{self.base_url}/embeddings",
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            raise ValueError(f"embedding 端点返回异常：{str(data)[:120]}")
         # Sort by index to ensure order matches input
         items = sorted(data["data"], key=lambda x: x["index"])
         return [item["embedding"] for item in items]

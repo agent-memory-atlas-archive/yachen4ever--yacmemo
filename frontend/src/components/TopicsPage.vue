@@ -114,11 +114,11 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { NSplit, NSpin, NTree, NEmpty, NText, NSpace, NButton, NInput, NSelect,
          NModal, NList, NListItem, NTag, NDivider, NPopconfirm, useMessage, useDialog } from 'naive-ui'
-import { marked } from 'marked'
 import { api, params } from '../composables/api.js'
 import { t } from '../composables/i18n.js'
+import { renderMarkdown } from '../composables/markdown.js'
 
-const props = defineProps({ user: String })
+const props = defineProps({ user: String, focusNote: String })
 const message = useMessage()
 const dialog = useDialog()
 
@@ -305,7 +305,7 @@ const treeData = computed(() => {
 
 const renderedContent = computed(() => {
   if (!selectedNote.value) return ''
-  return marked.parse(selectedNote.value.content || '')
+  return renderMarkdown(selectedNote.value.content)
 })
 
 async function loadData() {
@@ -328,7 +328,10 @@ async function loadData() {
 async function onSelect(keys) {
   const key = keys[0]
   if (!key || !key.startsWith('note:')) return
-  const path = key.slice(5)
+  await openByPath(key.slice(5))
+}
+
+async function openByPath(path) {
   try {
     const data = await api(`/api/${props.user}/note${params({ path })}`)
     selectedNote.value = data
@@ -340,6 +343,16 @@ async function onSelect(keys) {
     message.error(t('读取失败') + ': ' + e.message)
   }
 }
+
+// #note=<path> 深链定位（搜索页"打开笔记"）：数据就绪后展开树并打开
+watch(() => props.focusNote, async (p) => {
+  if (!p) return
+  if (loading.value) await loadData().catch(() => {})
+  expandedKeys.value = [...new Set([...expandedKeys.value,
+    ...p.split('/').slice(0, -1).map((_, i, arr) =>
+      arr.slice(0, i + 1).join('/')), `note:${p}`])]
+  await openByPath(p)
+}, { immediate: true })
 
 // 单篇归档能力：活跃主题目录内的非 abstract 笔记可归档；
 // archive/<主题>/ 形态的可取消归档（回 topics/<主题>/）
@@ -359,7 +372,7 @@ const canUnarchiveSelected = computed(() => {
 async function archiveSelected() {
   dialog.warning({
     title: t('归档笔记'),
-    content: t('将 {path} 移入 archive/<主题名>/？检索仍可用，可随时取消归档。',
+    content: t('将 {path} 移入 archive/<主题名>/？归档后对客户端不可见（WebUI 已归档分组可见），可随时取消归档。',
       { path: selectedNote.value.path }),
     positiveText: t('归档'),
     negativeText: t('取消'),
@@ -402,16 +415,32 @@ function toggleEdit() {
   }
 }
 
-async function saveNote() {
+async function saveNote(force = false) {
   try {
     await api(`/api/${props.user}/note`, {
       method: 'PUT',
-      body: JSON.stringify({ path: selectedNote.value.path, content: editContent.value }),
+      body: JSON.stringify({
+        path: selectedNote.value.path,
+        content: editContent.value,
+        expected_hash: selectedNote.value.hash || '',
+        force,
+      }),
     })
     selectedNote.value.content = editContent.value
+    selectedNote.value.hash = ''  // 保存后旧 hash 不再成立
     editing.value = false
     message.success(t('已保存'))
   } catch (e) {
+    if (e.conflict) {
+      dialog.warning({
+        title: t('保存冲突'),
+        content: t('笔记已被其他会话修改。覆盖对方的修改？'),
+        positiveText: t('覆盖保存'),
+        negativeText: t('取消'),
+        onPositiveClick: () => saveNote(true),
+      })
+      return
+    }
     message.error(t('保存失败') + ': ' + e.message)
   }
 }

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from yacmemo.search import Searcher
 from yacmemo.store import Store
 
@@ -66,11 +68,8 @@ def test_search_results_carry_collision_warnings(store: Store, searcher: Searche
 
 
 def test_search_kind_validation(store: Store, searcher: Searcher):
-    try:
+    with pytest.raises(ValueError, match="未知检索类型"):
         searcher.search("x", kind="bogus")
-        raise AssertionError("should reject unknown kind")
-    except ValueError:
-        pass
 
 
 def test_short_query_like_fallback(store: Store, searcher: Searcher):
@@ -131,3 +130,29 @@ def test_search_archive_hidden_only_on_request(store: Store, searcher: Searcher)
     kept = searcher.search("服务端口", kind="fts", include_archived=False)
     assert [r["path"] for r in kept] == ["notes/live.md"]
     assert searcher.last_notice and "归档" in searcher.last_notice
+
+
+def test_warnings_mask_invisible_and_archived(store: Store, searcher: Searcher):
+    """0.3.18 审计 P1：⚠ warnings 携带对方标题+50 字原文——对方已归档或属
+    其他专属区时必须降级为"存在疑似重复"，不外泄内容。"""
+    from yacmemo.identity import Identity
+    store.write("notes/主撞车.md", "# 主撞车\n\n- [撞车] 数据库口令轮换周期为 90 天并留痕\n")
+    store.write("notes/副撞车.md", "# 副撞车\n\n- [撞车] 数据库口令轮换周期为 90 天并留痕\n")
+    ar = store.note_archive("notes/副撞车.md", reason="旧")
+    cols = [c for c in store.db.list_collisions() if c["status"] == "open"]
+    assert cols, "归档前应检出撞车"
+    hits = searcher.search("数据库口令", kind="fts", include_archived=False)
+    target = next(r for r in hits if r["path"] == "notes/主撞车.md")
+    joined = " ".join(target["warnings"])
+    assert "副撞车" not in joined and "90 天" not in joined
+    assert "疑似重复" in joined
+
+    # identity：对方在别的专属区，warnings 不外泄
+    store.write("notes/空调台账.md", "# 空调台账\n\n- [撞车] 服务器机房空调温度设定为 24 摄氏度\n")
+    store.write("agents/bob/shared/机房.md", "# 机房\n\n- [撞车] 服务器机房空调温度设定为 24 摄氏度\n")
+    hits2 = searcher.search("机房空调", kind="fts",
+                            identity=Identity(agent="zcode", device="m5air"))
+    t2 = next(r for r in hits2 if r["path"] == "notes/空调台账.md")
+    j2 = " ".join(t2["warnings"])
+    assert "机房.md" not in j2 and "24 摄氏度" not in j2
+    assert "疑似重复" in j2

@@ -53,6 +53,7 @@ Dual-channel retrieval + Reciprocal Rank Fusion (k=60, using only ranks, never s
 - **Degradation notice**: when the vector channel fails, the tool outputs `⚠ vector channel unavailable (reason); this round's results are FTS only` — "no relevant notes found" is no longer treated as an authoritative conclusion (the silent-degradation problem observed in the real 2026-09-18 endpoint outage).
 - **Settled proposals hidden** (added 2026-09-25): once every finding of a curator/ proposal report is executed or dismissed, a `> 状态：已结案` (settled) marker is stamped at the top of the file and search results no longer return it by default (with the notice "N settled proposal(s) hidden"); explicit `memory_read` still works — that is deliberate lookup. Never execute findings from a settled proposal.
 - **Archived notes hidden** (added 0.3.17): notes under `archive/` no longer appear in search results (with the notice "N archived note(s) hidden") — archiving is the human's filing layer, and agents must not keep citing archived content as live memory. WebUI search is unaffected; explicit `memory_read` by archive path still works.
+- **Warning masking** (added 0.3.18): collision warnings carry the other note's title and a 50-char excerpt — when the other side is invisible (another identity's zone; archived notes on this channel), the warning degrades to "a疑似 duplicate exists (target invisible)" without content.
 
 Return format:
 
@@ -80,7 +81,8 @@ Return = `[正文开始 | path | 锚点提示]` + **verbatim body** + `[正文�
   - For missing targets: annotated "target does not exist" (the agent can create or clean it up in passing);
   - When the target exists in the index but **that row's `path` is out-of-root** (quarantined, see `quarantined_index_rows` in §7): an entry carrying **neither a `path` nor an observation**, only `quarantined: true` plus the reason — the bad row's path and content are never disclosed, the caller just sees "this link sits on a bad row" (added 2026-10-03). Link targets come from the same derived index table, so an out-of-root row takes part in none of this section's reads;
   - Semantic nearest neighbors top-2 (`via: vector`, requires an embedding endpoint);
-  - Related notes **never include archived targets** (0.3.17): `archive/` notes brought in via wiki-links or semantic neighbors are always dropped. Resolving an archived note **by title** is refused with the archive location and the `unarchive_note` exit; explicit reads by archive path still work (deliberate lookup).
+  - Related notes **never include archived targets** (0.3.17): `archive/` notes brought in via wiki-links or semantic neighbors are always dropped. Resolving an archived note **by title** is refused with the archive location and the `unarchive_note` exit; explicit reads by archive path still work (deliberate lookup);
+  - Related notes **respect the identity boundary** (0.3.18: the wiki-link branch previously missed the check, leaking other zones' paths + first observations via [[links]]) — link and vector channels share one rule; invisible targets are skipped silently.
 
 ## 3. memory_write
 
@@ -209,7 +211,7 @@ Full consistency audit that also **self-heals**:
 | `pruned_stale_collisions` | **Count** of auto-cleared stale collision pairs | text section + snapshot overview |
 | `pruned_blank_actions` | **Count** of auto-cleaned blank disposition lines | snapshot overview |
 | `quarantined_index_rows` | Quarantined out-of-root index rows (`path` + `reason`), remedy is reindex | text section + snapshot + audit-page alert |
-| `invalid_topic_cards` | Invalid registry `卡:` values (`title` / `card` / `reason`) | snapshot section (see the note below) |
+| `invalid_topic_cards` | Invalid registry `卡:` values (`title` / `card` / `reason`) | text section + snapshot + audit page |
 | `exec_status` | issue_id → latest execution event for this round (`event`/`identity`/`note`) | text section |
 | `verified` | issue_ids sealed by re-audit this round | text section + snapshot |
 | `reconciled_proposals` | Number of proposal-settlement backfills | text section |
@@ -217,7 +219,7 @@ Full consistency audit that also **self-heals**:
 | `git` | Git snapshot status line | end of text section |
 | `audit_file` | Path of this round's audit snapshot (`journal/audit/<date>.md`) | end of text section |
 
-> The text output is **hand-assembled field by field** (not an automatic dict serialization), so a key existing ≠ a section existing in the text: today `invalid_topic_cards` only lands in the audit snapshot section, and neither the MCP text nor the WebUI audit page shows it — read the snapshot file when you need this item; `quarantined_index_rows` appears in all three.
+> The text output is **hand-assembled field by field** (not an automatic dict serialization), so a key existing ≠ a section existing in the text. `invalid_topic_cards` and `quarantined_index_rows` are now shown in all three places: the MCP text's `== 非法主题卡 ==` section / the WebUI audit page's red alert (n-alert error) / the audit snapshot section.
 
 Fix suggestions are inlined throughout the output. Findings are shown as soon as discovered; **the system never auto-deletes or auto-invalidates anything**. External changes involved in self-healing are snapshotted into the repo uniformly as `external: self-healed N note(s)`, preserving the git-clean invariant (the end of the output carries a git snapshot status line and the current audit snapshot path `journal/audit/<date>.md` — one per day, with same-day re-audits appending; stale snapshots are cleaned up by curator according to `audit_retention_days`).
 
@@ -268,7 +270,7 @@ Abstract status changed?     → topic_status to sync the registry status line (
 ## 9. topic_list
 
 ```
-topic_list() -> str
+topic_list(tag: str = "") -> str
 ```
 
 Lists all currently registered long-term memory topics (title, one-sentence status, topic card path, tags). Registry-free zones (journal/, archive/, curator/) are listed separately with a note.
@@ -335,7 +337,7 @@ Unregisters a long-term memory topic: removes that topic's block from `TOPICS.md
 memory_context() -> str
 ```
 
-**Call first at the start of every session**. Returns the core memory context = integration contract version header + the full `TOPICS.md` registry + each topic card's summary header (first 12 lines) + identity must-reads (with a token, `agents/<agent>/必读.md` and `agents/<agent>/<device>/必读.md` are injected automatically; a write template is provided when they do not exist yet — see §0). Solves cold-start amnesia: the agent does not have to "think of what to search for" — the topic system is directly present.
+**Call first at the start of every session**. Returns the core memory context = integration contract version header + the full `TOPICS.md` registry + each topic card's summary header (first 12 lines) + identity must-reads (with a token, `agents/<agent>/shared/必读.md` and `agents/<agent>/<device>/必读.md` are injected automatically; a write template is provided when they do not exist yet — see §0). Solves cold-start amnesia: the agent does not have to "think of what to search for" — the topic system is directly present.
 
 **Version header** (added 2026-09-19): of the form `[yacmemo integration contract v0.1.3 — when it differs from the version you have recorded locally, call integration_check(onboarded_version="<your version>") to self-update]`. The agent records the contract version it onboarded with in its local onboarding prompt, compares at every session start, and self-updates when behind (see §17).
 
@@ -425,11 +427,12 @@ integration_check(onboarded_version="0.1.2")
 
 How it works (the server does not push; the agent pulls on its own):
 
+0. **Version unification** (since 0.3.13): contract version = release version = `project.version` in `pyproject.toml` (the single source of truth) — the version number advances on every release; agent-perceivable changes get a written increment in the changelog, and a pure release gets just one line saying "no agent-perceivable semantic changes";
 1. **Version declaration**: the agent records the contract version it onboarded with in its local onboarding prompt/USER.md (e.g. `yacmemo integration contract version: 0.1.3`);
 2. **Discovery**: the `memory_context` header carries the current contract version along, so the comparison happens naturally at every session start;
 3. **Update**: when the version is behind, call this tool; it returns **incremental changes** (per-version entries) + the **full write-convention digest** — the agent refreshes its local prompt and records the new version accordingly, with no human intervention;
 4. Leaving `onboarded_version` empty returns the current version + all recorded changes; if the declared version is newer than the server's, it hints "you may be connected to an old instance";
-5. **The contract version is independent of the package version**: it advances only when agent-perceivable behavior changes (tool semantics, return copy, write conventions); the data source is `yacmemo/agent_changes.py` — changing a convention requires appending an `AGENT_CHANGELOG` entry and bumping the version in sync (guarded by tests).
+5. **Every change must leave a trace**: each agent-perceivable change (tool semantics, return copy, write conventions) must be spelled out as an increment in `AGENT_CHANGELOG`; a pure release gets just a one-line "no agent-perceivable semantic changes" note, and the version number always advances; the data source is `yacmemo/agent_changes.py` (guarded by tests).
 
 ## Agent decision tree (updated)
 
@@ -438,7 +441,7 @@ Session start                          → memory_context (contract version head
 Contract version behind                → integration_check(onboarded_version=...) → self-update the local onboarding prompt
 User wants a new long-term memory topic → topic_register (only when the user explicitly asks) → write inside the topics/<topic>/ directory per the returned template
 User stops long-term-recording a topic → topic_unregister (only when the user explicitly asks) → guide filing/cleanup
-User says a project is behind them     → archive_topic (only when the user explicitly asks; retrieval retained, dropped from context)
+User says a project is behind them     → archive_topic (only when the user explicitly asks; invisible to MCP clients, dropped from context)
 User wants a memory deleted            → memory_delete (only when the user explicitly asks; recoverable via git)
 User's profile/preferences changed     → update_user_preference (replace/append per section)
 Record a new topic?                    → memory_search for duplicates → memory_write (if refused, switch to edit)

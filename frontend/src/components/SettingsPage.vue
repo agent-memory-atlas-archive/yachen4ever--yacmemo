@@ -185,7 +185,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, h } from 'vue'
 import {
   NTabs, NTabPane, NCard, NSpace, NButton, NList, NListItem, NText, NTag,
   NInput, NCheckbox, NInputNumber, NGrid, NGi, NSwitch, NModal, NEmpty,
@@ -385,10 +385,11 @@ const toolOptions = [
 
 const usageColumns = [
   { title: computed(() => t('时间')), key: 'ts', width: 150, render: (r) => r.ts?.slice(5, 19) || '' },
-  { title: computed(() => t('用户')), key: 'user', width: 70 },
+  { title: computed(() => t('用户')), key: 'user_id', width: 70 },
   { title: computed(() => t('工具')), key: 'tool', width: 160 },
   { title: computed(() => t('摘要')), key: 'summary', ellipsis: { tooltip: true } },
-  { title: computed(() => t('耗时')), key: 'ms', width: 60, render: (r) => r.ok ? `${r.ms}ms` : '—' },
+  { title: computed(() => t('耗时')), key: 'duration_ms', width: 60,
+    render: (r) => r.ok ? `${r.duration_ms}ms` : '—' },
   { title: computed(() => t('状态')), key: 'ok', width: 50,
     render: (r) => h(NTag, { size: 'tiny', type: r.ok ? 'success' : 'error' }, () => r.ok ? '✓' : '✗') },
 ]

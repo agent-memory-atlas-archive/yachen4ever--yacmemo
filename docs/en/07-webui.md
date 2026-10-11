@@ -13,7 +13,7 @@
 - Route order: `/api/*` and `/ui/*` are registered before the per-user MCP mounts; the config layer also reserves `api`/`ui`/`health` as user-id reserved words, ruling out shadowing;
 - **Sub-path (base_path)**: once `[server].base_path` is set (e.g. `/yacmemo`), every WebUI route is **additionally** mounted under the prefix (the original root routes stay, so direct `:9721/ui` access remains compatible); all absolute path references inside the page get the prefix injected by the server (see §5), and the frontend reads `window.__BASE_PATH__` to build API paths; MCP and `/health` are never prefixed; empty by default = behavior identical to not having the feature. Deployment and nginx reference configuration: [05-deployment.md](05-deployment.md) §1.5;
 - Error convention: business-level refusals (e.g. guard interception) return HTTP 200 + `{"ok": false, "error": "..."}`; unknown users return 404;
-- No separate authentication; follows the "personal use on the internal network" trust boundary (see the security boundary in [05-deployment.md](05-deployment.md)).
+- No authentication by default (LAN trust); configuring `[webui].password` enables login (HMAC session cookie, unauthenticated API calls get 401); follows the "personal use on the internal network" trust boundary (see the security boundary in [05-deployment.md](05-deployment.md)).
 
 ## 2. Page Guide
 
@@ -32,7 +32,7 @@ The left side is the **topic tree** — every markdown file in storage is visibl
 Selecting an entry shows it on the right; this merges all capabilities of the old "Notes" page:
 
 - **View**: the body renders as markdown by default; `编辑` (Edit) switches to a source textarea, `预览` (Preview) switches back to the rendered view;
-- **Edit**: `保存` (Save) goes through `store.save` — whole-file overwrite, the title follows the first-line `# 标题` (# Title) heading, and the index is rebuilt in sync (FTS/vectors/collisions recomputed);
+- **Edit**: `保存` (Save) goes through `store.save` — whole-file overwrite, the title follows the first-line `# 标题` (# Title) heading, and the index is rebuilt in sync (FTS/vectors/collisions recomputed); **Save-conflict detection** (0.3.18): the client echoes the hash from read time; if the note changed since, the API returns 409 + a conflict confirm (force overwrite bypasses) — previously two open tabs meant silent last-write-wins;
 - **Delete**: requires a confirm; deletes the file + cleans all indexes. Still recoverable from git. abstract.md cannot be deleted from the UI;
 - **Single-note archival**: selecting a module note inside an active topic offers "Archive" (moves it into archive/<topic>/, visible under the "archived notes" tree group). Archived notes are **invisible to MCP clients** (0.3.17: gone from search/listings/related notes); WebUI search and browsing are unaffected, and notes can be "Unarchived" back into the topic;
 - **Topic tags**: the tree toolbar filters topics by tag, topic nodes carry tag suffixes (〔work·dev〕 style); the "Tag management" modal supports renaming/deleting tags (batch-rewriting the registry) and per-topic tagging (with autocomplete of existing tags);
@@ -78,7 +78,7 @@ Disposition guidance per issue type:
 
 **Tab 2 "Quality Proposals"** — the curator deep-review workflow:
 
-- "Deep Review Now" hands the registry, the topic cards, and the audit results to the LLM configured under `[curator]` (about 1–3 minutes; the weekly timer runs it automatically); the report lands at `curator/提案-<日期>.md` (proposal-<date>.md), and same-day reruns append under a 复审 (Re-review) subsection (the title stays unique per day, so D1 is not triggered);
+- "Deep Review Now" hands the registry, the topic cards, and the audit results to the LLM configured under `[curator]` (about 1–2 minutes; the weekly timer runs it automatically); the report lands at `curator/提案-<日期>.md` (proposal-<date>.md), and same-day reruns append under a 复审 (Re-review) subsection (the title stays unique per day, so D1 is not triggered);
 - **Two-level structure**: the first level is the proposal list, each proposal carrying a **proposal-level status** (blocked·needs you / pending·awaiting your call / executing·agent at work / settled·all done, sorted to the top in that priority) with per-state finding counts; expanding reveals the **finding-level** details (severity / type / re-review badge / finding status / suggestion / execution timeline) — proposals needing your attention are expanded by default, settled ones collapse; the stats row runs the full state machine (pending → executing → executed / blocked / dismissed) and the selector on the right filters by status;
 - **There is no "Adopt" button — dispatching is adopting**: for pending items, "Copy Execution Instruction" pastes a complete instruction to any agent (the instruction embeds the `memory_audit_update` reporting convention); "Ignore" records a false positive / won't-do (persisted to the `audit_actions` table as a P-class entry and appended to the proposal note's 裁决记录 (Adjudication Record) section, git auto-snapshot); agent execution progress is shown as an event timeline under each item;
 - Legacy "adopted but not executed" items (old-model dispatch intents) are tagged explicitly and can still be dispatched or dismissed to settle them;
@@ -118,8 +118,13 @@ All responses are JSON; business failures return `{"ok": false, "error": "..."}`
 
 | Method | Path | Params | Description |
 |---|---|---|---|
+| POST | `/api/login` | `{password}` | WebUI login (when `[webui].password` is configured): a correct password sets the HMAC session cookie (valid 30 days, survives restarts); with no password configured an error message is returned |
 | GET | `/api/overview` | — | user list (notes/collisions/guard stats) + embedding status + today's call count; per user it also carries `topics` / `archived_topics` arrays (`title` / `card` / `status` + **`card_invalid` / `card_error`** — when the registry `卡:` is invalid the `card` is blanked, and these two fields say why, so the page doesn't just show "this topic has no card" with no sign that the registry is broken) |
 | GET | `/api/{user}/topics` | — | topic list (`active` / `archived`, same fields: `title` / `card` / `status` / `related` / `tags` + `card_invalid` / `card_error`) |
+| POST | `/api/{user}/topics/archive` | `{title}` | archive an entire topic (equivalent to the MCP `archive_topic`) |
+| POST | `/api/{user}/topics/tag` | `{title, add, remove}` | add/remove topic tags (equivalent to the MCP `topic_tag`) |
+| POST | `/api/{user}/topics/tag-rename` | `{old, new}` | rename a tag (rewritten across the whole library; same-name rename is a merge) |
+| POST | `/api/{user}/topics/tag-delete` | `{tag}` | delete a tag (removed from every topic's tag line; the topics themselves are untouched) |
 | GET | `/api/users` | — | detailed user list (id / memory root / git identity / whether the directory exists / whether mounted) + the config.toml path |
 | POST | `/api/users/add` | `{id, root, git_user_name?, git_user_email?}` | Add a user (id limited to letters/digits/underscore/hyphen, system reserved words api/ui/health rejected); the memory directory is created automatically, and **a new user needs a restart before it is mounted** |
 | POST | `/api/users/update` | `{id, root?, git_user_name?, git_user_email?, restart?}` | Update a user; fully validated first, then written back with an annotated backup (comments and ordering preserved); a `root` change triggers a restart by default |
@@ -127,13 +132,20 @@ All responses are JSON; business failures return `{"ok": false, "error": "..."}`
 | GET | `/api/usage` | `limit` `user` `tool` | call log (default 100 entries, newest first) |
 | GET | `/api/usage/clients` | — | client summary (UA + IP + call count + last active) |
 | GET | `/api/usage/days` | — | per-day call/error counts for the last 14 days |
+| GET | `/api/{user}/identities` | — | identity list (scans the `agents/` directory + created registry: agent / shared file count and mtime / per-device note counts and active status) |
+| POST | `/api/{user}/identities` | `{agent, device}` | mint an identity (deterministic token) and register it, auto-creating the `shared/必读.md` placeholder template |
 | GET | `/api/{user}/notes` | `path` `sort` | note list (with mtime/size) |
 | POST | `/api/{user}/notes` | `{title, content, force, force_confirm}` | create (goes through the write-path guards) |
 | GET | `/api/{user}/note` | `path` | read one note (by path or title) |
 | PUT | `/api/{user}/note` | `{path, content}` | whole-file save (title follows the first-line heading) |
 | DELETE | `/api/{user}/note` | `path` | delete (file + all indexes) |
+| POST | `/api/{user}/note/archive` | `{path, reason?}` | archive a single note inside a topic (equivalent to the MCP `archive_note`) |
+| POST | `/api/{user}/note/unarchive` | `{path}` | undo a single-note archive (equivalent to the MCP `unarchive_note`) |
+| GET | `/api/{user}/profile` | `section` | read profile & preferences (full text or a specified section) |
+| PUT | `/api/{user}/profile` | `{section, content}` | create/replace a profile section (equivalent to `update_user_preference`, goes through the write path with an automatic git snapshot) |
 | GET | `/api/{user}/search` | `q` `limit` `kind` | search (includes ⚠ warnings) |
 | POST | `/api/{user}/audit` | — | run the audit (includes self-healing; mutates the index); returns `audit_file` (this run's snapshot path) |
+| POST | `/api/{user}/reindex` | — | full index rebuild (dangerous maintenance operation: run metrics are reset too), invoked from the settings page's "Maintenance" card |
 | GET | `/api/{user}/audit/last` | — | most recent audit result (in-memory cache, lost on restart) |
 | GET | `/api/{user}/audit/runs` | — | historical audit snapshot list (journal/audit/*.md, newest first) |
 | GET | `/api/{user}/audit/actions` | — | full disposition/adjudication history (audit_actions table) |
@@ -163,7 +175,7 @@ curl -s -X POST http://debsvc.local:9721/api/yachen/audit
 
 ## 5. Build and Implementation Notes
 
-- **Frontend project**: Vue 3 + Naive UI + Vite (`frontend/`), sources `src/App.vue` + `src/components/` (the five page components) + `src/composables/api.js` (a unified fetch wrapper);
+- **Frontend project**: Vue 3 + Naive UI + Vite (`frontend/`), sources `src/App.vue` + `src/components/` (the seven page components) + `src/composables/api.js` (a unified fetch wrapper);
 - **Build**: `scripts/build_webui.sh` (npm ci + vite build) → output lands in `yacmemo/webui/dist/`, matching `app.py`'s `STATIC_DIR`; the vite outDir uses `new URL('../yacmemo/webui/dist', import.meta.url)`, resolved relative to `frontend/vite.config.js` (one level up is the repo root) — do not change it to `../../yacmemo/webui/dist` (that would point outside the repository);
 - **Chunking**: manualChunks puts `vue` and `naive-ui` into their own chunks — iterating on business code does not invalidate the big-dependency caches;
 - **Dev mode**: `cd frontend && npm run dev` (Vite dev server on port 5173, `/api` proxied to local 9721);

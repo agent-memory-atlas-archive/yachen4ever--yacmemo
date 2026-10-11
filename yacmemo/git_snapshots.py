@@ -90,9 +90,13 @@ class GitSnapshots:
                 self._disabled_reason = init.stderr.strip() or "git init 失败"
                 logger.warning("git ensure-repo failed: %s", self._disabled_reason)
                 return False
-            ignore = self.root / ".gitignore"
-            if not ignore.exists():
-                ignore.write_text(_GITIGNORE, encoding="utf-8")
+        # .gitignore 的确保不挂在 init 分支：用户手工 git init 过的记忆库
+        # （toplevel==root）走不到上面，add -A 会把 .index/（含全部笔记正文
+        # 的 FTS body 与 WAL）提交进每一次快照（2026-10-11 审计 P2）。
+        # 无条件补写——内容只忽略 yacmemo 自身的派生物，不动用户的其他规则。
+        ignore = self.root / ".gitignore"
+        if not ignore.exists():
+            ignore.write_text(_GITIGNORE, encoding="utf-8")
         for key, fallback in (("user.name", self._user_name or "yacmemo"),
                               ("user.email", self._user_email or "yacmemo@local")):
             cur = self._run("config", "--local", key, check=False)

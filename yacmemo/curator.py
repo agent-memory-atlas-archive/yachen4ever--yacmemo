@@ -254,29 +254,37 @@ def render_review_section(proposal: dict) -> str:
 
 
 def run_check(config: Config, user: UserEntry, dry_run: bool = False,
-              llm_call=None) -> str:
-    """One curator pass for one user. Returns the proposal report markdown."""
+              llm_call=None, store: "Store | None" = None) -> str:
+    """One curator pass for one user. Returns the proposal report markdown.
+
+    store 可传入常驻实例（WebUI 复用 server.py 建的那套）——run_check 自建
+    第二套 Store/IndexDB/向量库会与常驻实例并行写同一 SQLite/LanceDB/git
+    （无 busy_timeout），是 database is locked / index.lock 竞态的来源。"""
     from yacmemo.index_db import IndexDB
     from yacmemo.store import Store
     from yacmemo.vector import VectorStore
 
     root = config.user_root_abs(user)
-    db = IndexDB(str(root / ".index" / "index.db"))
-    emb, vectors = None, None
-    if config.embedding.base_url and config.embedding.model:
-        from yacmemo.embedding import EmbeddingClient
+    if store is not None and Path(store.root).resolve() != Path(root).resolve():
+        raise ValueError(
+            f"传入的 store 归属 {store.root}，与用户 {user.id} 的记忆根 {root} 不一致")
+    if store is None:
+        db = IndexDB(str(root / ".index" / "index.db"))
+        emb, vectors = None, None
+        if config.embedding.base_url and config.embedding.model:
+            from yacmemo.embedding import EmbeddingClient
 
-        emb = EmbeddingClient(base_url=config.embedding.base_url,
-                              api_key=config.embedding.api_key,
-                              model=config.embedding.model,
-                              dimensions=config.embedding.dimensions,
-                              timeout=config.embedding.timeout)
-        vectors = VectorStore(str(root / ".index" / "lancedb"),
-                              config.embedding.dimensions)
-    from yacmemo.config import resolve_git_identity
-    git_name, git_email = resolve_git_identity(user, config)
-    store = Store(config, db, emb, vectors, root=root,
-                  git_user=git_name, git_email=git_email)
+            emb = EmbeddingClient(base_url=config.embedding.base_url,
+                                  api_key=config.embedding.api_key,
+                                  model=config.embedding.model,
+                                  dimensions=config.embedding.dimensions,
+                                  timeout=config.embedding.timeout)
+            vectors = VectorStore(str(root / ".index" / "lancedb"),
+                                  config.embedding.dimensions)
+        from yacmemo.config import resolve_git_identity
+        git_name, git_email = resolve_git_identity(user, config)
+        store = Store(config, db, emb, vectors, root=root,
+                      git_user=git_name, git_email=git_email)
 
     cleaned = cleanup_audit_snapshots(store, config.curator.audit_retention_days,
                                       dry_run=dry_run)

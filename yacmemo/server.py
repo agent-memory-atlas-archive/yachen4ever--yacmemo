@@ -99,7 +99,9 @@ def create_app(config: Config) -> Starlette:
         raise SystemExit("config.toml 未定义任何 [[users]] — HTTP 服务至少需要一个用户")
 
     async def health(request):
-        return JSONResponse({"status": "ok", "users": list(servers)})
+        from yacmemo.agent_changes import AGENT_CONTRACT_VERSION
+        return JSONResponse({"status": "ok", "version": AGENT_CONTRACT_VERSION,
+                             "users": list(servers)})
 
     @contextlib.asynccontextmanager
     async def lifespan(app):

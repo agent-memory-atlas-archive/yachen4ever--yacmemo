@@ -84,9 +84,15 @@ _LOCKED_METHODS = (
     "add_guard_event", "guard_stats", "count_forced_since",
     "add_collision", "collisions_for", "list_collisions",
     "remove_collisions_involving", "prune_stale_collisions",
+    "suppressed_collision_keys", "restore_collisions",
     "record_audit_action", "list_audit_actions",
     "add_exec_event", "list_exec_events", "exec_last_status", "fts_body",
     "get_cached_vector", "put_cached_vector", "close",
+    # 2026-10-11 审计 P2：写方法 set_vector_ok 与读方法 like_search /
+    # notes_missing_vectors 此前不在名单——pysqlite 单连接隐式事务按线程
+    # 串不起来，A 线程的 commit 会把 B 线程执行到一半的语句连带提交，
+    # fts_remove 后异常即丢 FTS 行（notes 在、fts 不在，检索漏笔记）
+    "set_vector_ok", "notes_missing_vectors", "like_search",
 )
 
 
@@ -330,6 +336,37 @@ class IndexDB:
         ).fetchall()
         for r in rows:
             self.conn.execute("DELETE FROM collisions WHERE id=?", (r["id"],))
+        self.conn.commit()
+        return len(rows)
+
+    def suppressed_collision_keys(self, path: str) -> set[tuple]:
+        """path 相关的非 open 撞车对的规范键集——人已 resolved/dismissed 的
+        判断在内容不变时持续有效，重索引/编辑不复活（与 D1/D3/D4 的处置
+        永久性对齐）。键 = 按路径序对齐的 (a_path, b_path, a_text, b_text)。"""
+        rows = self.conn.execute(
+            "SELECT a_path, b_path, a_text, b_text FROM collisions "
+            "WHERE status != 'open' AND (a_path=? OR b_path=?)",
+            (path, path),
+        ).fetchall()
+        out = set()
+        for r in rows:
+            if r["a_path"] <= r["b_path"]:
+                out.add((r["a_path"], r["b_path"], r["a_text"], r["b_text"]))
+            else:
+                out.add((r["b_path"], r["a_path"], r["b_text"], r["a_text"]))
+        return out
+
+    def restore_collisions(self, rows: list[dict]) -> int:
+        """reindex 专用：clear_all 抹表前取出的人类处置对按原 id/status 回填，
+        audit_actions 里 D2:<id> 的处置记录不脱钩。"""
+        for c in rows:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO collisions (id, kind, a_path, b_path, "
+                "a_text, b_text, score, detected_at, status) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (c["id"], c["kind"], c["a_path"], c["b_path"], c["a_text"],
+                 c["b_text"], c["score"], c["detected_at"], c["status"]),
+            )
         self.conn.commit()
         return len(rows)
 

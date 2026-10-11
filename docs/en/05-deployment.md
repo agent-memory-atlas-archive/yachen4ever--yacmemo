@@ -228,15 +228,17 @@ Asset filenames are content hashes (`index-<hash>.js`), so a sync must **replace
 
 > The `/ui/assets` mount is registered conditionally at `create_app()` time, based on whether `dist/assets` exists (`webui/app.py`). **Repeat deploys need no restart** — verified on debsvc 2026-10-04: after `dist` was in place and without a restart, `/ui/assets/*` returned 200 with the correct content type. Whether a **first-ever** deploy onto a host that has never had a `dist` needs a restart is **unverified**; if assets 404 in that case, `systemctl restart yacmemo` fixes it. The `curl /ui/` self-check at the end of `scripts/deploy_webui.sh` covers this path.
 
-Without a build the service still runs normally, `/ui/` returns a 503 with build instructions, and MCP/API are unaffected. After building, open `http://debsvc.local:9721/ui/` in a browser (`/` redirects automatically). The five pages:
+Without a build the service still runs normally, `/ui/` returns a 503 with build instructions, and MCP/API are unaffected. After building, open `http://debsvc.local:9721/ui/` in a browser (`/` redirects automatically). The seven pages (dashboard/topics/search/audit/profile/identity/settings):
 
+- **Dashboard**: the default landing page — system status and per-user overview (note counts/active topics/audit todos) + a recent activity call stream;
 - **Topics**: the topic tree (registered topics → notes within a topic), with markdown rendering on the right, online editing (whole-file save, index synced) / deletion (confirm); the abstract cannot be deleted from the UI;
 - **Search**: manually verify three-channel retrieval; ⚠ collision flags are visible;
 - **Audit**: two tabs — "Deterministic Audit" (disposition cards grouped by D1–D5, disposition history, historical snapshots) and "Quality Proposals" (curator deep review, structured display of items, manual adopt/ignore + copy execution instructions for an agent to carry out); see [07-webui.md](07-webui.md) §2.3 for details;
 - **Profile**: view/edit/create each section of PROFILE.md;
+- **Identity**: managing the `agents/<agent>/` exclusive memory zone (identity token, the shared/ subtree and the per-machine subtree);
 - **Settings**: usage log (tool filter, last-14-days overview) + health overview + full index rebuild (maintenance card) + config.toml online editing (validation + backup + optional restart).
 
-For a complete description of the pages and APIs see [07-webui.md](07-webui.md). The WebUI shares the process and port with MCP and has no separate authentication — it follows the "personal use on the internal network" trust boundary; if broader exposure is needed, put an authenticating reverse proxy in front (same security boundary as below). To mount the console under a reverse-proxy sub-path (e.g. `https://<host>/yacmemo/`) see §1.5.
+For a complete description of the pages and APIs see [07-webui.md](07-webui.md). The WebUI shares the process and port with MCP; by default there is no authentication (LAN trust); configuring `[webui].password` enables login (HMAC session cookie, unauthenticated API calls get 401) — it follows the "personal use on the internal network" trust boundary; if broader exposure is needed, put an authenticating reverse proxy in front (same security boundary as below). To mount the console under a reverse-proxy sub-path (e.g. `https://<host>/yacmemo/`) see §1.5.
 
 ### 2.3 curator Quality Curation (Optional)
 
@@ -274,7 +276,7 @@ Paste into the system prompt of every agent that will write memories (original t
 8. 探索一个主题用 memory_read 的相关笔记链路，不要只凭单条搜索结果下结论。
 主题：
 9. 主题的注册、注销与归档都只在用户明确要求时操作（"把 X 加入长期记忆" / "X 不用长期记录了" / "X 归档吧"）→ topic_register / topic_unregister / archive_topic；主题现状写入 abstract（topics/<主题>/abstract.md）并就地更新，目录内可按模块增设详细 md。
-10. 只在注册主题内写笔记；journal/、archive/、curator/ 之外发现游离文件时提示用户归位。
+10. 只在注册主题内写笔记；journal/、archive/、curator/、agents/ 之外发现游离文件时提示用户归位。
 删除：
 11. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 ```
@@ -286,12 +288,12 @@ Even if the conventions are broken there is a backstop: guard refusals + two-sta
 - **git**: one repository per memory_root (`.index/` is ignored). **Snapshots are fully automatic**: every write/edit/delete/topic operation commits automatically and the repository is always git-clean (see 1.4); no manual maintenance needed;
 - **Backup**: back up the two memory directories (skipping `.index` is fine — indexes are rebuildable);
 - **Obsidian**: use Syncthing/a shared mount to sync the memory directory to a desktop machine and browse it directly;
-- **Index rebuild**: after deleting `.index/`, the self-healing triggered by any `memory_audit` or a restart performs a full rebuild (use `reindex` when content is large);
+- **Index rebuild**: a restart does not rebuild the index; rebuilding relies on the self-healing of `memory_audit` (newly discovered files get indexed) or the reindex in the WebUI settings page;
 - **Migration**: changing machines = copy the memory directory + update the config paths.
 
 ## 5. Security Boundary (Internal-Network Personal Use Assumption)
 
-- The service has no authentication; binding `0.0.0.0` means any device on the LAN can read and write the corresponding memories — the home LAN is the trust boundary; for broader exposure, front it with an authenticating reverse proxy;
+- No authentication by default (LAN trust); configuring `[webui].password` enables login (HMAC session cookie, unauthenticated API calls get 401). Binding `0.0.0.0` means any device on the LAN can read and write the corresponding memories — the home LAN is the trust boundary; for broader exposure, front it with an authenticating reverse proxy;
 - User isolation = URL path = disk directory, with the boundary fixed at Store construction time (tests cover that the two users cannot see each other);
 - `memory_read`/`memory_search` only operate inside the bound root; there is no path-traversal escape (`..` and paths outside the root are refused).
 

@@ -67,12 +67,21 @@ class Searcher:
     def search(self, query: str, limit: int = 10,
                kind: str = "hybrid",
                identity: Identity | None = None,
-               include_archived: bool = True) -> list[dict]:
+               include_archived: bool = True,
+               notice_out: list[str] | None = None) -> list[dict]:
         """include_archived=False 供 MCP 工具层使用：归档笔记（archive/）
-        对客户端不可见。默认 True——WebUI 检索与人的视野不受影响。"""
+        对客户端不可见。默认 True——WebUI 检索与人的视野不受影响。
+
+        notice_out：调用方传入 list，本次检索的提示（归档/已结案隐去条数、
+        降级说明）逐条追加。last_notice 是实例状态，无状态 HTTP 并发下会被
+        其他请求覆盖或读走（2026-10-11 审计 P2）——MCP/WebUI 通道一律用
+        notice_out；last_notice 仅为兼容旧消费方保留。"""
         if kind not in ("hybrid", "fts", "vector"):
             raise ValueError(f"未知检索类型: {kind}")
+        # 负数/0 会让 SQLite 的 LIMIT 语义翻转（负 = 无上限，候选全量）
+        limit = max(1, int(limit))
         self.last_notice = None
+        notices: list[str] = []
         # identity / 归档过滤在融合后做：通道多取 3 倍候选，防止不可见结果
         # 挤占限额
         overfetch = ((identity is not None and identity.agent != "")
@@ -91,22 +100,31 @@ class Searcher:
 
         if identity is not None and identity.agent != "":
             # scoped search：user 层 + 本 identity 专属区（identity.py 的
-            # visible 是唯一权威；ANONYMOUS 即 user 层全网可见）
-            merged = [r for r in merged if visible(r["path"], identity)][:limit]
+            # visible 是唯一权威；ANONYMOUS 即 user 层全网可见）。
+            # 过滤在前、截断在后——先截断再过滤会让结果少于 limit
+            #（overfetch 3x 只是缓解，不是保证）。
+            merged = [r for r in merged if visible(r["path"], identity)]
 
         if not include_archived:
-            merged = self._drop_archived(merged)
-        merged = self._drop_settled_proposals(merged)
+            merged = self._drop_archived(merged, notices)
+        merged = self._drop_settled_proposals(merged, notices)
+        merged = merged[:limit]
 
-        if not merged and len(query.strip()) < 3 and not self.last_notice:
+        if not merged and len(query.strip()) < 3:
             # 短查询空结果：LIKE 兜底也没命中，提示换更长的关键词
-            self.last_notice = "短于 3 字的查询无法被 FTS trigram 命中，请换更长的关键词"
+            notices.append("短于 3 字的查询无法被 FTS trigram 命中，请换更长的关键词")
 
         for r in merged:
-            r["warnings"] = self._warnings_for(r["path"])
+            r["warnings"] = self._warnings_for(
+                r["path"], identity, mask_archive=not include_archived)
+        if notices:
+            self.last_notice = "；".join(notices)
+            if notice_out is not None:
+                notice_out.extend(notices)
         return merged
 
-    def _drop_archived(self, results: list[dict]) -> list[dict]:
+    def _drop_archived(self, results: list[dict],
+                       notices: list[str]) -> list[dict]:
         """归档笔记（archive/）不对 MCP 客户端可见（0.3.17）：检索结果里
         全部隐去——归档是人的记忆收纳，agent 不该再把归档内容当活记忆引用。
         WebUI 检索不带本开关，人的视野不受影响；按归档路径的显式
@@ -118,11 +136,12 @@ class Searcher:
                 continue
             kept.append(r)
         if dropped:
-            self.last_notice = (f"已隐去 {dropped} 条归档笔记"
-                                "（archive/ 对客户端不可见；WebUI 已归档分组仍可见）")
+            notices.append(f"已隐去 {dropped} 条归档笔记"
+                           "（archive/ 对客户端不可见；WebUI 已归档分组仍可见）")
         return kept
 
-    def _drop_settled_proposals(self, results: list[dict]) -> list[dict]:
+    def _drop_settled_proposals(self, results: list[dict],
+                                notices: list[str]) -> list[dict]:
         """已结案提案（全部条目执行/忽略）默认不对 agent 可见：
         文件头部有已结案标记的 curator/ 报告从结果中隐去——执行类工作
         不该被重复派发；显式 memory_read 仍可读（那是明确查阅）。
@@ -134,8 +153,8 @@ class Searcher:
                 continue
             kept.append(r)
         if dropped:
-            self.last_notice = (f"已隐去 {dropped} 条已结案提案"
-                                "（全部条目已执行/忽略，无需重复处理）")
+            notices.append(f"已隐去 {dropped} 条已结案提案"
+                           "（全部条目已执行/忽略，无需重复处理）")
         return kept
 
     def _is_settled(self, path: str) -> bool:
@@ -173,13 +192,28 @@ class Searcher:
         stem = path.rsplit("/", 1)[-1]
         return stem.removesuffix(".md")
 
-    def _warnings_for(self, path: str) -> list[str]:
+    def _warnings_for(self, path: str, identity: Identity | None = None,
+                      mask_archive: bool = False) -> list[str]:
         warnings = []
+        restricted = identity is not None and identity.agent != ""
         for c in self.db.collisions_for(path):
             if c["a_path"] == path:
                 other_path, other_text = c["b_path"], c["b_text"]
             else:
                 other_path, other_text = c["a_path"], c["a_text"]
+            # warnings 是内容通道：⚠ 会携带对方标题与 50 字原文——对方不可见
+            # （其他专属区；MCP 通道下的已归档笔记）时只报存在，不外泄
+            # （2026-10-11 审计 P1：归档隐形被 ⚠ 原文打穿）
+            if in_archive_zone(other_path) and mask_archive:
+                warnings.append(
+                    f"⚠ 存在一条疑似重复笔记（score {c['score']}）——"
+                    "对象已归档，对客户端不可见。")
+                continue
+            if restricted and not visible(other_path, identity):
+                warnings.append(
+                    f"⚠ 存在一条疑似重复笔记（score {c['score']}）——"
+                    "对象对当前身份不可见，建议让有权限的会话处理。")
+                continue
             other_title = self._title_of(other_path)
             warnings.append(
                 f"⚠ 与 [[{other_title}]] 疑似重复（score {c['score']}）— "

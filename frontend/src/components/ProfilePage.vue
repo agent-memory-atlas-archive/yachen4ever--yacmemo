@@ -60,7 +60,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { NSplit, NSpin, NList, NListItem, NThing, NButton, NInput, NSpace, NText, NDivider, NEmpty, NModal, useMessage } from 'naive-ui'
-import { marked } from 'marked'
+import { renderMarkdown } from '../composables/markdown.js'
 import { api } from '../composables/api.js'
 import { t } from '../composables/i18n.js'
 
@@ -75,7 +75,7 @@ const editContent = ref('')
 const showAdd = ref(false)
 const newSectionName = ref('')
 
-const renderedPreview = computed(() => marked.parse(editContent.value || ''))
+const renderedPreview = computed(() => renderMarkdown(editContent.value))
 
 function parseSections(text) {
   if (!text || text.startsWith('（尚无')) return []

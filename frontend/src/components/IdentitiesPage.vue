@@ -106,7 +106,7 @@ import {
   NAlert, NButton, NCollapse, NCollapseItem, NCode, NEmpty, NInput,
   NList, NListItem, NModal, NSpace, NSpin, NTag, NText, NThing, useMessage,
 } from 'naive-ui'
-import { marked } from 'marked'
+import { renderMarkdown } from '../composables/markdown.js'
 import { api } from '../composables/api.js'
 import { t } from '../composables/i18n.js'
 
@@ -126,7 +126,7 @@ const previewPath = ref('')
 const previewContent = ref('')
 const previewLoading = ref(false)
 
-const previewHtml = computed(() => marked.parse(previewContent.value || ''))
+const previewHtml = computed(() => renderMarkdown(previewContent.value))
 
 const claudeSnippet = computed(() => created.value
   ? `claude mcp add --transport http yacmemo http://<服务器>:9721/${props.user}/mcp --header "Authorization: Bearer ${created.value.token}"`

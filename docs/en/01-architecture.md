@@ -126,7 +126,7 @@ memory_root/
 ├── PROFILE.md        用户画像与偏好（记忆层功能文件：不注册、不游离检测、context 前置）
 ├── topics/<主题>/     每个主题一个目录：abstract.md（agent 维护的现状手册）
 │                     + agent 可按模块自由增设的详细 md——目录即归属
-├── archive/<主题>/   已归档主题（免注册区，检索仍可用，context 不再注入）
+├── archive/<主题>/   已归档主题（免注册区，对 MCP 客户端不可见，WebUI 已归档分组可见，context 不再注入）
 ├── journal/          时间线流水（免注册区，豁免重名拦截）
 ├── agents/<agent>/          identity 专属区：shared/ 子树 = agent 层（同 agent
 │                            跨设备共享，如 shared/必读.md）；<device>/ 子树 = 本机
@@ -148,13 +148,20 @@ The directory layout serves human browsing and topic-membership determination (t
 
 ```sql
 -- index_db (SQLite)
-notes(path TEXT PRIMARY KEY, title TEXT, content_hash TEXT, updated_at TEXT)
-fts   (FTS5: title, body, tokenize='trigram')      -- 内容派生自 notes
+notes(path TEXT PRIMARY KEY, title TEXT, content_hash TEXT, updated_at TEXT,
+      vector_ok INTEGER DEFAULT 0)              -- 缺向量审计点名/自愈用
+fts   (FTS5: title, body, path UNINDEXED, tokenize='trigram')   -- 内容派生自 notes
 collisions(id TEXT PRIMARY KEY, kind TEXT,          -- open / resolved / dismissed
            a_path TEXT, b_path TEXT, a_text TEXT, b_text TEXT,
            score REAL, detected_at TEXT, status TEXT)
 guard_events(id TEXT PRIMARY KEY, ts TEXT, kind TEXT,        -- refused / forced
              attempted_title TEXT, matched_path TEXT)
+audit_actions(id TEXT PRIMARY KEY, kind TEXT,        -- D1:{a}|{b} / D2:{id} / D3 / D4
+              a_path TEXT, b_path TEXT, action TEXT, -- resolved / dismissed
+              note TEXT, acted_at TEXT)              -- 审计处置留痕（防复发）
+audit_exec_events(seq INTEGER PRIMARY KEY, issue_id TEXT, kind TEXT,
+                  event TEXT,                        -- executing/progress/executed/blocked
+                  note TEXT, identity TEXT, ts TEXT) -- 审计执行进度时间线
 vec_cache(content_hash TEXT PRIMARY KEY, vector BLOB)
 ```
 
@@ -252,7 +259,7 @@ Beyond the body, `memory_read` also returns "related notes": `[[链接]]` target
 | `topic_unregister` | `title` | Unregisters a topic (**only when the user explicitly asks**; only removed from the registry, notes untouched, adjudicated once stray) |
 | `archive_note` | `path, reason=""` | Archive a single note inside a topic (**only when the user explicitly asks**): moves it into `archive/<topic>/`, with `reason` optionally written into the header status line; an abstract cannot be archived on its own and an existing target is refused; **never move manually to the archive/ root with memory_move** |
 | `unarchive_note` | `path` | Undo a single-note archive: reverse-looks-up the active topic by directory name and moves it back to `topics/<topic>/`; a free-form archive directory (not topic-shaped) is an error |
-| `archive_topic` | `title` | Archives a topic (**only when the user explicitly asks**): the entire topic directory moves into archive/ (card paths rewritten in sync); retrieval keeps working, context no longer injects it |
+| `archive_topic` | `title` | Archives a topic (**only when the user explicitly asks**): the entire topic directory moves into archive/ (card paths rewritten in sync); invisible to MCP clients (search/list/related notes) and no longer injected into context, visible under the WebUI archived group |
 | `get_user_preference` | `section=""` | Reads the full profile & preferences or a specified section (PROFILE.md feature layer) |
 | `update_user_preference` | `section, content` | Creates/replaces one section of the profile & preferences (maintained by the agent) |
 | `integration_check` | `onboarded_version=""` | **Agent integration contract version check** ("teach the AI to self-update"): the agent reports the contract version recorded locally; when behind, the server returns incremental changes plus the write-convention quick reference, and the agent autonomously updates its local prompt from it |
@@ -317,8 +324,7 @@ When the embedding endpoint fails, writes **do not fail**: the file and FTS land
 ### 7.1 D1: title/topic duplication (write-time blocking + audit backstop)
 
 - At write time: blocked by the 6.1 guards;
-- Audit backstop: full pairwise comparison of normalized titles over the stock of existing notes (written before the guards went live, or forced through);
-- Shared tags are compared too (≥2 common tags with title similarity ≥ 0.7 are also listed as candidates).
+- Audit backstop: full pairwise comparison of normalized titles over the stock of existing notes (written before the guards went live, or forced through).
 
 ### 7.2 D2: observation semantic collisions (incremental detection at write time)
 
@@ -380,7 +386,8 @@ A list of `[[链接]]` pointing to nonexistent notes, output by audit. `memory_m
 13. memory_delete 仅在用户明确要求时调用（"删掉 X"/"X 不用记了"）；每次删除自动产生 git 快照，历史可恢复。
 审计与提案：
 14. 执行审计问题（memory_audit 发现的、或 WebUI 执行指令派下的）时用 memory_audit_update 汇报：executing 接手 → progress 过程 → executed 完成（附摘要）/ blocked 受阻；复审由审计自动确认，但只有以 executed 收口的问题才可能被封口——停手前务必补一条 executed，不要声称"已验证"、不要代替人忽略。
-15. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读；memory_list 对已结案提案就地标注（已结案），找待办提案只处理未标注的行，不要逐份打开确认。
+15. 主题标签=视角归类（如 工作/开发/生活），一般 1–2 个；不是关键词/主题名/状态。打标用 topic_tag 并优先复用已有标签；abstract 现状变化用 topic_status 同步注册表现状行。
+16. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读；memory_list 对已结案提案就地标注（已结案），找待办提案只处理未标注的行，不要逐份打开确认。
 ```
 
 The conventions still go into the prompt (items 1, 2 and 4 reduce wasted round-trips), but the system no longer **relies** on the model honoring them — guards and detectors provide the backstop. This is the essential difference between this design and v1.
@@ -474,7 +481,7 @@ Each phase can be rolled back independently: the system is already usable after 
 
 - **Topics are declared explicitly by the user** ("add X to long-term memory"), and the agent registers them by calling `topic_register` — the tool call is the voucher of user authorization; in normal operation the agent can only propose, never register on its own; registration is also a **precondition for writing** (the 6.1 topic hard block: paths not covered by any registered topic are always refused; force does not exempt);
 - **One directory per topic**: `abstract.md` (the current-state handbook, agent-maintained and updated in place) + module md files for detailed memories within the topic (the agent may add them as needed) — the directory is the membership, replacing hand-maintained path lists in the registry;
-- TOPICS.md is both registry and directory; **topic lifecycle**: register → active (context injects summaries) → **archive** (`archive_topic`: the registry gains a `状态: archived` entry and the card path is rewritten; the entire topic directory moves into archive/; retrieval still works, context no longer injects it, and it no longer counts as stray) → unregister (topic_unregister: only removed from the registry; notes become strays and go through D4 adjudication) — no silent data loss at any point;
+- TOPICS.md is both registry and directory; **topic lifecycle**: register → active (context injects summaries) → **archive** (`archive_topic`: the registry gains a `状态: archived` entry and the card path is rewritten; the entire topic directory moves into archive/; invisible to MCP clients (search/list/related notes; the WebUI archived group still shows it), context no longer injects it, and it no longer counts as stray) → unregister (topic_unregister: only removed from the registry; notes become strays and go through D4 adjudication) — no silent data loss at any point;
 - **Profile & preferences are a memory-layer feature, not a topic**: `PROFILE.md` is a single file divided into sections, maintained by the agent via `get_user_preference` / `update_user_preference` (metadata and domain knowledge are layered: the former is "how to collaborate with the user", the latter is "what to know"); `memory_context` injects PROFILE up front;
 - **Stray-file detection (D4) as double insurance**: the write path is already hard-blocked (the tool surface cannot create strays), so D4 becomes the backstop — it covers strays from outside the tool surface, such as files hand-created in Obsidian or leftovers after unregistration (registry-free zones: journal/, archive/, curator/; TOPICS.md/PROFILE.md are exempt);
 - Design stance: **hierarchy is declared, not computed** — no importance scoring / decay functions / automatic summarization.
@@ -489,7 +496,7 @@ Each phase can be rolled back independently: the system is already usable after 
 
 ### Tool surface (22 tools in total)
 
-The topic-lifecycle quartet `topic_list` / `topic_register` / `topic_unregister` / `archive_topic` plus the cold-start `memory_context`, and the profile & preferences pair `get_user_preference` / `update_user_preference`; specifications in [02-mcp-tools.md](02-mcp-tools.md). Unregistering only removes from the registry and never touches notes (afterwards the notes become stray files, named by D4 for adjudication); archiving keeps retrieval working but withdraws context injection — guaranteeing no silent data loss across the whole topic lifecycle.
+The topic-lifecycle quartet `topic_list` / `topic_register` / `topic_unregister` / `archive_topic` plus the cold-start `memory_context`, and the profile & preferences pair `get_user_preference` / `update_user_preference`; specifications in [02-mcp-tools.md](02-mcp-tools.md). Unregistering only removes from the registry and never touches notes (afterwards the notes become stray files, named by D4 for adjudication); after archiving it becomes invisible to MCP clients (search/list/related notes; the WebUI archived group still shows it) and context injection is withdrawn — guaranteeing no silent data loss across the whole topic lifecycle.
 
 ## 14. Rejected alternatives (decision record)
 

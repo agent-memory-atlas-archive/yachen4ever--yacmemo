@@ -126,7 +126,7 @@ memory_root/
 ├── PROFILE.md        用户画像与偏好（记忆层功能文件：不注册、不游离检测、context 前置）
 ├── topics/<主题>/     每个主题一个目录：abstract.md（agent 维护的现状手册）
 │                     + agent 可按模块自由增设的详细 md——目录即归属
-├── archive/<主题>/   已归档主题（免注册区，检索仍可用，context 不再注入）
+├── archive/<主题>/   已归档主题（免注册区，对 MCP 客户端不可见，WebUI 已归档分组可见，context 不再注入）
 ├── journal/          时间线流水（免注册区，豁免重名拦截）
 ├── agents/<agent>/          identity 专属区：shared/ 子树 = agent 层（同 agent
 │                            跨设备共享，如 shared/必读.md）；<device>/ 子树 = 本机
@@ -148,13 +148,20 @@ memory_root/
 
 ```sql
 -- index_db (SQLite)
-notes(path TEXT PRIMARY KEY, title TEXT, content_hash TEXT, updated_at TEXT)
-fts   (FTS5: title, body, tokenize='trigram')      -- 内容派生自 notes
+notes(path TEXT PRIMARY KEY, title TEXT, content_hash TEXT, updated_at TEXT,
+      vector_ok INTEGER DEFAULT 0)              -- 缺向量审计点名/自愈用
+fts   (FTS5: title, body, path UNINDEXED, tokenize='trigram')   -- 内容派生自 notes
 collisions(id TEXT PRIMARY KEY, kind TEXT,          -- open / resolved / dismissed
            a_path TEXT, b_path TEXT, a_text TEXT, b_text TEXT,
            score REAL, detected_at TEXT, status TEXT)
 guard_events(id TEXT PRIMARY KEY, ts TEXT, kind TEXT,        -- refused / forced
              attempted_title TEXT, matched_path TEXT)
+audit_actions(id TEXT PRIMARY KEY, kind TEXT,        -- D1:{a}|{b} / D2:{id} / D3 / D4
+              a_path TEXT, b_path TEXT, action TEXT, -- resolved / dismissed
+              note TEXT, acted_at TEXT)              -- 审计处置留痕（防复发）
+audit_exec_events(seq INTEGER PRIMARY KEY, issue_id TEXT, kind TEXT,
+                  event TEXT,                        -- executing/progress/executed/blocked
+                  note TEXT, identity TEXT, ts TEXT) -- 审计执行进度时间线
 vec_cache(content_hash TEXT PRIMARY KEY, vector BLOB)
 ```
 
@@ -252,7 +259,7 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 | `topic_unregister` | `title` | 注销主题（**仅用户明确要求**；仅移出注册表，笔记不动，游离后裁决） |
 | `archive_note` | `path, reason=""` | 归档主题内单篇笔记（**仅用户明确要求**）：移入 `archive/<主题名>/`，`reason` 可选写入头部状态行；abstract 不可单独归档、目标已存在拒绝；**不要手工 memory_move 到 archive/ 根目录** |
 | `unarchive_note` | `path` | 取消单篇归档：按目录名反查活跃主题移回 `topics/<主题>/`；自由归档目录（非主题形态）报错 |
-| `archive_topic` | `title` | 归档主题（**仅用户明确要求**）：整个主题目录移入 archive/（卡路径同步改写），检索可用、context 不注入 |
+| `archive_topic` | `title` | 归档主题（**仅用户明确要求**）：整个主题目录移入 archive/（卡路径同步改写），对 MCP 客户端不可见（检索/列表/相关笔记）、context 不注入，WebUI 已归档分组可见 |
 | `get_user_preference` | `section=""` | 读画像/偏好全文或指定小节（PROFILE.md 功能层） |
 | `update_user_preference` | `section, content` | 创建/替换画像/偏好的一个小节（agent 维护） |
 | `integration_check` | `onboarded_version=""` | **Agent 接入契约版本核对**（"教 AI 自我更新"）：agent 汇报本地记录的契约版本，落后时返回增量变更与写入约定速览，agent 据此自主更新本地提示词 |
@@ -317,8 +324,7 @@ embedding 端点故障时写入**不失败**：文件与 FTS 正常落库，向�
 ### 7.1 D1：标题/主题重复（写时拦截 + 审计兜底）
 
 - 写时：6.1 的守卫拦截；
-- 审计兜底：对存量笔记（守卫上线前写入的、或 force 越过的）做全量归一化标题两两比对；
-- 同时比对共享 tag（≥2 个共同 tag 且标题相似度 ≥ 0.7 也列为候选）。
+- 审计兜底：对存量笔记（守卫上线前写入的、或 force 越过的）做全量归一化标题两两比对。
 
 ### 7.2 D2：observation 语义撞车（写时增量检测）
 
@@ -381,7 +387,7 @@ memory_write / memory_edit 完成 embedding 后：
 审计与提案：
 14. 执行审计问题（memory_audit 发现的、或 WebUI 执行指令派下的）时用 memory_audit_update 汇报：executing 接手 → progress 过程 → executed 完成（附摘要）/ blocked 受阻；复审由审计自动确认，但只有以 executed 收口的问题才可能被封口——停手前务必补一条 executed，不要声称"已验证"、不要代替人忽略。
 15. 主题标签=视角归类（如 工作/开发/生活），一般 1–2 个；不是关键词/主题名/状态。打标用 topic_tag 并优先复用已有标签；abstract 现状变化用 topic_status 同步注册表现状行。
-15. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读；memory_list 对已结案提案就地标注（已结案），找待办提案只处理未标注的行，不要逐份打开确认。
+16. memory_search 默认不返回已结案提案（curator/ 报告全部条目执行/忽略后系统自动打标）——不要执行已结案提案里的条目；memory_read 按路径仍可读；memory_list 对已结案提案就地标注（已结案），找待办提案只处理未标注的行，不要逐份打开确认。
 ```
 
 约定仍会写进提示（第 1、2、4 条减少无效往返），但系统不再**依赖**模型守约——守卫与检测器兜底，这正是本设计与第一版的本质区别。
@@ -475,7 +481,7 @@ obs_topk = 5
 
 - **主题由用户显式声明**（"把 X 加入长期记忆"），agent 调用 `topic_register` 注册——工具调用即用户授权的凭证；agent 平时只能提案，不能自行注册；注册同时是**写入的前置条件**（6.1 主题硬拦截：未注册主题覆盖的路径一律拒写，force 不豁免）；
 - **每个主题一个目录**：`abstract.md`（现状手册，agent 维护、就地更新）+ 主题内详细记忆的模块 md（agent 可按需增设）——目录即归属，取代注册表手工维护路径列表；
-- TOPICS.md 为注册表与目录；**主题生命周期**：注册 → 活跃（context 注入摘要）→ **归档**（`archive_topic`，注册表加`状态: archived` 并改写卡路径，整个主题目录移入 archive/，检索仍可用、context 不再注入、不计游离）→ 注销（topic_unregister，仅移出注册表，笔记变游离走 D4 裁决）——全程无静默数据损失；
+- TOPICS.md 为注册表与目录；**主题生命周期**：注册 → 活跃（context 注入摘要）→ **归档**（`archive_topic`，注册表加`状态: archived` 并改写卡路径，整个主题目录移入 archive/，对 MCP 客户端不可见（检索/列表/相关笔记，WebUI 已归档分组可见）、context 不再注入、不计游离）→ 注销（topic_unregister，仅移出注册表，笔记变游离走 D4 裁决）——全程无静默数据损失；
 - **画像/偏好是记忆层功能，不是主题**：`PROFILE.md` 单文件分小节，agent 用 `get_user_preference` / `update_user_preference` 维护（元信息与领域知识分层：前者是"怎么和用户协作"，后者是"知道什么"）；`memory_context` 将 PROFILE 前置注入；
 - **游离文件检测（D4）双保险**：写路径已硬拦截（工具面不可能制造游离），D4 转为兜底——管 Obsidian 手建、注销后遗等工具面之外的游离（免注册区：journal/、archive/、curator/；TOPICS.md/PROFILE.md 豁免）；
 - 设计立场：**主次是被声明的，不是被算出来的**——不做重要度打分/衰减函数/自动摘要。
@@ -490,7 +496,7 @@ obs_topk = 5
 
 ### 工具面（累计 22 个）
 
-主题生命周期四件套 `topic_list` / `topic_register` / `topic_unregister` / `archive_topic` + 冷启动 `memory_context`，画像/偏好功能对 `get_user_preference` / `update_user_preference`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。注销只移出注册表、不动笔记（注销后笔记成游离文件，由 D4 点名走裁决），归档保留检索可用性但退出注入——保证主题生命周期全程无静默数据损失。
+主题生命周期四件套 `topic_list` / `topic_register` / `topic_unregister` / `archive_topic` + 冷启动 `memory_context`，画像/偏好功能对 `get_user_preference` / `update_user_preference`，规格见 [02-mcp-tools.md](02-mcp-tools.md)。注销只移出注册表、不动笔记（注销后笔记成游离文件，由 D4 点名走裁决），归档后对 MCP 客户端不可见（检索/列表/相关笔记，WebUI 已归档分组可见）并退出注入——保证主题生命周期全程无静默数据损失。
 
 ## 十四、被否决的备选方案（决策记录）
 

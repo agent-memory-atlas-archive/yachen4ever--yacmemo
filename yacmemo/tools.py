@@ -155,14 +155,17 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
             if out["error"]:
                 return out["error"]
             try:
+                notices: list[str] = []
                 results = searcher.search(query, limit=limit, kind=kind,
                                           identity=out["identity"],
-                                          include_archived=False)
+                                          include_archived=False,
+                                          notice_out=notices)
                 text = _fmt_search(results)
                 # 降级/短查询提示：向量通道不可用等让 agent 知情，
-                # 避免"未找到相关笔记"被当成权威结论
-                if searcher.last_notice:
-                    text += f"\n⚠ {searcher.last_notice}"
+                # 避免"未找到相关笔记"被当成权威结论（notice_out 逐次返回，
+                # 不读共享的 last_notice——无状态并发下会被别的请求覆盖）
+                if notices:
+                    text += "\n⚠ " + "；".join(notices)
                 return text
             except StoreError as e:
                 return f"{e}"
@@ -250,6 +253,9 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["ok"], out["error"] = False, str(e)
                 return f"写入失败: {e}"
             note = "（注意：本次为 force 越过近似标题守卫，已记录）" if r["forced"] else ""
+            if r.get("marker_warning"):
+                note += ("\n⚠ 写入内容含以 [正文开始/[正文结束 开头的行——"
+                         "会干扰 memory_read 的正文边界标记，建议改写该行。")
             cols = r.get("new_collisions") or []
             if cols:
                 # 写时撞车即时回显：别让 agent 等到审计才知道制造了语义撞车
@@ -280,6 +286,9 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["before_hash"] = r.get("before_hash", "")
                 note = (f"（自动清除过期冲突对 {r['cleared_collisions']} 对）"
                         if r.get("cleared_collisions") else "")
+                if r.get("marker_warning"):
+                    note += ("\n⚠ 写入内容含以 [正文开始/[正文结束 开头的行——"
+                             "会干扰 memory_read 的正文边界标记，建议改写该行。")
                 return f"已修改并重新索引: {r['path']}{note}"
             except StoreError as e:
                 return f"{e}"
@@ -308,6 +317,9 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 out["before_hash"] = r.get("before_hash", "")
                 note = (f"（自动清除过期冲突对 {r['cleared_collisions']} 对）"
                         if r.get("cleared_collisions") else "")
+                if r.get("marker_warning"):
+                    note += ("\n⚠ 写入内容含以 [正文开始/[正文结束 开头的行——"
+                             "会干扰 memory_read 的正文边界标记，建议改写该行。")
                 return f"已替换小节 '{r['heading']}' 并重新索引: {r['path']}{note}"
             except StoreError as e:
                 return f"{e}"
@@ -787,8 +799,9 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
         """返回核心记忆上下文：主题注册表 + 各主题卡摘要头 + 你的专属必读。
         每次会话开始时先调用一次。
 
-        携带 identity token 时自动注入 agents/<agent>/必读.md 与
-        agents/<agent>/<device>/必读.md（专属区，其他 identity 不可见）。
+        携带 identity token 时自动注入 agents/<agent>/shared/必读.md（agent 层
+        跨设备共享）与 agents/<agent>/<device>/必读.md（本机专属；专属区，
+        其他 identity 不可见）。
 
         返回头部带接入契约版本：与你本地记录的版本不一致时，调用
         integration_check 自主更新本地接入提示词。"""

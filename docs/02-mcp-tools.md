@@ -53,6 +53,7 @@ memory_search(query: str, limit: int = 10, kind: str = "hybrid") -> str
 - **降级提示**：向量通道故障时输出 `⚠ 向量通道不可用（原因），本次结果仅 FTS`——"未找到相关笔记"不再被当成权威结论（2026-09-18 端点故障实测的静默降级问题）。
 - **已结案提案隐去**（2026-09-25 增补）：curator/ 提案报告的全部条目都执行完成或忽略后，文件头部自动打「> 状态：已结案」标记，检索结果默认不再返回（输出提示"已隐去 N 条已结案提案"）；显式 `memory_read` 仍可读——那是明确查阅。不要再去执行已结案提案里的条目。
 - **归档笔记隐去**（0.3.17 增补）：`archive/` 下的归档笔记不再出现在检索结果里（输出提示"已隐去 N 条归档笔记"）——归档是人的收纳层，agent 不该再把归档内容当活记忆引用。WebUI 检索不受影响；按归档路径的显式 `memory_read` 仍可读。
+- **⚠ 脱敏**（0.3.18 增补）：撞车提示会携带对方标题与 50 字原文——对方不可见（其他专属区；本通道下的已归档笔记）时降级为「存在疑似重复（对象不可见）」，只报存在不带内容。
 
 返回格式：
 
@@ -80,7 +81,8 @@ memory_read(path_or_title: str) -> str
   - 目标不存在的：标注"目标不存在"（agent 可顺手创建或清理）；
   - 目标在索引里、但**那一行的 `path` 越界**（被隔离，见 §7 的 `quarantined_index_rows`）：给一条**既没有 `path` 也没有 observation**、只带 `quarantined: true` 与原因的条目——坏行指向的路径与内容一律不外泄，只让调用方看见"这条链接背后有坏行"（2026-10-03 增补）。链接目标同样来自派生索引表，越界行不参与这一段的任何读取；
   - 语义近邻 top-2（`via: vector`，需要 embedding 端点）；
-  - 相关笔记里**不出现归档目标**（0.3.17）：wiki-link 与语义近邻两条路带出的 `archive/` 笔记一律隐去。按**标题**解析归档笔记会被拒绝并给出归档位置与 `unarchive_note` 出口；按归档路径的显式读取仍可（明确查阅）。
+  - 相关笔记里**不出现归档目标**（0.3.17）：wiki-link 与语义近邻两条路带出的 `archive/` 笔记一律隐去。按**标题**解析归档笔记会被拒绝并给出归档位置与 `unarchive_note` 出口；按归档路径的显式读取仍可（明确查阅）；
+  - 相关笔记**遵守 identity 边界**（0.3.18 收口：wiki-link 分支此前漏检，其他专属区的路径+首条 observation 会经 [[链接]] 外泄）——链接与向量两条路同口径，不可见目标静默跳过。
 
 ## 3. memory_write
 
@@ -89,7 +91,7 @@ memory_write(title: str, content: str, force: bool = False,
              force_confirm: bool = False) -> str
 ```
 
-新建笔记。`title` 可含目录前缀，**主题目录内写作 `topics/<主题>/笔记名`**（缺 `topics/` 前缀会被主题硬拦截，拦截消息会给出修正后的 title）。目录只是归档，**笔记的标题是去掉目录后的主题名**。文件名对非法字符（`\ / : * ? " < > |`）做替换清洗。**索引注册的标题与落盘路径同源**（0.3.17 收口）：`title` 尾部带 `.md` 时先剥除再统一追加，注册的标题恒为文件名 stem——此前 title 带 `.md` 时注册的标题也带 `.md`，按标题读取与 `[[标题]]` wiki-link 会全部失联（openviking 实爆）。
+新建笔记。`title` 可含目录前缀，**主题目录内写作 `topics/<主题>/笔记名`**（缺 `topics/` 前缀会被主题硬拦截，拦截消息会给出修正后的 title）。目录只是归档，**笔记的标题是去掉目录后的主题名**。文件名对非法字符（`\ / : * ? " < > |`）做替换清洗。**索引注册的标题与落盘路径同源**（0.3.17 收口）：`title` 尾部带 `.md` 时先剥除再统一追加，注册的标题恒为文件名 stem——此前 title 带 `.md` 时注册的标题也带 `.md`，按标题读取与 `[[标题]]` wiki-link 会全部失联（openviking 实爆）。内容含以 `[正文开始` / `[正文结束` 开头的行时返回文本追加 ⚠ 提示（0.3.18：该类行干扰 memory_read 的正文边界）。
 
 **只创建不覆盖**（0.3.12 增补，force 不豁免）：目标路径已存在（topics/、journal/、archive/ 同口径）直接拒绝，原文不动——更新走 `memory_edit` / `memory_edit_section`，整篇重建先 `memory_delete`（仅用户明确要求时）。同名拦截先于近重名守卫执行：exact 匹配会被 exclude_path 排除出近重名候选，若不加此拦截，消息只会指向 `-2` 之类的近似笔记而漏掉真正同名的那篇。
 
@@ -209,7 +211,7 @@ memory_audit() -> str
 | `pruned_stale_collisions` | 自动清除的过期冲突对**数量** | 文本节 + 快照概览 |
 | `pruned_blank_actions` | 自动清理的空白处置行**数量** | 快照概览 |
 | `quarantined_index_rows` | 越界索引行隔离清单（`path` + `reason`），处置手段 reindex | 文本节 + 快照 + 审计页告警 |
-| `invalid_topic_cards` | 注册表 `卡:` 非法值（`title` / `card` / `reason`） | 快照小节（见下注） |
+| `invalid_topic_cards` | 注册表 `卡:` 非法值（`title` / `card` / `reason`） | 文本节 + 快照 + 审计页 |
 | `exec_status` | 本轮 issue_id → 最新执行事件（`event`/`identity`/`note`） | 文本节 |
 | `verified` | 本轮被复审封口的 issue_id | 文本节 + 快照 |
 | `reconciled_proposals` | 提案结案补记条数 | 文本节 |
@@ -217,7 +219,7 @@ memory_audit() -> str
 | `git` | git 快照状态行 | 文本节末尾 |
 | `audit_file` | 本次审计快照路径（`journal/audit/<日期>.md`） | 文本节末尾 |
 
-> 文本输出是**逐字段手写**的（不是 dict 自动序列化），所以键存在 ≠ 文本里有对应节：目前 `invalid_topic_cards` 只落在审计快照小节里，MCP 文本与 WebUI 审计页都看不到它——需要这一项时请读快照文件；`quarantined_index_rows` 三处都有。
+> 文本输出是**逐字段手写**的（不是 dict 自动序列化），所以键存在 ≠ 文本里有对应节。`invalid_topic_cards` 与 `quarantined_index_rows` 现均三处展示：MCP 文本 `== 非法主题卡 ==` 节 / WebUI 审计页红色告警（n-alert error）/ 审计快照小节。
 
 修复建议都内联在输出里。发现即展示，**系统不做任何自动删除或失效**。自愈涉及的外部改动统一以 `external: self-healed N note(s)` 快照入库，保持 git-clean 不变式（输出末尾附 git 快照状态行与当次审计快照路径 `journal/audit/<日期>.md`——每日一份、同日复审追加；过期快照由 curator 按 `audit_retention_days` 清理）。
 
@@ -268,7 +270,7 @@ abstract 现状变了？     → topic_status 同步注册表现状行（一句�
 ## 9. topic_list
 
 ```
-topic_list() -> str
+topic_list(tag: str = "") -> str
 ```
 
 列出当前注册的全部长期记忆主题（标题、一句话现状、主题卡路径、标签）。免注册区（journal/、archive/、curator/）单列说明。
@@ -336,7 +338,7 @@ topic_unregister(title: str) -> str
 memory_context() -> str
 ```
 
-**每次会话开始先调用**。返回核心记忆上下文 = 接入契约版本头 + `TOPICS.md` 注册表全文 + 各主题卡摘要头（前 12 行）+ identity 专属必读（携带 token 时自动注入 `agents/<agent>/必读.md` 与 `agents/<agent>/<device>/必读.md`，未创建时给写入模板；见 §0）。解决冷启动失忆：agent 不必"想到去搜什么"，主题体系直接在场。
+**每次会话开始先调用**。返回核心记忆上下文 = 接入契约版本头 + `TOPICS.md` 注册表全文 + 各主题卡摘要头（前 12 行）+ identity 专属必读（携带 token 时自动注入 `agents/<agent>/shared/必读.md` 与 `agents/<agent>/<device>/必读.md`，未创建时给写入模板；见 §0）。解决冷启动失忆：agent 不必"想到去搜什么"，主题体系直接在场。
 
 **版本头**（2026-09-19 增补）：形如 `[yacmemo 接入契约 v0.1.3——与你本地记录的版本不一致时，调用 integration_check(onboarded_version="<你的版本>") 自主更新]`。agent 把接入时依据的契约版本记在本地接入提示词里，每次会话开始比对，落后即自主更新（见 §17）。
 
@@ -431,7 +433,7 @@ integration_check(onboarded_version="0.1.2")
 2. **发现**：`memory_context` 头部随身携带当前契约版本，每次会话开始自然比对；
 3. **更新**：版本落后时调用本工具，返回**增量变更**（逐版本条目）+ **写入约定速览全文**——agent 据此刷新本地提示词并记录新版本，无需人工介入；
 4. 留空 `onboarded_version` 返回当前版本 + 全部记录在案的变更；声明版本比服务端还新则提示"可能连到了旧实例"；
-5. **契约版本独立于包版本**：只在 agent 可感知行为变化（工具语义、返回文案、写入约定）时前进，数据源在 `yacmemo/agent_changes.py`——改约定必须同步追加 `AGENT_CHANGELOG` 条目并前进版本号（有测试守护）。
+5. **变更必须留痕**：每笔 agent 可感知变化（工具语义、返回文案、写入约定）必须在 `AGENT_CHANGELOG` 写清增量，纯发包只记一句「无 agent 可感知语义变化」说明，版本号始终前进；数据源在 `yacmemo/agent_changes.py`（有测试守护）。
 
 ## Agent 决策树（更新）
 
@@ -440,7 +442,7 @@ integration_check(onboarded_version="0.1.2")
 契约版本落后          → integration_check(onboarded_version=...) → 自主更新本地提示词
 用户要新增长期记忆主题 → topic_register（仅用户明示时）→ 按返回模板写 topics/<主题>/ 目录内
 用户不再长期记录某主题 → topic_unregister（仅用户明示）→ 引导归位/清理
-用户说某项目翻篇了    → archive_topic（仅用户明示；检索保留、context 退出）
+用户说某项目翻篇了    → archive_topic（仅用户明示；对 MCP 客户端不可见、context 退出）
 用户要删某条记忆      → memory_delete（仅用户明示；git 可恢复）
 用户的画像/偏好变化了 → update_user_preference（按小节替换/追加）
 要记一个新主题？      → memory_search 查重 → memory_write（被拒转 edit）

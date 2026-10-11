@@ -57,7 +57,7 @@
             <n-space justify="space-between" align="center" :wrap="false">
               <n-space align="center" :size="8" :wrap="false">
                 <n-tag size="tiny" :type="r.ok ? 'success' : 'error'">{{ r.ok ? '✓' : '✗' }}</n-tag>
-                <n-text depth="2" style="font-size: 12px">{{ r.user }}</n-text>
+                <n-text depth="2" style="font-size: 12px">{{ r.user_id }}</n-text>
                 <n-text style="font-size: 13px">{{ r.tool }}</n-text>
                 <n-text depth="3" style="font-size: 12px">{{ r.summary }}</n-text>
               </n-space>

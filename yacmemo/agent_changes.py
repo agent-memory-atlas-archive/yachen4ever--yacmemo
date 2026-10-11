@@ -45,6 +45,26 @@ AGENT_CONTRACT_VERSION = _package_version()
 
 # 版本 -> 该版本里 agent 需要知道的变化（措辞可直接执行）
 AGENT_CHANGELOG: dict[str, str] = {
+    "0.3.18": (
+        "- 安全收口（深度审计 0.3.17 代码面）：memory_read 的相关笔记现在"
+        "对**链接与向量两条路**都执行 identity 边界——此前 wiki-link 分支"
+        "漏检，其他专属区的路径+首条 observation 会经 [[链接]] 外泄；"
+        "memory_search 的 ⚠ 撞车提示同理：对方不可见（其他专属区/已归档）"
+        "时只报「存在疑似重复」，不再携带对方标题与原文；\n"
+        "- D2 处置持久化：人已 resolved/dismissed 的撞车对不再被编辑或 "
+        "reindex 以 open 复活（内容不变即持续有效；内容变了算新证据照常"
+        "入库）；reindex 返回新增 restored_dispositions 计数；\n"
+        "- 写入防护：memory_write/memory_edit/memory_edit_section 的内容"
+        "含以 [正文开始/[正文结束 开头的行时，返回文本会追加 ⚠ 提示（该类"
+        "行干扰 memory_read 的正文边界）；move 目标有陈旧索引行时给出明确"
+        "拒绝（先 memory_audit 自愈或 reindex 再移动）；edit 多行锚点重复"
+        "命中时行号提示不再为空；\n"
+        "- WebUI（agent 不直连，一并收口）：保存冲突检测（409+强制覆盖）、"
+        "配置 api_key 掩码、无密码模式拒域名 Host 与非 JSON 写请求、归档"
+        "确认文案对齐 0.3.17 口径、三个页面级运行时崩溃修复、markdown 渲染"
+        "统一 DOMPurify 消毒；\n"
+        "- 工具语义无其他变化。"
+    ),
     "0.3.17": (
         "- 归档笔记（archive/）对客户端不可见：memory_search / memory_list / "
         "memory_read 的相关笔记都不再出现 archive/ 下的内容；按标题解析也"

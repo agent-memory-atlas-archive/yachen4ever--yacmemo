@@ -62,7 +62,8 @@
                   <n-layout-content class="app-content">
                     <DashboardPage v-if="activePage === 'dashboard'" :build="build"
                       @navigate="onDashboardNavigate" />
-                    <TopicsPage v-else-if="activePage === 'topics'" :user="currentUser" />
+                    <TopicsPage v-else-if="activePage === 'topics'" :user="currentUser"
+                      :focus-note="focusNote" />
                     <SearchPage v-else-if="activePage === 'search'" :user="currentUser" />
                     <AuditPage v-else-if="activePage === 'audit'" :user="currentUser" />
                     <ProfilePage v-else-if="activePage === 'profile'" :user="currentUser" />
@@ -116,6 +117,17 @@ import { t, locale, setLocale } from './composables/i18n.js'
 const build = __BUILD__
 
 const activePage = ref('dashboard')
+const focusNote = ref('')
+
+// #note=<path> 深链：搜索页"打开笔记"跳 /ui/#note=…——此前全前端无任何
+// hash 处理，点了没反应（2026-10-11 审计 P2）
+function consumeHash() {
+  const m = (window.location.hash || '').match(/^#note=(.+)$/)
+  if (m) {
+    focusNote.value = decodeURIComponent(m[1])
+    activePage.value = 'topics'
+  }
+}
 const collapsed = ref(false)
 const currentUser = ref('')
 const users = ref([])
@@ -178,7 +190,10 @@ function onUserChange(val) {
   currentUser.value = val
 }
 
+window.addEventListener('hashchange', consumeHash)
+
 onMounted(async () => {
+  consumeHash()
   try {
     const data = await api('/api/overview')
     users.value = data.users.map(u => u.id)

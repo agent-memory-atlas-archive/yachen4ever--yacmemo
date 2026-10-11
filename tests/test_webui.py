@@ -111,9 +111,10 @@ def test_webui_collision_resolve(http_server, tmp_path):
 
     r = httpx.post(f"{base}/audit")
     a = r.json()["audit"]
-    row = next((c for c in a["collisions"] if c["id"] == cid), None)
-    if row is not None:  # dismissed rows only show with status filter; open list must not contain it
-        assert row["status"] != "open"
+    # dismissed 行不得出现在审计默认列表——断言必须无条件成立：
+    # 旧写法把断言包在 if row is not None 里，处置失效时断言被静默跳过（假绿）
+    assert next((c for c in a["collisions"] if c["id"] == cid), None) is None, \
+        "已 dismissed 的撞车对不应再出现在审计列表"
 
 
 def test_usage_logged_for_mcp_calls(http_server, tmp_path):
@@ -524,3 +525,69 @@ def test_webui_user_delete_removes_empty_dedicated_parent(http_server, tmp_path)
     assert not (tmp_path / "users-dir").exists()        # 空的专属父目录一并收尾
     # 非空父目录不受影响（config.toml 仍在 tmp_path 下）
     assert (tmp_path / "config.toml").is_file()
+
+
+def test_webui_search_keeps_archive_visible(http_server):
+    """0.3.18：WebUI 检索走 searcher 默认 include_archived=True——人的视野
+    不受归档隐形影响（给 handler 误加 include_archived=False 时这里红）。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    httpx.post(f"{base}/notes", json={
+        "title": "notes/归档可见性", "content": "# 归档可见性\n\n- [配置] 归档可见性检查点\n"})
+    r = httpx.post(f"{base}/note/archive", json={"path": "notes/归档可见性.md"})
+    assert r.json()["ok"] is True
+    r = httpx.get(f"{base}/search", params={"q": "归档可见性检查点"})
+    paths = [x["path"] for x in r.json()["results"]]
+    assert any(p.startswith("archive/") for p in paths)
+
+
+def test_note_save_conflict_409_and_force(http_server):
+    """0.3.18：保存冲突检测——expected_hash 不匹配返 409+conflict，
+    force=true 越过；此前双开标签页是静默 last-write-wins。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    httpx.post(f"{base}/notes", json={"title": "notes/冲突页", "content": "# 冲突页\n\n- v1\n"})
+    g = httpx.get(f"{base}/note", params={"path": "notes/冲突页.md"})
+    h = g.json()["hash"]
+    assert h, "note_get 必须返回 hash 供冲突检测"
+    httpx.put(f"{base}/note",
+              json={"path": "notes/冲突页.md", "content": "# 冲突页\n\n- v2\n"})
+    r = httpx.put(f"{base}/note",
+                  json={"path": "notes/冲突页.md", "content": "# 冲突页\n\n- v3\n",
+                        "expected_hash": h})
+    assert r.status_code == 409 and r.json()["conflict"] is True
+    r = httpx.put(f"{base}/note",
+                  json={"path": "notes/冲突页.md", "content": "# 冲突页\n\n- v3\n",
+                        "expected_hash": h, "force": True})
+    assert r.json()["ok"] is True
+
+
+def test_config_structured_masks_api_key(http_server):
+    """0.3.18：api_key 明文不进浏览器——GET 回掩码，保存端把掩码值视为
+    未改动（base_url 照常更新、api_key 保持原值）。"""
+    base = f"http://127.0.0.1:{http_server}/api"
+    r = httpx.get(f"{base}/config/structured")
+    emb = r.json()["embedding"]
+    assert emb["api_key"] == "" or "••••" in emb["api_key"]
+    r = httpx.post(f"{base}/config/structured",
+                   json={"embedding": {"base_url": "http://x:1",
+                                       "api_key": emb["api_key"]}})
+    assert r.json()["ok"] is True
+    r2 = httpx.get(f"{base}/config/structured")
+    assert r2.json()["embedding"]["base_url"] == "http://x:1"
+
+
+def test_user_add_rejects_overlong_id(http_server):
+    """0.3.18：user_add 校验与 load_config 对齐（≤32）——超长 id 写进
+    config.toml 后重启即 ValueError，服务起不来。"""
+    base = f"http://127.0.0.1:{http_server}/api"
+    r = httpx.post(f"{base}/users/add",
+                   json={"id": "a" * 33, "root": "/tmp/yacmemo-a33"})
+    assert r.json()["ok"] is False
+
+
+def test_post_rejects_non_json_body(http_server):
+    """0.3.18：跨站 no-cors 表单发不出 application/json——带体的 POST
+    非 JSON 一律 415（LAN 信任模式的 CSRF 面）。"""
+    base = f"http://127.0.0.1:{http_server}/api/alice"
+    r = httpx.post(f"{base}/notes", content="path=x&content=y",
+                   headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert r.status_code == 415

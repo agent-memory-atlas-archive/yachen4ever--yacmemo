@@ -1,7 +1,7 @@
 {
   "name": "yacmemo-webui",
   "private": true,
-  "version": "0.3.17",
+  "version": "0.3.18",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "dompurify": "^3.4.16",
     "marked": "^14.0.0",
     "naive-ui": "^2.40.0",
     "vue": "^3.5.0"

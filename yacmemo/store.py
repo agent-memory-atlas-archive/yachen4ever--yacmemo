@@ -67,8 +67,13 @@ ARCHIVE_DIR = "archive"
 
 
 def in_archive_zone(rel: str) -> bool:
-    """rel 是否落在归档区（archive/ 或其子树）。"""
-    r = (rel or "").strip()
+    """rel 是否落在归档区（archive/ 或其子树）。
+
+    与 in_agents_zone 同款折大小写：macOS/Windows 文件系统大小写不敏感，
+    `Archive/` 在盘上就是 `archive/`——字符串精确比对会对它放行，归档
+    隐形被大小写变体绕过。折成"在区内"只可能更严（大小写敏感文件系统上
+    一个真叫 `Archive/` 的普通目录会对客户端隐藏），方向安全。"""
+    r = (rel or "").strip().lower()
     return r == ARCHIVE_DIR or r.startswith(ARCHIVE_DIR + "/")
 
 
@@ -82,6 +87,23 @@ _DRIVE_RE = re.compile(r"^[A-Za-z]:")
 # 时，拒绝消息要能直接点破（2026-09-16 TeleAgent 连续 4 次 edit 失败的根因）
 _READ_DECOR_MARKERS = ("[正文开始", "[正文结束", "相关笔记", "(path: ",
                        "(vector)", "(via: ")
+# 写入侧防混淆只盯两个块标记：正文里出现以其开头的行会让 memory_read 的
+# [正文开始]/[正文结束] 边界失真（agent 的块提取从第一个假边界截断）。
+# "相关笔记"/"(path: " 这类行内装饰是正常中文/链接文本，不设写入门槛。
+_READ_BLOCK_MARKERS = ("[正文开始", "[正文结束")
+
+
+def _has_read_block_marker(text: str) -> bool:
+    """text 是否含以块标记开头的行（edit/edit_section/save/write 的提示信号）。"""
+    return any(ln.startswith(_READ_BLOCK_MARKERS) for ln in text.splitlines())
+
+
+def _collision_key(a_path: str, b_path: str, a_text: str, b_text: str) -> tuple:
+    """撞车对规范键：路径按序对齐、texts 随路径换位——与
+    IndexDB.suppressed_collision_keys 同一规则，两处必须一致。"""
+    if a_path <= b_path:
+        return (a_path, b_path, a_text, b_text)
+    return (b_path, a_path, b_text, a_text)
 
 
 def _log_safe(value: object) -> str:
@@ -134,7 +156,19 @@ class AnchorError(StoreError):
 class Store:
     # Methods serialized under the instance lock: the HTTP server runs tools
     # in a threadpool, and mutating ops must not interleave.
-    _MUTATING = ("write", "edit", "edit_section", "move", "read", "audit", "reindex")
+    _MUTATING = (
+        # 文件+索引双写的主链路
+        "write", "edit", "edit_section", "save", "delete_note", "move",
+        "read", "audit", "reindex",
+        # 主题注册表 / 归档 / 处置表：同样落盘+改索引（2026-10-11 审计 B4：
+        # save/delete_note 此前不在名单，WebUI 编辑与持锁的 edit/audit 交错
+        # 可丢更新，audit 采样与未锁删除竞态可让审计整体失败）
+        "topic_register", "topic_unregister", "topic_status", "topic_tag",
+        "tag_rename", "tag_delete", "archive_topic",
+        "note_archive", "note_unarchive",
+        "record_audit_action", "record_proposal_action", "audit_exec_report",
+        "update_preference",
+    )
 
     def __init__(self, config: Config, db: IndexDB,
                  emb: EmbeddingClient | None = None,
@@ -443,11 +477,18 @@ class Store:
         # 带回，agent 要等到下次审计才知道自己制造了语义撞车
         new_cols = [c for c in self.db.collisions_for(rel, "open")
                     if c["b_path"] == rel]
+        # 对方路径遵守 identity 边界：撞上其他专属区的笔记时不外泄路径
+        cols_out = []
+        for c in new_cols:
+            other = c["a_path"]
+            if not visible(other, identity):
+                other = "（其他专属区笔记，路径不显示）"
+            cols_out.append({"with_path": other,
+                             "score": c["score"], "text": c["b_text"]})
         self.snapshots.commit(f"write: {rel}")
         return {"path": rel, "forced": bool(conflicts and force),
-                "new_collisions": [{"with_path": c["a_path"],
-                                    "score": c["score"],
-                                    "text": c["b_text"]} for c in new_cols]}
+                "marker_warning": _has_read_block_marker(content),
+                "new_collisions": cols_out}
 
     # ------------------------------------------------------------------ read
 
@@ -492,6 +533,12 @@ class Store:
                                  "已拒绝读取（不给出路径与内容）；"
                                  "详见 memory_audit 的 quarantined_index_rows")})
                     continue
+                # 相关笔记同样遵守 identity 边界（与下方向量分支同款；2026-10-11
+                # 审计 B1：链接分支此前漏检，其他专属区的路径+首条 observation
+                # 会经 [[链接]] 外泄）。不可见时静默跳过——报 missing 或给路径
+                # 都算泄漏存在性。
+                if not visible(trel, identity):
+                    continue
                 first_obs = self._first_observation(trel)
                 related.append({"title": link, "path": target["path"],
                                 "via": "link", "note": first_obs or ""})
@@ -525,8 +572,15 @@ class Store:
         abs_path = self.root / rel
         content = abs_path.read_text(encoding="utf-8")
 
-        positions = [i + 1 for i, line in enumerate(content.splitlines())
-                     if old_string in line]
+        if "\n" in old_string:
+            # 多行锚点永远匹配不到单行，逐行 in 扫描恒得空行号——按字符偏移折行号
+            positions, off = [], content.find(old_string)
+            while off != -1:
+                positions.append(content.count("\n", 0, off) + 1)
+                off = content.find(old_string, off + 1)
+        else:
+            positions = [i + 1 for i, line in enumerate(content.splitlines())
+                         if old_string in line]
         n = content.count(old_string)
         if n == 0:
             raise AnchorError(
@@ -543,6 +597,7 @@ class Store:
         self.snapshots.commit(f"edit: {rel}")
         return {"path": rel, "title": title,
                 "before_hash": content_hash(content),
+                "marker_warning": _has_read_block_marker(new_string),
                 "cleared_collisions": self._last_cleared_collisions}
 
     def _edit_miss_hint(self, content: str, old: str) -> str:
@@ -617,14 +672,26 @@ class Store:
         wanted = (heading or "").strip()
         targets: list[tuple[int, int]] = []
         available: list[str] = []
+
+        def _toggle_fence(line: str, cur: str | None) -> str | None:
+            """围栏开合状态机：``` / ~~~ 行翻转（开与闭必须同符）。"""
+            s = line.lstrip()
+            if s.startswith("```") or s.startswith("~~~"):
+                mark = s[:3]
+                return None if cur == mark else (cur or mark)
+            return cur
+
+        fence: str | None = None
         for i, line in enumerate(lines):
-            m = _HEADING_RE.match(line)
-            if not m:
-                continue
-            text = m.group(2).strip()
-            available.append(text)
-            if text == wanted:
-                targets.append((i, len(m.group(1))))
+            if fence is None:
+                m = _HEADING_RE.match(line)
+                if m:
+                    text = m.group(2).strip()
+                    available.append(text)
+                    if text == wanted:
+                        targets.append((i, len(m.group(1))))
+            # 围栏行自身不会是标题行，先判标题再翻转与"围栏内 # 不算标题"等价
+            fence = _toggle_fence(line, fence)
 
         if not targets:
             raise StoreError(
@@ -639,11 +706,16 @@ class Store:
 
         idx, level = targets[0]
         end = len(lines)
+        fence = None
         for j in range(idx + 1, len(lines)):
-            m = _HEADING_RE.match(lines[j])
-            if m and len(m.group(1)) <= level:
-                end = j
-                break
+            if fence is None:
+                m = _HEADING_RE.match(lines[j])
+                if m and len(m.group(1)) <= level:
+                    end = j
+                    break
+            # 小节终点同样不感知围栏会把代码示例里的伪标题当边界（2026-10-11
+            # 审计 P2：替换体会吞掉闭合 ```，后续小节全部错位）
+            fence = _toggle_fence(lines[j], fence)
 
         body = (new_content or "").strip("\n")
         if body:
@@ -666,13 +738,16 @@ class Store:
         self.snapshots.commit(f"edit: {rel}")
         return {"path": rel, "heading": wanted,
                 "before_hash": content_hash(content),
+                "marker_warning": _has_read_block_marker(body),
                 "cleared_collisions": self._last_cleared_collisions}
 
     def save(self, path: str, content: str) -> dict:
         """Create-or-overwrite by exact path (WebUI editor, curator reports).
         Title follows the first `#` heading; index fully resynced."""
         rel = self._norm_rel(path)
-        if not rel.endswith(".md"):
+        # 大小写不敏感判定：save("x.MD") 此后会落成 x.MD.md 双扩展名（与
+        # title_to_path 的大小写不敏感剥离口径不一）；保留用户给的原扩展名
+        if not rel.lower().endswith(".md"):
             rel += ".md"
         abs_path = self.root / rel
         if not abs_path.is_file():
@@ -688,7 +763,8 @@ class Store:
         title = self._title_from_content(rel, content) or old_title
         self._index_note(rel, title, content)
         self.snapshots.commit(f"save: {rel}")
-        return {"path": rel, "title": title, "before_hash": before_hash}
+        return {"path": rel, "title": title, "before_hash": before_hash,
+                "marker_warning": _has_read_block_marker(content)}
 
     def delete_note(self, path: str,
                     identity: Identity | None = None) -> dict:
@@ -724,13 +800,20 @@ class Store:
         old_rel = self.resolve(path)
         self._require_agents_write(old_rel, identity)
         new_rel = self._norm_rel(new_path, what="目标路径")
-        if not new_rel.endswith(".md"):
+        if not new_rel.lower().endswith(".md"):
             new_rel += ".md"
         if new_rel == old_rel:
             raise StoreError("目标路径与原路径相同。")
         new_abs = self.root / new_rel
         if new_abs.exists():
             raise StoreError(f"目标已存在: {new_rel}")
+        if self.db.get_note(new_rel) is not None:
+            # 文件已不在盘上但索引行还在（外部删除后审计未跑）：rename 成功、
+            # move_note 才撞主键，现场是裸 IntegrityError + 索引失配（2026-10-11
+            # 审计 P2）。提前拒绝并指出出口。
+            raise StoreError(
+                f"目标已存在陈旧索引行: {new_rel}（文件可能已被外部删除）——"
+                "先跑 memory_audit 自愈或 WebUI reindex 清理索引后再移动。")
         # A move that lands outside every registered topic is stray creation
         # by another name; archive_topic() lands in archive/ and is exempt.
         self._require_agents_write(new_rel, identity)
@@ -982,16 +1065,20 @@ class Store:
         dest = f"{dest_dir}/{posixpath.basename(rel)}"
         if (self.root / dest).exists():
             raise StoreError(f"归档目标已存在: {dest}")
+        # 先 move 后写状态行：reason 写入若先于 move，move 失败会留下"源文件
+        # 已改、索引与快照没有"的半改状态
+        self.move(rel, dest, identity=identity)
         if reason.strip():
-            abs_p = self.root / rel
+            abs_p = self.root / dest
             lines = abs_p.read_text(encoding="utf-8").splitlines()
             note = (f"> 状态：已归档（{date.today().isoformat()}）——{reason.strip()}")
             pos = 1 if (lines and lines[0].lstrip().startswith("#")) else 0
-            lines.insert(pos, "\n" + note)
+            # H1 后空一行再插状态行；无 H1（含空文件）时状态行就是首行，不加前导空行
+            lines.insert(pos, note if pos == 0 else "\n" + note)
             abs_p.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            self._index_note(rel, self._title_of(rel),
+            self._index_note(dest, self._title_of(dest),
                              abs_p.read_text(encoding="utf-8"))
-        self.move(rel, dest, identity=identity)
+            self.snapshots.commit(f"archive: {dest}")
         return {"archived": rel, "to": dest, "topic": t["title"]}
 
     def note_unarchive(self, path: str,
@@ -2120,6 +2207,15 @@ class Store:
     # ------------------------------------------------------------------ reindex
 
     def reindex(self) -> dict:
+        # 人类对 D2 的处置（resolved/dismissed）不因重建蒸发：clear_all 会
+        # 清空 collisions，重检出恒为 open + 新 id，audit_actions 里
+        # D2:<id> 的处置记录随之脱钩（2026-10-11 审计 B5）。循环内用预取的
+        # 抑制集挡住重检出（_index_note 照常 remove+重检，会吃掉先回填的
+        # 行），全部重建完再按原 id 回填处置对。
+        preserved = [c for c in self.db.list_collisions() if c["status"] != "open"]
+        suppressed = {_collision_key(c["a_path"], c["b_path"],
+                                     c["a_text"], c["b_text"])
+                      for c in preserved}
         self.db.clear_all()
         if self.vectors:
             self.vectors.wipe()
@@ -2129,11 +2225,14 @@ class Store:
             try:
                 content = p.read_text(encoding="utf-8")
                 title = self._title_from_content(rel, content)
-                self._index_note(rel, title, content)
+                self._index_note(rel, title, content, suppressed_keys=suppressed)
                 count += 1
             except Exception as e:
                 failed.append({"path": rel, "error": str(e)})
-        return {"indexed": count, "failed": failed}
+        if preserved:
+            self.db.restore_collisions(preserved)
+        return {"indexed": count, "failed": failed,
+                "restored_dispositions": len(preserved)}
 
     # ------------------------------------------------------------------ internals
 
@@ -2175,8 +2274,12 @@ class Store:
         self.db.put_cached_vector(chash, vec)
         return vec
 
-    def _index_note(self, rel: str, title: str, content: str):
-        """Synchronously sync every index for one note. File must be written already."""
+    def _index_note(self, rel: str, title: str, content: str,
+                    suppressed_keys: set | None = None):
+        """Synchronously sync every index for one note. File must be written already.
+
+        suppressed_keys：调用方预取的处置对规范键（reindex 全局传入）；
+        None 时按本笔记自查 DB（常规编辑路径）。"""
         chash = content_hash(content)
         self.db.upsert_note(rel, title, chash)
         self.db.fts_replace(rel, title, content)
@@ -2186,6 +2289,13 @@ class Store:
             return
         pre_open = len(self.db.collisions_for(rel))
         try:
+            if suppressed_keys is None:
+                suppressed_keys = self.db.suppressed_collision_keys(rel)
+            # 人已处置（resolved/dismissed）的撞车对在删除前取出规范键：
+            # remove_collisions_involving 不分状态全删，随后 _d2_check 重检出
+            # 恒为 open + 新 id——没有这个抑制集，任何一次编辑都会把人的
+            # "忽略"判断打回待办（reindex 的 restore 也依赖同一套键）。
+            suppressed = suppressed_keys
             # Stale vectors/collisions from a previous version of this note
             # must go before re-adding (obs ids are content-addressed, so
             # changed observation lines would otherwise leave orphans).
@@ -2218,7 +2328,7 @@ class Store:
                 vec = self._embed_cached(obs["text"])
                 obs_vecs.append(vec)
                 self.vectors.upsert_obs_vector(rel, obs["text"], vec)
-            self._d2_check(rel, obs_list, obs_vecs)
+            self._d2_check(rel, obs_list, obs_vecs, suppressed)
             self.db.set_vector_ok(rel, True)
             _settle()
         except Exception as e:
@@ -2229,8 +2339,13 @@ class Store:
             logger.warning("Vector indexing failed for %s: %s",
                            _log_safe(rel), _log_safe(e))
 
-    def _d2_check(self, rel: str, obs_list: list[dict], obs_vecs: list[list[float]]):
-        """Incremental D2: compare new observations against existing ones."""
+    def _d2_check(self, rel: str, obs_list: list[dict], obs_vecs: list[list[float]],
+                  suppressed: set[tuple] = frozenset()):
+        """Incremental D2: compare new observations against existing ones.
+
+        suppressed 是人已处置（resolved/dismissed）撞车对的规范键集——同内容
+        再检出不入库，人的"忽略/已合并"判断不因重索引或编辑复活；内容变了
+        （obs 文本不同）就是新证据，照常入库。"""
         import numpy as np
 
         threshold = self.config.guard.collision_cosine_threshold
@@ -2253,8 +2368,11 @@ class Store:
                 denom = a_norm * (float(np.linalg.norm(other_vec)) or 1.0)
                 score = float(np.dot(a, other_vec) / denom)
                 if score >= threshold:
+                    a_text, b_text = hit.get("text", ""), obs["text"]
+                    if _collision_key(other_path, rel, a_text, b_text) in suppressed:
+                        continue
                     self.db.add_collision(
                         kind="obs", a_path=other_path, b_path=rel,
-                        a_text=hit.get("text", ""), b_text=obs["text"],
+                        a_text=a_text, b_text=b_text,
                         score=round(score, 3),
                     )
