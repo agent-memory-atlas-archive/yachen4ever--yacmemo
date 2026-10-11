@@ -184,7 +184,7 @@ LanceDB 两张向量表（沿用现有 `vector.py`，三表改两表，维度 10
 - 身份可配置：`[[users].git_user_name/git_user_email]` > `[memory].git_user_name/git_user_email]` > 默认 `<id>` / `<id>@yacmemo.com`；
 - 外部直接改文件（Obsidian/vim）由 `memory_audit` 自愈时统一以 `external:` 快照收编；
 - 降级语义：git 不可用/调用失败只跳过快照（warning 日志 + audit 输出 `== git ==` 行显示最近失败原因），**绝不阻塞记忆写入**；
-- 部署注意：systemd 服务默认无 HOME → git 读不到 global gitconfig 的 safe.directory 豁免 → dubious ownership 静默降级（2026-09-16 实测踩坑）；unit 需 `Environment=HOME=/root`，代码层另有 pwd 回填兑底；
+- 部署注意：systemd 服务默认无 HOME → git 读不到 global gitconfig 的 safe.directory 豁免 → dubious ownership 静默降级（2026-09-16 实测踩坑）；unit 需 `Environment=HOME=/root`，代码层另有 pwd 回填兜底；
 - 无远程：记忆仓库纯本地，远程备份（私有 remote / 定期 bundle）列为后续功能。
 
 ### 4.5 identity 层级与专属记忆（2026-09-24）
@@ -253,7 +253,7 @@ RRF 只用名次不用分数，避免两路分数量纲对齐问题。`kind` 参
 | `memory_list` | `path="", sort="name"\|"mtime"` | 目录树 / 最近变更 |
 | `memory_context` | — | **会话开始先调**：PROFILE 前置 + 注册表 + 活跃主题 abstract 摘要头（冷启动回顾） |
 | `topic_list` | `tag` | 列出活跃/已归档主题（分组，含标签；可按标签过滤） |
-| `topic_register` | `title, description, related` | 注册新主题（**仅用户明确要求**），创建 topics/<主题>/abstract.md |
+| `topic_register` | `title, description, related, tags` | 注册新主题（**仅用户明确要求**），创建 topics/<主题>/abstract.md |
 | `topic_tag` | `title, add, remove` | 主题标签增删（轻量可逆；响应带全库清单引导复用） |
 | `topic_status` | `title, status` | 更新注册表现状行（abstract 现状变化后同步） |
 | `topic_unregister` | `title` | 注销主题（**仅用户明确要求**；仅移出注册表，笔记不动，游离后裁决） |

@@ -75,7 +75,7 @@ vec_cache(content_hash PK, vector BLOB)                     -- float32 向量缓
 
 ### 4.2 向量通道
 
-查询文本 embed 后在 `note_vectors` 搜 top-limit，返回 path/title/rank。embedding 端点不可用时降级为空（hybrid 退化为 FTS-only），并经 `searcher.last_notice` 在 MCP 结果与 WebUI 搜索页输出降级提示——不再静默（2026-09-18 端点故障实测暴露的静默降级问题）。
+查询文本 embed 后在 `note_vectors` 搜 top-limit，返回 path/title/rank。embedding 端点不可用时降级为空（hybrid 退化为 FTS-only），并经逐次返回的 notice（`searcher.last_notice` 仅为兼容保留）在 MCP 结果与 WebUI 搜索页输出降级提示——不再静默（2026-09-18 端点故障实测暴露的静默降级问题）。
 
 ### 4.3 RRF 融合
 

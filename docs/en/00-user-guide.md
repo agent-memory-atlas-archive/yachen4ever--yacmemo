@@ -44,7 +44,7 @@ Start and verify:
 
 ```bash
 uv run yacmemo-server --config config.toml
-curl http://127.0.0.1:9721/health     # → {"status":"ok","users":[...]}
+curl http://127.0.0.1:9721/health     # → {"status":"ok","version":"0.3.18","users":[...]}
 ```
 
 For long-term use, systemd is recommended (see [05-deployment.md](05-deployment.md) §1.3).
@@ -230,12 +230,14 @@ root = "/srv/yacmemo/user2/memory"
 
 Open `http://debsvc.local:9721/ui/` in a browser (bundled with the server, nothing to install; with `[server].base_path` configured it is `https://<host>/<base_path>/ui/`, while the old direct address keeps working):
 
-- **Notes**: browse by user in the left-hand list; the body renders as markdown; "Edit" modifies the source file directly and syncs the index; "＋" creates a new note (the near-duplicate-title guard applies here too; if rejected, tick "Force" and save again — clicking the button on the web page counts as the human confirmation; **a note whose title is exactly identical to an existing one is always refused** — update it via "Edit" instead, `force` does not override this); "Delete" also cleans the index (still recoverable from git);
+- **Topics**: browse all notes in a per-topic tree (including the "single-note archive" and "system files" groups); the body renders as markdown; "Edit" modifies the source file directly and syncs the index; "Delete" also cleans the index (still recoverable from git); tag management (rename/delete apply library-wide); **there is no UI entry for creating notes** — use MCP `memory_write` (stricter guards) or create files in Obsidian and let the audit self-heal them into the index;
 - **Search**: manually verify retrieval quality anytime; supports switching between the hybrid/fts/vector channels; ⚠ markers are directly visible; clicking a result jumps to the note;
 - **Audit**: dual mode — "Deterministic Audit" for quick self-healing + rule detection (duplicate titles/semantic collisions/dangling links/stray files), "Deep Review" produces a proposal report from the configured LLM; both areas run the full workflow: each issue/proposal carries a status tag (pending/executing/executed/verified/dismissed), filters by status, and an expandable agent execution timeline; a human makes exactly two judgments — "Ignore" a false positive, or "Copy Execution Instruction" to dispatch an agent; issues an agent fixed are verified automatically on the next audit;
 - **Usage Log**: a usage log of every MCP tool call **and every WebUI console change** (save/create/delete/profile edits, client marked as `webui`) — time, user, tool, content summary, client UA, IP, duration, pre-change content hash. The most important page to watch during the trial period: which clients are active, what they called, what they wrote, whether anything errored;
-- **Health**: embedding configuration status, per-user note counts/collision counts/guard statistics, the **topic memory overview table**, curator proposal counts, client inventory, call volumes and error counts over the last 14 days;
-- **Settings**: online config.toml editing (users / embedding model / curator LLM) — auto-validated and backed up before saving, with an optional service restart.
+- **Dashboard** (default landing page): service/Embedding/Curator status cards + per-user note counts/collision counts/guard stats/last audit + a cross-user recent-activity stream + the **topic memory overview**;
+- **Profile**: view and edit the user profile & preferences (PROFILE.md) by section;
+- **Identities**: identity management (agent+device token list and creation);
+- **Settings**: online config.toml editing (users / embedding model / curator LLM) + the usage log (call traces and 14-day trend, client marked `webui`) — auto-validated and backed up before saving, with an optional service restart.
 
 For a full description of page functions and APIs, see [07-webui.md](07-webui.md).
 

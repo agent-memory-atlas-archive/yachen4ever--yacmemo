@@ -60,7 +60,7 @@ git clone <your-repo> yacmemo && cd yacmemo
 uv sync
 cp config.example.toml config.toml   # 填 embedding 端点与各用户 root
 uv run yacmemo-server --config config.toml
-curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["user2","yachen"]}
+curl http://127.0.0.1:9721/health    # → {"status":"ok","version":"0.3.18","users":["user2","yachen"]}
 ```
 
 浏览器打开 `http://debsvc.local:9721/ui/` 就是自带的管理控制台（仪表盘 / 主题 / 搜索 / 审计 / 画像 / 身份 / 设置，侧边栏底部展示版本号与 commit），详见 [docs/07-webui.md](docs/07-webui.md)。前端需先构建：本机一条命令 `scripts/deploy_webui.sh`（构建 + scp 到 debsvc，需 Node 18+），或分步 `scripts/build_webui.sh` 后手动 scp（见部署文档）。
@@ -103,7 +103,7 @@ codex mcp add yacmemo --url http://debsvc.local:9721/yachen/mcp
 | `topic_status` | 更新注册表主题「现状」行（一句话定位；abstract 现状变化后同步，防止注册表停留在注册时快照） |
 | `topic_register` | 注册新主题（**仅在用户明确要求时调用**，如"把 X 加入长期记忆"），创建 topics/<主题>/abstract.md；成功返回可复制的写入模板 |
 | `topic_unregister` | 注销主题（**仅用户明示**，仅移出注册表，笔记不动，游离后裁决） |
-| `archive_note` | 归档主题内单篇笔记（**仅用户明示**）：移入 `archive/<主题名>/`，`reason` 可选写入头部状态行；abstract 不可单独归档，归档后对 MCP 客户端不可见（检索/列表/相关笔记），WebUI 已归档分组可见 |
+| `archive_note` | 归档主题内单篇笔记（**仅用户明示**）：移入 `archive/<主题名>/`，`reason` 可选写入头部状态行；abstract 不可单独归档，归档后对 MCP 客户端不可见（检索/列表/相关笔记），WebUI 主题树「单篇归档」分组可见 |
 | `unarchive_note` | 取消单篇归档：按目录名反查活跃主题移回 `topics/<主题>/`（自由归档目录报错） |
 | `archive_topic` | 归档主题（**仅用户明示**）：整个主题目录移入 archive/，对 MCP 客户端不可见（检索/列表/相关笔记），WebUI 已归档分组可见 |
 | `get_user_preference` | 读画像/偏好（PROFILE.md 功能层，全文或指定小节） |

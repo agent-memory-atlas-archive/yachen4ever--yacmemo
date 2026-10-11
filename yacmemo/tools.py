@@ -710,7 +710,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
                 return f"归档失败: {e}"
         return (f"已归档: {r['archived']} → {r['to']}\n"
                 f"归档后对客户端不可见（检索/列表/相关笔记不再出现，按归档路径"
-                f"显式读取仍可）；WebUI 已归档分组可见；取消归档用 unarchive_note。")
+                f"显式读取仍可）；WebUI 主题树「单篇归档」分组可见；取消归档用 unarchive_note。")
 
     @tool()
     def unarchive_note(path: str, ctx: Context = None) -> str:
@@ -736,7 +736,7 @@ def register_tools(mcp: FastMCP, store: Store, searcher: Searcher,
     @tool()
     def archive_topic(title: str, ctx: Context = None) -> str:
         """归档主题（仅在用户明确要求时调用，如"X 归档吧"）：abstract 移入 archive/，
-        注册表标记为已归档——检索仍可用，memory_context 不再注入，不计游离。
+        注册表标记为已归档——对客户端不可见（检索/列表），memory_context 不再注入，不计游离。
 
         Args:
             title: 主题名（与 topic_list 活跃列表中一致）

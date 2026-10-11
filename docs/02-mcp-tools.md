@@ -77,7 +77,7 @@ memory_read(path_or_title: str) -> str
 
 - 正文块内的文字是文件原文——`memory_edit` 的 `old_string` 必须从中**逐字复制**，勿凭记忆重打；
 - `[正文结束]` 之后的"相关笔记"是**工具附加信息，非文件内容**（不再用 `##` 标题语法，避免被误认为笔记小节）：
-  - `[[wiki-link]]` 目标存在的：列出标题 + 对方首条 observation（`via: link`）；
+  - `[[wiki-link]]` 目标存在的：列出标题 + 对方首条 observation（`via: link`）；内容含以 `[正文开始` / `[正文结束` 开头的行时返回文本追加 ⚠ 提示（0.3.18，同 memory_write）；
   - 目标不存在的：标注"目标不存在"（agent 可顺手创建或清理）；
   - 目标在索引里、但**那一行的 `path` 越界**（被隔离，见 §7 的 `quarantined_index_rows`）：给一条**既没有 `path` 也没有 observation**、只带 `quarantined: true` 与原因的条目——坏行指向的路径与内容一律不外泄，只让调用方看见"这条链接背后有坏行"（2026-10-03 增补）。链接目标同样来自派生索引表，越界行不参与这一段的任何读取；
   - 语义近邻 top-2（`via: vector`，需要 embedding 端点）；
@@ -273,7 +273,7 @@ abstract 现状变了？     → topic_status 同步注册表现状行（一句�
 topic_list(tag: str = "") -> str
 ```
 
-列出当前注册的全部长期记忆主题（标题、一句话现状、主题卡路径、标签）。免注册区（journal/、archive/、curator/）单列说明。
+列出当前注册的全部长期记忆主题（标题、一句话现状、主题卡路径、标签）。免注册区（journal/、archive/、curator/、agents/）单列说明。
 
 - `tag` 参数可按标签过滤（如 topic_list(tag="工作")）；
 - 标签存于注册表 `- 标签:` 行（0-多个，视角归类用，不是状态）。

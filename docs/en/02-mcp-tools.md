@@ -53,7 +53,7 @@ Dual-channel retrieval + Reciprocal Rank Fusion (k=60, using only ranks, never s
 - **Degradation notice**: when the vector channel fails, the tool outputs `⚠ vector channel unavailable (reason); this round's results are FTS only` — "no relevant notes found" is no longer treated as an authoritative conclusion (the silent-degradation problem observed in the real 2026-09-18 endpoint outage).
 - **Settled proposals hidden** (added 2026-09-25): once every finding of a curator/ proposal report is executed or dismissed, a `> 状态：已结案` (settled) marker is stamped at the top of the file and search results no longer return it by default (with the notice "N settled proposal(s) hidden"); explicit `memory_read` still works — that is deliberate lookup. Never execute findings from a settled proposal.
 - **Archived notes hidden** (added 0.3.17): notes under `archive/` no longer appear in search results (with the notice "N archived note(s) hidden") — archiving is the human's filing layer, and agents must not keep citing archived content as live memory. WebUI search is unaffected; explicit `memory_read` by archive path still works.
-- **Warning masking** (added 0.3.18): collision warnings carry the other note's title and a 50-char excerpt — when the other side is invisible (another identity's zone; archived notes on this channel), the warning degrades to "a疑似 duplicate exists (target invisible)" without content.
+- **Warning masking** (added 0.3.18): collision warnings carry the other note's title and a 50-char excerpt — when the other side is invisible (another identity's zone; archived notes on this channel), the warning degrades to "a suspected duplicate exists (target invisible)" without content.
 
 Return format:
 
@@ -77,7 +77,7 @@ Return = `[正文开始 | path | 锚点提示]` + **verbatim body** + `[正文�
 
 - The text inside the body block is the file's original text — `memory_edit`'s `old_string` must be **copied verbatim** from it; do not retype from memory;
 - The "related notes" after `[正文结束]` are **tool-appended information, not file content** (no longer uses `##` heading syntax, to avoid being mistaken for note sections):
-  - For `[[wiki-link]]` targets that exist: lists the title + the other note's first observation (`via: link`);
+  - For `[[wiki-link]]` targets that exist: lists the title + the other note's first observation (`via: link`); content containing lines starting with `[正文开始` / `[正文结束` makes the return text append a ⚠ notice (0.3.18, same as memory_write);
   - For missing targets: annotated "target does not exist" (the agent can create or clean it up in passing);
   - When the target exists in the index but **that row's `path` is out-of-root** (quarantined, see `quarantined_index_rows` in §7): an entry carrying **neither a `path` nor an observation**, only `quarantined: true` plus the reason — the bad row's path and content are never disclosed, the caller just sees "this link sits on a bad row" (added 2026-10-03). Link targets come from the same derived index table, so an out-of-root row takes part in none of this section's reads;
   - Semantic nearest neighbors top-2 (`via: vector`, requires an embedding endpoint);
@@ -91,7 +91,7 @@ memory_write(title: str, content: str, force: bool = False,
              force_confirm: bool = False) -> str
 ```
 
-Creates a new note. `title` may include a directory prefix; **within a topic directory, write as `topics/<topic>/<note-name>`** (a missing `topics/` prefix is hard-blocked by the topic registry, and the block message provides the corrected title). The directory is only for archiving; **the note's title is the topic name with the directory stripped**. Filenames are sanitized by replacing illegal characters (`\ / : * ? " < > |`). **The registered index title shares one source with the on-disk path** (tightened in 0.3.17): a trailing `.md` in `title` is stripped before the extension is appended uniformly, so the registered title is always the filename stem — previously a `.md`-suffixed title got registered with the suffix, silently breaking read-by-title and `[[title]]` wiki-links (the openviking incident).
+Creates a new note. `title` may include a directory prefix; **within a topic directory, write as `topics/<topic>/<note-name>`** (a missing `topics/` prefix is hard-blocked by the topic registry, and the block message provides the corrected title). The directory is only for archiving; **the note's title is the topic name with the directory stripped**. Filenames are sanitized by replacing illegal characters (`\ / : * ? " < > |`). **The registered index title shares one source with the on-disk path** (tightened in 0.3.17): a trailing `.md` in `title` is stripped before the extension is appended uniformly, so the registered title is always the filename stem — previously a `.md`-suffixed title got registered with the suffix, silently breaking read-by-title and `[[title]]` wiki-links (the openviking incident). Content containing lines starting with `[正文开始` / `[正文结束` makes the return text append a ⚠ notice (0.3.18: such lines interfere with memory_read's body markers). — the same notice applies to memory_edit / memory_edit_section.
 
 **Create-only, never overwrite** (added 0.3.12; `force` not exempt): if the target path already exists (same rule for topics/, journal/ and archive/), the write is refused and the existing note is left untouched — update via `memory_edit` / `memory_edit_section`; to rebuild an entire note, `memory_delete` first (only at the user's explicit request). The same-name block runs **before** the near-duplicate title guard: the exact match is excluded from near-duplicate candidates by `exclude_path`, so without this block the message would only point at `-2`-style near-duplicates and miss the truly identically-named note.
 
@@ -273,7 +273,7 @@ Abstract status changed?     → topic_status to sync the registry status line (
 topic_list(tag: str = "") -> str
 ```
 
-Lists all currently registered long-term memory topics (title, one-sentence status, topic card path, tags). Registry-free zones (journal/, archive/, curator/) are listed separately with a note.
+Lists all currently registered long-term memory topics (title, one-sentence status, topic card path, tags). Registry-free zones (journal/, archive/, curator/, agents/) are listed separately with a note.
 
 - The `tag` parameter filters by tag (e.g. topic_list(tag="work"));
 - Tags live in the registry `- 标签:` line (0-N, for perspective grouping, not status).

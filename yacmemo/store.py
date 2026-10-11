@@ -549,7 +549,12 @@ class Store:
         if self.emb and self.vectors:
             try:
                 qv = self._embed_cached(f"{title}\n{content}")
-                for hit in self.vectors.search_note_vectors(qv, 3):
+                added = 0
+                # 文档承诺 top-2：多取候选（自身缺向量行时会挤占名额）、
+                # 命中数封顶——否则笔记自身向量缺失时会吐出 3 条近邻
+                for hit in self.vectors.search_note_vectors(qv, 4):
+                    if added >= 2:
+                        break
                     if hit["id"] not in seen_paths:
                         # 相关笔记同样遵守 identity 边界：其他专属区的笔记不出现
                         if not visible(hit["id"], identity):
@@ -558,6 +563,7 @@ class Store:
                                         "path": hit["id"], "via": "vector",
                                         "score": round(1 - hit["_distance"] / 2, 3)})
                         seen_paths.add(hit["id"])
+                        added += 1
             except Exception as e:
                 logger.warning("Related-vector lookup failed: %s", e)
 

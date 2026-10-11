@@ -137,13 +137,17 @@ PROFILE.md 的可视化编辑：左侧列出全部小节（身份 / 沟通风格
 | GET | `/api/{user}/notes` | `path` `sort` | 笔记列表（含 mtime/size） |
 | POST | `/api/{user}/notes` | `{title, content, force, force_confirm}` | 新建（走写路径守卫） |
 | GET | `/api/{user}/note` | `path` | 读取单篇（path 或标题） |
-| PUT | `/api/{user}/note` | `{path, content}` | 整篇保存（标题随首行标题） |
+| PUT | `/api/{user}/note` | `{path, content, expected_hash?, force?}` | 整篇保存（标题随首行标题）；带 expected_hash 时做保存冲突检测，不匹配返 409+`conflict`，`force:true` 越过 |
 | DELETE | `/api/{user}/note` | `path` | 删除（文件 + 全部索引） |
 | POST | `/api/{user}/note/archive` | `{path, reason?}` | 归档主题内单篇笔记（等价 MCP `archive_note`） |
 | POST | `/api/{user}/note/unarchive` | `{path}` | 取消单篇归档（等价 MCP `unarchive_note`） |
 | GET | `/api/{user}/profile` | `section` | 读取画像/偏好（全文或指定小节） |
 | PUT | `/api/{user}/profile` | `{section, content}` | 创建/替换画像小节（等价 `update_user_preference`，走写路径自动 git 快照） |
-| GET | `/api/{user}/search` | `q` `limit` `kind` | 检索（含 ⚠ warnings） |
+| GET | `/api/{user}/search` | `q` `limit` `kind` | 检索（含 ⚠ warnings 与 notice）
+| GET | `/api/config/structured` | — | 结构化配置读取（embedding/curator 表单值；api_key 回掩码） |
+| POST | `/api/config/structured` | `{embedding?, curator?, restart?}` | 结构化配置保存（掩码 api_key 视为未改动；原子写回） |
+| POST | `/api/config/test-embedding` | `{base_url, model, api_key?}` | 连通性测试（实调 /embeddings 回显延迟/维度） |
+| POST | `/api/config/test-curator` | `{base_url, model, api_key?}` | 连通性测试（实调 /chat/completions 回显回复） |
 | POST | `/api/{user}/audit` | — | 运行审计（含自愈，会改动索引）；返回 `audit_file`（本次快照路径） |
 | POST | `/api/{user}/reindex` | — | 全量重建索引（危险维护操作：运行指标一并清零），设置页「维护」卡片调用 |
 | GET | `/api/{user}/audit/last` | — | 最近一次审计结果（内存缓存，重启即失效） |
@@ -168,7 +172,7 @@ curl -s -X POST http://debsvc.local:9721/api/yachen/audit
 ## 四、使用日志（usage.db）
 
 - 位置：`[server].data_dir/usage.db`（默认 `data/usage.db`，相对服务启动目录）；
-- 表 `call_log`：`id / ts / user_id / client / ip / tool / summary / duration_ms / ok / error`；
+- 表 `call_log`：`id / ts / user_id / client / ip / tool / summary / duration_ms / ok / error / before_hash / identity`；
 - **滚动保留最近 2 万条**，无需维护；
 - 写入方：`tools.py` 在每次 MCP 工具调用后记录（stdio 调用 client 记为 `stdio`；HTTP 调用取请求 UA 与远端 IP）；
 - `ok` 语义：意外异常 = 0；守卫拒绝等业务结果 = 1（守卫行为另有 `guard_events` 表可查）。

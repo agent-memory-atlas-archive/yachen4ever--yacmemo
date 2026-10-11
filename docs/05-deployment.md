@@ -49,7 +49,7 @@ root = "/srv/yacmemo/user2/memory"
 mkdir -p /srv/yacmemo/yachen/memory /srv/yacmemo/user2/memory
 uv run yacmemo-server --config config.toml
 curl http://127.0.0.1:9721/health
-# → {"status":"ok","users":["user2","yachen"]}
+# → {"status":"ok","version":"0.3.18","users":["user2","yachen"]}
 ```
 
 ### 1.3 systemd 常驻
@@ -64,7 +64,7 @@ After=network-online.target
 WorkingDirectory=/srv/yacmemo
 # git 快照需要 HOME：systemd 默认不设，git 读不到 ~/.gitconfig 的
 # safe.directory 豁免，会对非本用户属主的 memory 目录报 dubious ownership
-# 导致快照静默降级（代码层已有 pwd 回填兑底，这里显式声明更稳）
+# 导致快照静默降级（代码层已有 pwd 回填兜底，这里显式声明更稳）
 Environment=HOME=/root
 ExecStart=/srv/yacmemo/.venv/bin/yacmemo-server --config /srv/yacmemo/config.toml
 Restart=on-failure

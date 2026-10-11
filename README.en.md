@@ -61,7 +61,7 @@ git clone <your-repo> yacmemo && cd yacmemo
 uv sync
 cp config.example.toml config.toml   # fill in the embedding endpoint and each user's root
 uv run yacmemo-server --config config.toml
-curl http://127.0.0.1:9721/health    # → {"status":"ok","users":["user2","yachen"]}
+curl http://127.0.0.1:9721/health    # → {"status":"ok","version":"0.3.18","users":["user2","yachen"]}
 ```
 
 Opening `http://debsvc.local:9721/ui/` in a browser gives you the built-in management console (dashboard / topics / search / audit / profile / identity / settings, with the version number and commit shown at the bottom of the sidebar); see [docs/en/07-webui.md](docs/en/07-webui.md) for details. The frontend must be built first: one command on the same machine, `scripts/deploy_webui.sh` (build + scp to debsvc, requires Node 18+), or step by step with `scripts/build_webui.sh` followed by a manual scp (see the deployment doc).
@@ -104,7 +104,7 @@ Agents on the same machine can also use stdio: `uv run yacmemo-mcp --root /path/
 | `topic_status` | Update a topic's registry "status" line (one-sentence positioning; sync after the abstract changes so the registry never lags behind) |
 | `topic_register` | Register a new topic (**call only when the user explicitly asks**, e.g. "add X to long-term memory"); creates topics/<topic>/abstract.md; on success returns a copyable write template |
 | `topic_unregister` | Unregister a topic (**only on explicit user instruction**; only removes it from the registry, notes untouched, adjudicated as strays afterwards) |
-| `archive_note` | Archive a single note inside a topic (**only on explicit user instruction**): moves it into `archive/<topic>/`, with `reason` optionally written into the header status line; an abstract cannot be archived on its own; after archiving it becomes invisible to MCP clients (search/list/related notes) and shows under the WebUI archived group |
+| `archive_note` | Archive a single note inside a topic (**only on explicit user instruction**): moves it into `archive/<topic>/`, with `reason` optionally written into the header status line; an abstract cannot be archived on its own; after archiving it becomes invisible to MCP clients (search/list/related notes) and shows under the WebUI topic tree's "single-note archive" group |
 | `unarchive_note` | Undo a single-note archive: reverse-looks-up the active topic by directory name and moves it back to `topics/<topic>/` (a free-form archive directory is an error) |
 | `archive_topic` | Archive a topic (**only on explicit user instruction**): the whole topic directory moves into archive/ — invisible to MCP clients (search/list/related notes), visible under the WebUI archived group |
 | `get_user_preference` | Read profile & preferences (PROFILE.md functional layer; full text or a specified section) |
