@@ -156,3 +156,25 @@ def test_warnings_mask_invisible_and_archived(store: Store, searcher: Searcher):
     j2 = " ".join(t2["warnings"])
     assert "机房.md" not in j2 and "24 摄氏度" not in j2
     assert "疑似重复" in j2
+
+
+def test_anonymous_search_never_sees_agents_zone(store: Store, searcher: Searcher):
+    """0.3.18 二轮审计 P1：ANONYMOUS（无 token）此前被 `agent != ""` 前置门
+    跳过过滤——agents/ 专属区路径与 ⚠ 原文对匿名会话裸奔。与
+    memory_list/memory_read/test_identity 同口径：ANONYMOUS 一律不可见。"""
+    from yacmemo.identity import ANONYMOUS, Identity
+    store.write("notes/公开撞车.md", "# 公开撞车\n\n- [撞车] VPN 并发连接数上限为 200 并公示\n")
+    store.write("agents/bob/r9000x/私密.md",
+                "# 私密\n\n- [撞车] VPN 并发连接数上限为 200 并公示\n")
+    for ident in (ANONYMOUS, Identity(agent="zcode", device="m5air")):
+        hits = searcher.search("VPN 并发连接数", kind="fts", identity=ident)
+        assert all(not r["path"].startswith("agents/") for r in hits), \
+            f"{ident} 不得看到 agents/ 区结果"
+        target = next((r for r in hits if r["path"] == "notes/公开撞车.md"), None)
+        assert target is not None
+        joined = " ".join(target["warnings"])
+        assert "hunter2" not in joined and "私密" not in joined
+        assert "疑似重复" in joined
+    # identity=None 是人类/服务端内部语义：仍然全见（不过滤）
+    hits = searcher.search("VPN 并发连接数", kind="fts", identity=None)
+    assert any(r["path"].startswith("agents/") for r in hits)

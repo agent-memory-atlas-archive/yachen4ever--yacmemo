@@ -150,3 +150,21 @@ def test_build_material_includes_tag_inventory(store):
     assert "未打标主题：" in m
     untagged_line = next(ln for ln in m.splitlines() if ln.startswith("- （未打标主题："))
     assert "乙主题" in untagged_line
+
+
+def test_run_check_with_external_store(tstore: Store):
+    """0.3.18 二轮审计 P1：WebUI 传常驻 store 后尾部 db.close() 触发
+    UnboundLocalError（提案已落盘但端点报错）——传入 store 时不得自建、
+    不得关别人的连接。"""
+    from types import SimpleNamespace
+    from yacmemo.curator import run_check
+
+    def fake_llm(system, material):
+        return "```json\n{\"findings\": []}\n```"
+
+    user = SimpleNamespace(id="yachen", root=str(tstore.root),
+                           git_user_name="", git_user_email="")
+    report = run_check(tstore.config, user, dry_run=False,
+                       llm_call=fake_llm, store=tstore)
+    assert report
+    assert (tstore.root / "curator").is_dir()

@@ -832,7 +832,10 @@ class Store:
         new_abs.parent.mkdir(parents=True, exist_ok=True)
         os.rename(old_abs, new_abs)
 
-        self.db.remove_collisions_involving(old_rel)
+        # open 对删除（新路径下由 _index_note 重检出）；非 open 处置对随路径
+        # 迁移——删除会脱钩处置记录并让重检出复活（2026-10-11 审计二轮 P2）
+        self.db.remove_collisions_involving(old_rel, open_only=True)
+        self.db.move_collisions_paths(old_rel, new_rel)
         if self.vectors:
             self.vectors.delete_by_path(old_rel)
         self.db.move_note(old_rel, new_rel)
@@ -1094,7 +1097,7 @@ class Store:
         会报错——那些文件本就不是主题笔记。"""
         rel = self.resolve(path)
         parts = rel.split("/")
-        if parts[0] != "archive" or len(parts) < 3:
+        if parts[0].lower() != "archive" or len(parts) < 3:
             raise StoreError(f"{rel} 不是 archive/<主题>/<文件> 形态的归档笔记。")
         dir_name = parts[1]
         t = next((x for x in self.load_topics()
@@ -2223,20 +2226,24 @@ class Store:
                                      c["a_text"], c["b_text"])
                       for c in preserved}
         self.db.clear_all()
-        if self.vectors:
-            self.vectors.wipe()
-        failed = []
-        count = 0
-        for rel, p in self._iter_in_root_md():
-            try:
-                content = p.read_text(encoding="utf-8")
-                title = self._title_from_content(rel, content)
-                self._index_note(rel, title, content, suppressed_keys=suppressed)
-                count += 1
-            except Exception as e:
-                failed.append({"path": rel, "error": str(e)})
-        if preserved:
-            self.db.restore_collisions(preserved)
+        try:
+            if self.vectors:
+                self.vectors.wipe()
+            failed = []
+            count = 0
+            for rel, p in self._iter_in_root_md():
+                try:
+                    content = p.read_text(encoding="utf-8")
+                    title = self._title_from_content(rel, content)
+                    self._index_note(rel, title, content, suppressed_keys=suppressed)
+                    count += 1
+                except Exception as e:
+                    failed.append({"path": rel, "error": str(e)})
+        finally:
+            # 处置对回填必须在 finally：wipe/循环中途抛异常也不能把人的
+            # 处置对永久丢掉（2026-10-11 审计二轮 P3）
+            if preserved:
+                self.db.restore_collisions(preserved)
         return {"indexed": count, "failed": failed,
                 "restored_dispositions": len(preserved)}
 
@@ -2297,16 +2304,16 @@ class Store:
         try:
             if suppressed_keys is None:
                 suppressed_keys = self.db.suppressed_collision_keys(rel)
-            # 人已处置（resolved/dismissed）的撞车对在删除前取出规范键：
-            # remove_collisions_involving 不分状态全删，随后 _d2_check 重检出
-            # 恒为 open + 新 id——没有这个抑制集，任何一次编辑都会把人的
-            # "忽略"判断打回待办（reindex 的 restore 也依赖同一套键）。
-            suppressed = suppressed_keys
+            # 只删 open 行：非 open（resolved/dismissed）行留在库里，抑制集
+            # 才能在后续编辑中持续生效——全删会让处置对在第二次编辑时复活
+            # （2026-10-11 审计二轮 P1：首次编辑靠本次抑制集挡住、行已删，
+            # 第二次编辑键已不在，复活）。
+            self.db.remove_collisions_involving(rel, open_only=True)
             # Stale vectors/collisions from a previous version of this note
             # must go before re-adding (obs ids are content-addressed, so
             # changed observation lines would otherwise leave orphans).
-            self.db.remove_collisions_involving(rel)
             self.vectors.delete_by_path(rel)
+            suppressed = suppressed_keys
 
             note_vec = self._embed_cached(f"{title}\n{content}")
             self.vectors.upsert_note_vector(rel, f"{title}", note_vec)

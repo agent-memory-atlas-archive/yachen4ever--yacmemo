@@ -183,6 +183,14 @@ def _trusted_host(request: Request) -> bool:
         return False
 
 
+def _json_body_len(request: Request) -> int:
+    """POST 声明的体长（畸形头按 0 处理）——>0 且非 application/json 才拒。"""
+    try:
+        return int(request.headers.get("content-length") or 0)
+    except ValueError:
+        return 0
+
+
 async def _body(request: Request) -> dict:
     try:
         data = await request.json()
@@ -246,7 +254,7 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
                               " [webui].password"},
                     status_code=403)
             if (request.method == "POST"
-                    and int(request.headers.get("content-length") or 0) > 0
+                    and _json_body_len(request) > 0
                     and (request.headers.get("content-type") or "").split(";")[0]
                     .strip().lower() != "application/json"):
                 return JSONResponse(
@@ -585,7 +593,10 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
             def _cur_hash():
                 p = c["store"].root / c["store"]._norm_rel(body.get("path", ""))
                 return content_hash(p.read_text(encoding="utf-8")) if p.is_file() else ""
-            cur = await run_in_threadpool(_cur_hash)
+            try:
+                cur = await run_in_threadpool(_cur_hash)
+            except StoreError as e:
+                return _err(str(e))
             if cur and cur != expected:
                 return JSONResponse(
                     {"ok": False, "conflict": True,
@@ -1000,7 +1011,7 @@ def create_webui_routes(config: Config, contexts: dict[str, dict]) -> list[Route
         if target.exists():
             backup = f"{target.name}.bak-{time.strftime('%Y%m%d%H%M%S')}"
             shutil.copy2(target, target.parent / backup)
-        tmp = target.parent / f".{target.name}.tmp"
+        tmp = target.parent / f".{target.name}.{os.getpid()}.{time.time_ns()}.tmp"
         tmp.write_text(content, encoding="utf-8")
         os.chmod(tmp, 0o600)
         os.replace(tmp, target)

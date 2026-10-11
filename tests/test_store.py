@@ -836,3 +836,36 @@ def test_save_md_case_no_double_extension(store: Store):
     assert r["path"] == "notes/大写.MD"
     assert (store.root / "notes/大写.MD").is_file()
     assert not (store.root / "notes/大写.MD.md").exists()
+
+
+def test_d2_disposition_survives_repeated_edits(store: Store):
+    """0.3.18 二轮审计 P1：dismissed 对在编辑路径被全删、抑制集只护一次——
+    第二次编辑即复活。修复后处置行留库、同内容永久抑制。"""
+    store.write("notes/撞车A.md", "# 撞车A\n\n- [撞车] 网关出口带宽限制为 50 Mbps 并按月复核\n")
+    store.write("notes/撞车B.md", "# 撞车B\n\n- [撞车] 网关出口带宽限制为 50 Mbps 并按月复核\n")
+    cid = store.db.list_collisions()[0]["id"]
+    store.db.resolve_collision(cid, "dismissed")
+    store.edit("notes/撞车A.md", "- [撞车]", "- [撞车·注]")   # 第 1 次编辑
+    store.edit("notes/撞车A.md", "- [撞车·注]", "- [撞车]")   # 第 2 次编辑（旧行为在此复活）
+    kept = [c for c in store.db.list_collisions() if c["id"] == cid]
+    assert kept and kept[0]["status"] == "dismissed", "处置对必须留库持续抑制"
+    open_pairs = [{c["a_path"], c["b_path"]}
+                  for c in store.db.list_collisions(status="open")]
+    assert {"notes/撞车A.md", "notes/撞车B.md"} not in open_pairs
+
+
+def test_move_migrates_d2_dispositions(store: Store):
+    """0.3.18 二轮审计 P2：move 删除涉及旧路径的处置对 → 新路径下复活。
+    修复后非 open 行随路径迁移（a_path/b_path 改写、id 不变）。"""
+    store.write("notes/迁移A.md", "# 迁移A\n\n- [撞车] 备份任务失败告警阈值为 3 次每小时\n")
+    store.write("notes/迁移B.md", "# 迁移B\n\n- [撞车] 备份任务失败告警阈值为 3 次每小时\n")
+    cid = store.db.list_collisions()[0]["id"]
+    store.db.resolve_collision(cid, "dismissed")
+    store.move("notes/迁移A.md", "notes/迁移A2")
+    kept = [c for c in store.db.list_collisions() if c["id"] == cid]
+    assert kept and kept[0]["status"] == "dismissed"
+    assert {kept[0]["a_path"], kept[0]["b_path"]} == {
+        "notes/迁移A2.md", "notes/迁移B.md"}
+    open_pairs = [{c["a_path"], c["b_path"]}
+                  for c in store.db.list_collisions(status="open")]
+    assert {"notes/迁移A2.md", "notes/迁移B.md"} not in open_pairs

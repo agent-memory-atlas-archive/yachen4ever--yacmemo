@@ -91,8 +91,10 @@ _LOCKED_METHODS = (
     # 2026-10-11 审计 P2：写方法 set_vector_ok 与读方法 like_search /
     # notes_missing_vectors 此前不在名单——pysqlite 单连接隐式事务按线程
     # 串不起来，A 线程的 commit 会把 B 线程执行到一半的语句连带提交，
-    # fts_remove 后异常即丢 FTS 行（notes 在、fts 不在，检索漏笔记）
+    # fts_remove 后异常即丢 FTS 行（notes 在、fts 不在，检索漏笔记）；
+    # resolve_collision 是 WebUI 线程池直调的写方法，同类风险
     "set_vector_ok", "notes_missing_vectors", "like_search",
+    "resolve_collision", "move_collisions_paths",
 )
 
 
@@ -313,11 +315,30 @@ class IndexDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def remove_collisions_involving(self, path: str):
-        self.conn.execute(
-            "DELETE FROM collisions WHERE a_path=? OR b_path=?", (path, path)
-        )
+    def remove_collisions_involving(self, path: str, open_only: bool = False):
+        """path 相关撞车对删除。open_only=True 只删 open 行——人已处置
+        （resolved/dismissed）的对由 _index_note 的抑制集与 move 的路径
+        迁移接管，重索引/编辑不再打回待办；笔记删除（delete_note）仍全删。"""
+        if open_only:
+            self.conn.execute(
+                "DELETE FROM collisions WHERE status='open' AND (a_path=? OR b_path=?)",
+                (path, path),
+            )
+        else:
+            self.conn.execute(
+                "DELETE FROM collisions WHERE a_path=? OR b_path=?", (path, path)
+            )
         self.conn.commit()
+
+    def move_collisions_paths(self, old_path: str, new_path: str) -> int:
+        """move 时把涉及旧路径的非 open 撞车对迁移到新路径——删除会让人的
+        处置脱钩、重检出又复活（2026-10-11 审计二轮 P2）。返回迁移行数。"""
+        cur1 = self.conn.execute(
+            "UPDATE collisions SET a_path=? WHERE a_path=?", (new_path, old_path))
+        cur2 = self.conn.execute(
+            "UPDATE collisions SET b_path=? WHERE b_path=?", (new_path, old_path))
+        self.conn.commit()
+        return cur1.rowcount + cur2.rowcount
 
     def resolve_collision(self, collision_id: str, status: str):
         """Mark a collision resolved/dismissed (human decision via WebUI/audit)."""

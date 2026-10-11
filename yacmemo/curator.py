@@ -265,6 +265,7 @@ def run_check(config: Config, user: UserEntry, dry_run: bool = False,
     from yacmemo.vector import VectorStore
 
     root = config.user_root_abs(user)
+    owns_store = store is None
     if store is not None and Path(store.root).resolve() != Path(root).resolve():
         raise ValueError(
             f"传入的 store 归属 {store.root}，与用户 {user.id} 的记忆根 {root} 不一致")
@@ -319,7 +320,9 @@ def run_check(config: Config, user: UserEntry, dry_run: bool = False,
             store.save(path, merged)
         else:
             store.save(path, report)
-    db.close()
+    # 只关自建的连接：传入的常驻 store（WebUI 复用）关掉会让后续所有请求崩
+    if owns_store:
+        db.close()
     return report
 
 

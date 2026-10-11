@@ -64,7 +64,12 @@ class VectorStore:
                 continue
             # 已有表的维度与配置不一致：每个 add 都会失败到重建为止——启动时
             # 快速失败并指出出口，别让用户在设置页改完 dimensions 后静默坏掉
-            existing = tbl.schema.field("vector").type.list_size
+            try:
+                existing = tbl.schema.field("vector").type.list_size
+            except (KeyError, ValueError) as e:
+                raise RuntimeError(
+                    f"LanceDB 表 {name} 的 schema 异常（缺 vector 列？{e}）——"
+                    "删除 .index/lancedb 后 reindex 重建") from e
             if existing != dimensions:
                 raise RuntimeError(
                     f"LanceDB 表 {name} 的向量维度是 {existing}，配置要求 "

@@ -48,6 +48,11 @@ class EmbeddingClient:
                     raise
         if not isinstance(data, dict) or not isinstance(data.get("data"), list):
             raise ValueError(f"embedding 端点返回异常：{str(data)[:120]}")
+        for item in data["data"]:
+            if (not isinstance(item, dict) or "index" not in item
+                    or "embedding" not in item):
+                raise ValueError(
+                    f"embedding 响应条目缺 index/embedding：{str(item)[:80]}")
         # Sort by index to ensure order matches input
         items = sorted(data["data"], key=lambda x: x["index"])
         return [item["embedding"] for item in items]

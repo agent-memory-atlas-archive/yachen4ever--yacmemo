@@ -83,26 +83,31 @@ class Searcher:
         self.last_notice = None
         notices: list[str] = []
         # identity / 归档过滤在融合后做：通道多取 3 倍候选，防止不可见结果
-        # 挤占限额
-        overfetch = ((identity is not None and identity.agent != "")
-                     or not include_archived)
+        # 挤占限额。identity 非 None 即过滤（含 ANONYMOUS——无 token 的
+        # agents/ 区不可见，与 memory_list/memory_read 同口径；identity=None
+        # 是人类/服务端内部语义，恒可见）
+        overfetch = (identity is not None or not include_archived)
         fetch = limit * 3 if overfetch else limit
         channels = []
         if kind in ("hybrid", "fts"):
             channels.append(self.fts_channel(query, fetch))
         if kind in ("hybrid", "vector"):
             channels.append(self.vector_channel(query, fetch))
+        if self.last_notice:
+            # 通道级提示（向量降级等）并入逐次返回的 notices——只写
+            # last_notice 会在入口被清、被并发覆盖（2026-10-11 审计二轮 P2）
+            notices.append(self.last_notice)
+            self.last_notice = None
 
         if len(channels) == 2:
             merged = self._rrf(channels, fetch)
         else:
             merged = self._take_first(channels, fetch)
 
-        if identity is not None and identity.agent != "":
+        if identity is not None:
             # scoped search：user 层 + 本 identity 专属区（identity.py 的
-            # visible 是唯一权威；ANONYMOUS 即 user 层全网可见）。
-            # 过滤在前、截断在后——先截断再过滤会让结果少于 limit
-            #（overfetch 3x 只是缓解，不是保证）。
+            # visible 是唯一权威）。过滤在前、截断在后——先截断再过滤会让
+            # 结果少于 limit（overfetch 3x 只是缓解，不是保证）。
             merged = [r for r in merged if visible(r["path"], identity)]
 
         if not include_archived:
@@ -195,7 +200,9 @@ class Searcher:
     def _warnings_for(self, path: str, identity: Identity | None = None,
                       mask_archive: bool = False) -> list[str]:
         warnings = []
-        restricted = identity is not None and identity.agent != ""
+        # identity 非 None 即受控（含 ANONYMOUS——agents/ 区对其不可见）；
+        # identity=None 是人类/服务端内部语义
+        restricted = identity is not None
         for c in self.db.collisions_for(path):
             if c["a_path"] == path:
                 other_path, other_text = c["b_path"], c["b_text"]
