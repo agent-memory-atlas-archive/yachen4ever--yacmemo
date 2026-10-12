@@ -384,13 +384,13 @@ const toolOptions = [
 ].map(t => ({ label: t, value: t }))
 
 const usageColumns = [
-  { title: computed(() => t('时间')), key: 'ts', width: 150, render: (r) => r.ts?.slice(5, 19) || '' },
-  { title: computed(() => t('用户')), key: 'user_id', width: 70 },
-  { title: computed(() => t('工具')), key: 'tool', width: 160 },
-  { title: computed(() => t('摘要')), key: 'summary', ellipsis: { tooltip: true } },
-  { title: computed(() => t('耗时')), key: 'duration_ms', width: 60,
+  { title: () => t('时间'), key: 'ts', width: 150, render: (r) => r.ts?.slice(5, 19) || '' },
+  { title: () => t('用户'), key: 'user_id', width: 70 },
+  { title: () => t('工具'), key: 'tool', width: 160 },
+  { title: () => t('摘要'), key: 'summary', ellipsis: { tooltip: true } },
+  { title: () => t('耗时'), key: 'duration_ms', width: 60,
     render: (r) => r.ok ? `${r.duration_ms}ms` : '—' },
-  { title: computed(() => t('状态')), key: 'ok', width: 50,
+  { title: () => t('状态'), key: 'ok', width: 50,
     render: (r) => h(NTag, { size: 'tiny', type: r.ok ? 'success' : 'error' }, () => r.ok ? '✓' : '✗') },
 ]
 
